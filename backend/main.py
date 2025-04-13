@@ -373,7 +373,7 @@ async def startup_event():
     # Вывод информации о конфигурации
     logger.info(f"Конфигурация Telegram: API_ID={'Настроен' if TELEGRAM_API_ID else 'Не настроен'}, API_HASH={'Настроен' if TELEGRAM_API_HASH else 'Не настроен'}, SESSION_NAME={'Настроен' if SESSION_NAME else 'Не настроен'}")
     logger.info(f"Конфигурация OpenRouter: API_KEY={'Настроен' if OPENROUTER_API_KEY else 'Не настроен'}")
-    logger.info(f"Конфигурация Supabase: URL={'Настроен' if SUPABASE_URL else 'Не настроен'}, KEY={'Настроен' if SUPABASE_KEY else 'Не настроен'}")
+    logger.info(f"Конфигурация Supabase: URL={'Настроен' if SUPABASE_URL else 'Не настроен'}, KEY={'Настроен' if SUPABASE_ANON_KEY else 'Не настроен'}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
