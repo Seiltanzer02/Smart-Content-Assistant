@@ -27,6 +27,7 @@ import mimetypes # Для определения типа файла
 from telethon.errors import AuthKeyError, RPCError
 import getpass # Для получения пароля
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -112,10 +113,13 @@ from fastapi.staticfiles import StaticFiles
 # Путь к папке со статическими файлами
 static_folder = os.path.join(os.path.dirname(__file__), "static")
 
-# Проверяем, существует ли папка static, и если да - монтируем её
-if os.path.exists(static_folder):
-    app.mount("/", StaticFiles(directory=static_folder, html=True), name="static")
-    logger.info(f"Статические файлы будут обслуживаться из папки: {static_folder}")
+# ФЛАГ для монтирования статики в конце файла
+SHOULD_MOUNT_STATIC = os.path.exists(static_folder)
+# НОВЫЙ ФЛАГ, указывающий, что мы уже настроили маршруты SPA
+SPA_ROUTES_CONFIGURED = False
+
+if SHOULD_MOUNT_STATIC:
+    logger.info(f"Статические файлы будут обслуживаться из папки: {static_folder} (монтирование в конце файла)")
 else:
     logger.warning(f"Папка статических файлов не найдена: {static_folder}")
     logger.warning("Статические файлы не будут обслуживаться. Только API endpoints доступны.")
@@ -353,7 +357,17 @@ async def shutdown_event():
 
 @app.get("/")
 async def read_root():
-    return {"message": "Smart Content Assistant Backend"}
+    """Корневой маршрут, возвращает JSON, если запрос от API, или index.html для браузера"""
+    # Логируем вызов корневого маршрута
+    logger.info("Запрос к корневому пути '/'")
+    
+    # Если папка статических файлов существует и запрос, вероятно, из браузера
+    if SHOULD_MOUNT_STATIC and os.path.exists(os.path.join(static_folder, "index.html")):
+        logger.info("Отдаем index.html из статических файлов")
+        return FileResponse(os.path.join(static_folder, "index.html"))
+    
+    # Иначе возвращаем JSON с информацией об API
+    return {"message": "Smart Content Assistant Backend API"}
 
 # Определяем модель ответа для /analyze, чтобы включить примеры
 class AnalyzeResponse(BaseModel):
@@ -1480,6 +1494,14 @@ async def generate_keywords(post_text: str, language: str = "russian") -> Tuple[
 # Роут для обслуживания фронтенда (React SPA)
 @app.get("/", include_in_schema=False)
 async def serve_index():
+    global SPA_ROUTES_CONFIGURED
+    
+    # Если маршруты SPA уже настроены в конце файла, пропускаем этот обработчик
+    if SPA_ROUTES_CONFIGURED:
+        logger.debug("Запрос к / пропущен, так как SPA_ROUTES_CONFIGURED=True")
+        # Возвращаем 404, чтобы FastAPI перешел к следующему обработчику
+        raise HTTPException(status_code=404, detail="Redirecting to new handler")
+    
     index_path = os.path.join(static_folder, "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
@@ -1490,6 +1512,14 @@ async def serve_index():
 # Роут для перенаправления всех неизвестных путей на React Router
 @app.get("/{full_path:path}", include_in_schema=False)
 async def serve_spa(full_path: str):
+    global SPA_ROUTES_CONFIGURED
+    
+    # Если маршруты SPA уже настроены в конце файла, пропускаем этот обработчик
+    if SPA_ROUTES_CONFIGURED:
+        logger.debug(f"Запрос к /{full_path} пропущен, так как SPA_ROUTES_CONFIGURED=True")
+        # Возвращаем 404, чтобы FastAPI перешел к следующему обработчику
+        raise HTTPException(status_code=404, detail="Redirecting to new handler")
+    
     # Если запрашивается API-эндпоинт, не обрабатываем его здесь
     if full_path.startswith("api/"):
         raise HTTPException(status_code=404, detail="API endpoint not found")
@@ -1510,14 +1540,100 @@ async def serve_spa(full_path: str):
 # Добавляем посредник для логирования запросов
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    # Логируем заголовки и пути
+    """Расширенное логирование всех входящих запросов для отладки"""
+    path = request.url.path
+    method = request.method
     user_id = request.headers.get("x-telegram-user-id", "не определен")
-    logger.info(f"Запрос: {request.method} {request.url.path} | User ID: {user_id}")
+    logger.info(f"Запрос: {method} {path} | User ID: {user_id}")
     
-    # Логируем все заголовки в режиме отладки
+    # Логируем все заголовки для отладки
     headers_str = ", ".join([f"{k}: {v}" for k, v in request.headers.items()])
     logger.debug(f"Заголовки запроса: {headers_str}")
     
     # Продолжаем обработку запроса
-    response = await call_next(request)
-    return response
+    try:
+        response = await call_next(request)
+        logger.info(f"Ответ: {path} - Статус: {response.status_code}")
+        return response
+    except Exception as e:
+        logger.error(f"Ошибка при обработке запроса {path}: {str(e)}", exc_info=True)
+        raise
+
+# Монтируем статические файлы ПОСЛЕ определения всех API-эндпоинтов
+# Это гарантирует, что API-эндпоинты будут иметь приоритет
+if SHOULD_MOUNT_STATIC:
+    # Устанавливаем флаг, что мы используем новые маршруты
+    global SPA_ROUTES_CONFIGURED
+    logger.info("Установлен флаг SPA_ROUTES_CONFIGURED=True для предотвращения конфликтов маршрутов")
+    SPA_ROUTES_CONFIGURED = True
+    
+    # Перечисляем все API-маршруты, чтобы исключить их из обработки static middleware
+    API_PATHS = [
+        "/analyze", 
+        "/generate-plan", 
+        "/posts", 
+        "/ideas", 
+        "/upload-image", 
+        "/generate-post-details",
+        "/channels/summary"
+    ]
+    
+    # Определяем особый middleware для обработки запросов к статическим файлам
+    @app.middleware("http")
+    async def static_files_middleware(request: Request, call_next):
+        """Middleware для обработки запросов к статическим файлам с учетом приоритета API"""
+        path = request.url.path
+        method = request.method
+        
+        # Если метод и путь соответствуют API-эндпоинту, пропускаем запрос дальше
+        for api_path in API_PATHS:
+            if path.startswith(api_path):
+                logger.debug(f"Запрос {method} {path} обрабатывается как API-запрос")
+                return await call_next(request)
+        
+        # Если путь не соответствует API, и это GET-запрос, проверяем наличие файла
+        if method == "GET":
+            # Обрабатываем корневой путь отдельно
+            if path == "/":
+                file_path = os.path.join(static_folder, "index.html")
+            else:
+                # Убираем начальный / для получения относительного пути
+                relative_path = path.lstrip("/")
+                file_path = os.path.join(static_folder, relative_path)
+                
+            # Если файл существует, возвращаем его
+            if os.path.exists(file_path) and os.path.isfile(file_path):
+                logger.debug(f"Запрос {path} обрабатывается как запрос статического файла")
+                return FileResponse(file_path)
+        
+        # Во всех остальных случаях продолжаем цепочку middleware
+        return await call_next(request)
+    
+    # Добавляем маршрут для обработки всех оставшихся GET-запросов к статическим файлам
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_static_files(full_path: str):
+        """Обработка всех запросов к статическим файлам, не перехваченных middleware"""
+        logger.info(f"Запрос к статическому файлу: {full_path}")
+        
+        # Формируем полный путь к файлу
+        file_path = os.path.join(static_folder, full_path)
+        
+        # Проверяем существование файла
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            logger.debug(f"Файл найден, отдаем: {file_path}")
+            return FileResponse(file_path)
+        
+        # Если файл не найден, попробуем вернуть index.html для SPA маршрутизации
+        index_path = os.path.join(static_folder, "index.html")
+        if os.path.exists(index_path):
+            logger.debug(f"Файл не найден, возвращаем index.html для SPA маршрутизации: {full_path}")
+            return FileResponse(index_path)
+        
+        # Если даже index.html нет, вернем 404
+        logger.warning(f"Файл не найден и нет index.html: {full_path}")
+        raise HTTPException(status_code=404, detail=f"Файл не найден: {full_path}")
+    
+    # Монтируем статические файлы для обработки всех остальных запросов
+    # Это будет запасной вариант, если наш middleware не обработал запрос
+    app.mount("/static", StaticFiles(directory=static_folder), name="static")
+    logger.info("Статические файлы успешно смонтированы и настроены с учетом приоритета API-запросов")
