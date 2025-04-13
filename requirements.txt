@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+requests
+huggingface_hub # Для Inference API
+openai
+supabase
+telethon # Добавляем Telethon
+httpx # Добавляем httpx 
+python-multipart
+beautifulsoup4
+python-unsplash
