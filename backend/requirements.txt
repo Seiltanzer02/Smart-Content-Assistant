@@ -10,3 +10,4 @@ httpx # Добавляем httpx
 python-multipart
 beautifulsoup4
 python-unsplash
+gunicorn
