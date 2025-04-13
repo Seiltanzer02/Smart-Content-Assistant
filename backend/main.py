@@ -400,9 +400,10 @@ class AnalyzeResponse(BaseModel):
     message: str
     themes: List[str]
     styles: List[str]
-    analyzed_posts_sample: List[str]
+    analyzed_posts_sample: List[str]  # Поле для образцов постов
     best_posting_time: str
     analyzed_posts_count: int
+    error: Optional[str] = None  # Опциональное поле для ошибки
 
 # --- Функция для работы с Telegram --- 
 async def get_telegram_posts_via_telethon(username: str) -> Tuple[List[Dict[str, str]], Optional[str]]:
@@ -524,6 +525,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeRespo
     
     posts = []
     error_message = None
+    errors_list = []  # Список для накопления ошибок
     
     # Попытка получить посты через Telethon
     try:
@@ -532,6 +534,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeRespo
         
         if telethon_error:
             logger.warning(f"Ошибка Telethon для канала @{username}: {telethon_error}")
+            errors_list.append(f"Telethon: {telethon_error}")
             # Если ошибка связана с ботами или другими конкретными проблемами,
             # попробуем HTTP парсинг
             if "Бот не может получить историю сообщений" in telethon_error or "Канал не найден" in telethon_error:
@@ -543,8 +546,10 @@ async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeRespo
                         logger.info(f"Успешно получено {len(posts)} постов через HTTP парсинг")
                     else:
                         logger.warning(f"HTTP парсинг не вернул постов для канала @{username}")
+                        errors_list.append("HTTP: Не удалось получить посты")
                 except Exception as http_error:
                     logger.error(f"Ошибка при HTTP парсинге для канала @{username}: {http_error}")
+                    errors_list.append(f"HTTP: {str(http_error)}")
         else:
             # Если Telethon успешно получил посты
             posts = telethon_posts
@@ -552,13 +557,18 @@ async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeRespo
         
     except Exception as e:
         logger.error(f"Непредвиденная ошибка при получении постов канала @{username}: {e}")
+        errors_list.append(f"Ошибка: {str(e)}")
     
     # Если не удалось получить посты ни через Telethon, ни через HTTP
+    sample_data_used = False
     if not posts:
         logger.warning(f"Используем примеры постов для канала {username}")
         sample_posts = get_sample_posts(username)
         posts = [{"text": post} for post in sample_posts]
         error_message = "Не удалось получить реальные посты. Используются примеры для демонстрации."
+        errors_list.append(error_message)
+        sample_data_used = True
+        logger.info(f"Используем примеры постов для канала {username}")
     
     # Ограничиваем анализ первыми 20 постами
     posts = posts[:20]
@@ -576,25 +586,30 @@ async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeRespo
         # Анализ через deepseek
         analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
         
+        # Извлечение результатов анализа
+        if isinstance(analysis_result, dict):
+            themes = analysis_result.get("themes", [])
+            styles = analysis_result.get("styles", [])
+        else:
+            # Если результат пришел в виде кортежа (например, из предыдущей версии функции)
+            themes, styles, _ = analysis_result
+        
         # Сохранение результата анализа в базу данных (если есть telegram_user_id)
         if telegram_user_id:
             try:
-                # Преобразуем analysis_result в объект SuggestedIdeaRequest
-                # и сохраняем в базу данных
-                idea_request = SuggestedIdeaRequest(
-                    channel_name=username,
-                    themes=analysis_result.get("themes", []),
-                    styles=analysis_result.get("styles", []),
-                    user_id=telegram_user_id
-                )
-                await save_suggested_idea(idea_request)
+                # Создаем словарь с данными для предложения
+                idea_data = {
+                    "channel_name": username,
+                    "themes": themes,
+                    "styles": styles,
+                    "user_id": telegram_user_id
+                }
+                # Вызываем функцию сохранения, передавая словарь напрямую или создавая объект, если требуется
+                await save_suggested_idea(idea_data)
                 logger.info(f"Результаты анализа сохранены для пользователя {telegram_user_id}, канал @{username}")
             except Exception as db_error:
                 logger.error(f"Ошибка при сохранении результатов анализа в БД: {db_error}")
-        
-        # Извлечение результатов анализа
-        themes = analysis_result.get("themes", [])
-        styles = analysis_result.get("styles", [])
+                errors_list.append(f"Ошибка БД: {str(db_error)}")
         
         # Подготовка образцов постов для ответа
         sample_texts = [post.get("text", "") for post in posts[:5] if post.get("text")]
@@ -605,6 +620,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeRespo
         # Если произошла ошибка при анализе, возвращаем ошибку 500
         if not error_message:
             error_message = f"Ошибка при анализе контента: {str(e)}"
+        errors_list.append(f"Анализ: {str(e)}")
     
     # Временная заглушка для определения лучшего времени публикации
     best_posting_time = "18:00 - 20:00 МСК"
@@ -617,15 +633,15 @@ async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeRespo
             detail=f"Не удалось найти текстовые посты в канале @{username} или доступ запрещен."
         )
     
-    # Возвращаем результат анализа
+    # Возвращаем результат анализа в соответствии с ожидаемой моделью ответа
     return AnalyzeResponse(
+        message="Анализ успешно выполнен" if not error_message else error_message,
         themes=themes,
         styles=styles,
-        sample_posts=sample_posts,
+        analyzed_posts_sample=sample_posts,  # Используем правильное имя поля
         best_posting_time=best_posting_time,
-        posts_count=len(posts),
-        error=error_message,
-        message="Анализ успешно выполнен"
+        analyzed_posts_count=len(posts),      # Используем правильное имя поля
+        error=error_message
     )
 
 @app.post("/generate-plan", response_model=List[SuggestedIdeaResponse])
@@ -1889,3 +1905,42 @@ async def get_telegram_posts_via_http(username: str) -> List[str]:
     except Exception as e:
         logger.error(f"Непредвиденная ошибка при получении канала @{username} через HTTP: {str(e)}")
         return []
+
+class SuggestedIdeaRequest(BaseModel):
+    """Модель для запроса создания предложенной идеи."""
+    channel_name: str
+    themes: List[str]
+    styles: List[str]
+    user_id: Optional[str] = None
+
+async def save_suggested_idea(idea_data):
+    """Сохраняет предложенную идею в базу данных."""
+    if not supabase:
+        logger.error("Supabase не инициализирован. Не могу сохранить идею.")
+        return None
+    
+    logger.info(f"Сохранение идеи для канала {idea_data.get('channel_name', 'N/A')}")
+    
+    try:
+        # Создаем временную идею с форматированными данными
+        temp_idea = {
+            "topic_idea": f"Анализ канала {idea_data.get('channel_name', 'N/A')}",
+            "format_style": "Результаты анализа",
+            "relative_day": 0,
+            "channel_name": idea_data.get('channel_name'),
+            "user_id": idea_data.get('user_id')
+        }
+        
+        # Сохраняем информацию в базу данных
+        insert_response = supabase.table('suggested_ideas').insert(temp_idea).execute()
+        
+        if not insert_response.data:
+            logger.error("Ошибка при сохранении результатов анализа: не получены данные от БД")
+            return None
+        
+        logger.info(f"Идея успешно сохранена для канала {idea_data.get('channel_name')}")
+        return insert_response.data[0].get('id')
+        
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении идеи: {e}")
+        return None
