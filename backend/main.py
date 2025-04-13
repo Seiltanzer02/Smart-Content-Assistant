@@ -546,52 +546,91 @@ async def analyze_channel(request: Request, analyze_request: AnalyzeRequest):
     username = analyze_request.username.lstrip('@')
     logger.info(f"Получен запрос на анализ канала: @{username}")
 
-    # --- ШАГ 1: Получение постов из Telegram (с новой функцией) ---
-    posts, tg_error = await get_telegram_posts_via_telethon(username)
+    posts = []
+    error_messages = []
+
+    # --- СТРАТЕГИЯ 1: Получение постов через Telethon (как было раньше) ---
+    try:
+        logger.info(f"Попытка получить посты через Telethon для канала @{username}")
+        telethon_posts, telethon_error = await get_telegram_posts_via_telethon(username)
+        
+        if telethon_posts:
+            logger.info(f"Успешно получено {len(telethon_posts)} постов через Telethon")
+            posts = telethon_posts
+            error_message = None
+        elif telethon_error:
+            error_messages.append(f"Ошибка Telethon: {telethon_error}")
+            logger.warning(f"Не удалось получить посты через Telethon: {telethon_error}")
+    except Exception as e:
+        error_message = f"Непредвиденная ошибка Telethon: {str(e)}"
+        error_messages.append(error_message)
+        logger.error(f"Непредвиденная ошибка при получении постов через Telethon: {error_message}")
     
-    # Проверяем, получены ли посты или возникла ошибка
-    if tg_error and not posts:
-        # Если есть ошибка и нет постов, возвращаем ошибку
-        status_code = 400 # По умолчанию Bad Request (неверный канал и т.д.)
-        if "флуд-контроль" in tg_error:
-            status_code = 429 # Too Many Requests
-        elif "авторизоваться" in tg_error or "пароль" in tg_error:
-            status_code = 401 # Unauthorized
-        raise HTTPException(status_code=status_code, detail=f"Ошибка Telegram: {tg_error}")
-    
+    # --- СТРАТЕГИЯ 2: Если Telethon не сработал, пробуем через HTTP парсинг ---
     if not posts:
-        # Если нет постов и нет ошибки, используем примеры
-        logger.warning(f"Не найдено текстовых постов в канале @{username}, используем примеры.")
+        try:
+            logger.info(f"Попытка получить посты через HTTP парсинг для канала @{username}")
+            http_posts = await get_telegram_posts_via_http(username)
+            
+            if http_posts and len(http_posts) > 0:
+                logger.info(f"Успешно получено {len(http_posts)} постов через HTTP парсинг")
+                posts = http_posts
+            else:
+                logger.warning(f"Не удалось получить посты через HTTP парсинг (пустой результат)")
+                error_messages.append("HTTP парсинг вернул пустой результат")
+        except Exception as e:
+            error_message = f"Ошибка HTTP парсинга: {str(e)}"
+            error_messages.append(error_message)
+            logger.error(f"Ошибка при получении постов через HTTP парсинг: {error_message}")
+    
+    # --- СТРАТЕГИЯ 3: Если оба метода не сработали, используем примеры постов ---
+    if not posts:
+        logger.warning(f"Не удалось получить посты ни через Telethon, ни через HTTP. Используем примеры.")
         posts = get_sample_posts(username)
+        error_messages.append("Использованы примеры постов, так как не удалось получить реальные данные")
     
-    # Даже если есть ошибка, но мы успешно получили примеры постов - продолжаем анализ
-    if tg_error and posts:
-        logger.warning(f"Возникла ошибка Telegram ({tg_error}), но получены примеры постов. Продолжаем с анализом.")
-
-    # --- ШАГ 2: Анализ контента (темы и стили) --- 
-    logger.info(f"Запускаем анализ контента (темы и стили) для {len(posts)} постов...")
-    themes, styles, post_samples = await analyze_content_with_deepseek(posts, OPENROUTER_API_KEY)
+    # Проверяем, есть ли посты после всех попыток
+    if len(posts) == 0:
+        # Если совсем нет постов (что маловероятно, т.к. у нас есть заглушки), возвращаем ошибку
+        detail = "Не удалось получить посты для анализа: " + "; ".join(error_messages)
+        raise HTTPException(status_code=404, detail=detail)
     
-    # Если не получили темы/стили из API, добавим примеры для демонстрации
-    if not themes or not styles:
-        logger.warning("Не получены темы/стили от API анализа. Используем заглушки.")
+    # --- АНАЛИЗ КОНТЕНТА ---
+    logger.info(f"Анализ {len(posts)} постов канала @{username}...")
+    
+    try:
+        themes, styles, post_samples = await analyze_content_with_deepseek(posts, OPENROUTER_API_KEY)
+        
+        # Если не получили темы/стили из API, добавим примеры для демонстрации
         if not themes:
+            logger.warning("Не получены темы от API анализа. Используем заглушки.")
             themes = ["Информационные технологии", "Образование", "Саморазвитие", "Бизнес", "Маркетинг"]
+        
         if not styles:
+            logger.warning("Не получены стили от API анализа. Используем заглушки.")
             styles = ["Новость/Анонс", "Список советов", "Инструкция"]
+        
+        logger.info(f"Анализ канала @{username} завершен успешно")
+    except Exception as e:
+        logger.error(f"Ошибка при анализе контента: {str(e)}")
+        # Используем заглушки в случае ошибки
+        themes = ["Информационные технологии", "Образование", "Саморазвитие", "Бизнес", "Маркетинг"]
+        styles = ["Новость/Анонс", "Список советов", "Инструкция"]
+        post_samples = posts[:3] if len(posts) >= 3 else posts
     
-    # --- ШАГ 3: Определение лучшего времени постинга (заглушка) --- 
-    mock_best_time = "18:00 - 20:00 МСК" 
-    logger.info(f"Анализ для @{username} завершен.")
-    # --- Конец ЗАГЛУШКИ --- 
-
+    # Временная заглушка для лучшего времени публикации
+    best_posting_time = "18:00 - 20:00 МСК"
+    
+    # Формируем сообщение на основе способа получения постов
+    using_samples = len(error_messages) > 0 and "примеры" in error_messages[-1]
+    message = f"Анализ для канала @{username} завершен." + (" (использованы примеры постов)" if using_samples else "")
+    
     return AnalyzeResponse(
-        message=f"Анализ для канала @{username} завершен." + 
-                (" (использованы примеры постов)" if tg_error else ""),
+        message=message,
         themes=themes, 
         styles=styles,
-        analyzed_posts_sample=post_samples if post_samples else posts[:3],
-        best_posting_time=mock_best_time,
+        analyzed_posts_sample=post_samples if post_samples else posts[:min(3, len(posts))],
+        best_posting_time=best_posting_time,
         analyzed_posts_count=len(posts) 
     )
 
