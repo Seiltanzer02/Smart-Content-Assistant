@@ -21,13 +21,14 @@ import random # <--- Добавляем импорт random
 from supabase import create_client, Client, AClient # <--- Импортируем create_client, Client, AClient
 from postgrest.exceptions import APIError # <--- ИМПОРТИРУЕМ ИЗ POSTGREST
 from telethon.sessions import StringSession # Если используем строку сессии
-from telethon.errors import SessionPasswordNeededError, FloodWaitError, PhoneNumberInvalidError, InvalidCheckSumError, AuthKeyError, ApiIdInvalidError
+from telethon.errors import SessionPasswordNeededError, FloodWaitError, PhoneNumberInvalidError, AuthKeyError, ApiIdInvalidError
 import uuid # Для генерации уникальных имен файлов
 import mimetypes # Для определения типа файла
 from telethon.errors import RPCError
 import getpass # Для получения пароля
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+import time # Добавляем модуль time для работы с временем
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -350,6 +351,29 @@ def parse_plan_to_ideas(raw_plan: str) -> List[Dict]:
 @app.on_event("startup")
 async def startup_event():
     logger.info("FastAPI приложение запущено.")
+    
+    # Проверка доступности классов ошибок Telethon
+    logger.info("Проверка импортов Telethon...")
+    try:
+        # Проверяем, что все импортированные классы ошибок Telethon доступны
+        error_classes = [
+            SessionPasswordNeededError,
+            FloodWaitError, 
+            PhoneNumberInvalidError,
+            AuthKeyError,
+            ApiIdInvalidError,
+            RPCError
+        ]
+        logger.info(f"Проверка импортов Telethon успешна: {len(error_classes)} классов ошибок доступны")
+    except ImportError as e:
+        logger.error(f"Ошибка импорта классов Telethon: {e}")
+    except Exception as e:
+        logger.error(f"Ошибка при проверке импортов Telethon: {e}")
+    
+    # Вывод информации о конфигурации
+    logger.info(f"Конфигурация Telegram: API_ID={'Настроен' if TELEGRAM_API_ID else 'Не настроен'}, API_HASH={'Настроен' if TELEGRAM_API_HASH else 'Не настроен'}, SESSION_NAME={'Настроен' if SESSION_NAME else 'Не настроен'}")
+    logger.info(f"Конфигурация OpenRouter: API_KEY={'Настроен' if OPENROUTER_API_KEY else 'Не настроен'}")
+    logger.info(f"Конфигурация Supabase: URL={'Настроен' if SUPABASE_URL else 'Не настроен'}, KEY={'Настроен' if SUPABASE_KEY else 'Не настроен'}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -390,8 +414,25 @@ async def get_telegram_posts_via_telethon(username: str, limit: int = 20) -> tup
     client = None # Инициализируем как None
     try:
         api_id_int = int(TELEGRAM_API_ID)
-        client = TelegramClient(SESSION_NAME, api_id_int, TELEGRAM_API_HASH)
-        logger.info(f"Попытка подключения к Telegram (сессия: {SESSION_NAME})...")
+        
+        # Проверяем существование файла сессии и его целостность
+        session_file = f"{SESSION_NAME}.session"
+        if os.path.exists(session_file):
+            logger.info(f"Найден файл сессии Telegram: {session_file}")
+            try:
+                # Попытка использовать существующий файл сессии
+                client = TelegramClient(SESSION_NAME, api_id_int, TELEGRAM_API_HASH)
+            except Exception as e:
+                logger.error(f"Ошибка при использовании существующего файла сессии: {e}")
+                # Пробуем создать новый файл сессии с временным именем
+                new_session_name = f"{SESSION_NAME}_new_{int(time.time())}"
+                logger.info(f"Создание новой сессии Telegram с именем: {new_session_name}")
+                client = TelegramClient(new_session_name, api_id_int, TELEGRAM_API_HASH)
+        else:
+            logger.warning(f"Файл сессии {session_file} не найден, создаем новый")
+            client = TelegramClient(SESSION_NAME, api_id_int, TELEGRAM_API_HASH)
+            
+        logger.info(f"Попытка подключения к Telegram (сессия: {client.session.filename})...")
         
         # Проверяем, есть ли бот-токен в переменных окружения
         bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -399,19 +440,31 @@ async def get_telegram_posts_via_telethon(username: str, limit: int = 20) -> tup
         if bot_token:
             # Используем бот-токен для авторизации вместо интерактивного ввода
             logger.info("Используем бот-токен для авторизации в Telegram")
-            await client.start(bot_token=bot_token)
+            try:
+                await client.start(bot_token=bot_token)
+                logger.info("Авторизация с использованием бот-токена успешна")
+            except Exception as e:
+                logger.error(f"Ошибка при авторизации с бот-токеном: {e}")
+                # Вместо попытки создать гостевую сессию, используем примеры постов
+                error_message = "Невозможно авторизоваться в Telegram. Используем примеры постов."
+                return get_sample_posts(username), error_message
         else:
-            # Резервный вариант - не должен выполняться на сервере
-            logger.warning("Бот-токен не найден, попытка интерактивной авторизации (не рекомендуется для сервера)")
-            await client.start(phone=lambda: input("Please enter your phone (or bot token): "),
-                             code_callback=lambda: input("Please enter the code you received: "),
-                             password=lambda: getpass.getpass("Please enter your password: "))
-        
-        # Проверка авторизации (хотя start должен ее обеспечить)
-        if not await client.is_user_authorized():
-             # Это не должно произойти после успешного client.start()
-             raise Exception("Не удалось авторизоваться в Telegram после client.start()")
-        logger.info("Авторизация в Telegram прошла успешно.")
+            # Без бот-токена сразу используем примеры постов
+            logger.warning("Бот-токен не найден, невозможно авторизоваться в Telegram")
+            error_message = "Бот-токен не настроен. Используем примеры постов."
+            return get_sample_posts(username), error_message
+            
+        # Проверка авторизации
+        try:
+            is_authorized = await client.is_user_authorized()
+            if is_authorized:
+                logger.info("Авторизация в Telegram успешна.")
+            else:
+                logger.warning("Не авторизован в Telegram. Используем примеры постов.")
+                return get_sample_posts(username), "Не авторизован в Telegram."
+        except Exception as e:
+            logger.error(f"Ошибка при проверке авторизации: {e}")
+            return get_sample_posts(username), f"Ошибка при проверке авторизации: {e}"
         
         # Попытка получения информации о канале
         logger.info(f"Получение информации о канале @{username}...")
@@ -455,14 +508,14 @@ async def get_telegram_posts_via_telethon(username: str, limit: int = 20) -> tup
     except FloodWaitError as e:
         error_message = f"Telegram попросил подождать {e.seconds} секунд (флуд-контроль). Попробуйте позже."
         logger.error(error_message)
-    except InvalidCheckSumError:
-        error_message = "Неверная контрольная сумма в сессии Telegram. Попробуйте создать новый файл сессии."
-        logger.error(error_message)
     except AuthKeyError:
         error_message = "Проблема с ключом авторизации Telegram. Возможно, устаревшая сессия."
         logger.error(error_message)
     except ApiIdInvalidError:
         error_message = "Недействительный API ID для Telegram. Проверьте настройки TELEGRAM_API_ID."
+        logger.error(error_message)
+    except RPCError as e:
+        error_message = f"Ошибка удаленного вызова процедур Telegram: {str(e)}"
         logger.error(error_message)
     except Exception as e:
         error_message = f"Ошибка при подключении/авторизации в Telegram: {type(e).__name__}: {e}"
