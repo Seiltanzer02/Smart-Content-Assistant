@@ -87,20 +87,22 @@ app = FastAPI(
 
 # Настройка CORS
 origins = [
-    "http://localhost",         # Разрешить запросы с localhost (для разработки)
-    "http://localhost:5173",    # Стандартный порт Vite
+    "http://localhost", 
+    "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "http://localhost:3000",    # Может использоваться create-react-app
-    # TODO: Добавьте сюда URL вашего развернутого фронтенда, если он есть
-    # Например: "https://your-app-domain.com"
+    "http://localhost:3000",
+    "https://*.onrender.com",  # Для Render
+    "https://t.me",            # Для Telegram
+    "*"                        # Временно разрешаем все
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,       # Разрешенные источники
-    allow_credentials=True,      # Разрешить куки
-    allow_methods=["*"],         # Разрешить все методы (GET, POST, etc.)
-    allow_headers=["*"],         # Разрешить все заголовки
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-Telegram-User-Id"]  # Позволяем читать этот заголовок
 )
 
 # --- Настройка обслуживания статических файлов ---
@@ -431,9 +433,18 @@ async def get_telegram_posts_via_telethon(username: str, limit: int = 20) -> tup
     return posts_text, error_message
 
 @app.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_channel(request: AnalyzeRequest):
-    """Анализирует Telegram канал: получает посты, определяет темы и стили."""
-    username = request.username.lstrip('@') # Убираем @ если есть
+async def analyze_channel(request: Request, analyze_request: AnalyzeRequest):
+    # Получаем Telegram User ID из заголовка
+    user_id = None
+    try:
+        user_id = request.headers.get("x-telegram-user-id")
+        if user_id:
+            logger.info(f"Запрос на анализ канала от пользователя: {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при получении User ID: {e}")
+    
+    # Продолжаем с анализом канала
+    username = analyze_request.username.lstrip('@')
     logger.info(f"Получен запрос на анализ канала: @{username}")
 
     # --- ШАГ 1: Получение постов из Telegram (с новой функцией) ---
@@ -1495,3 +1506,18 @@ async def serve_spa(full_path: str):
     else:
         logging.error(f"Файл index.html не найден по пути: {index_path}")
         raise HTTPException(status_code=404, detail="Файл index.html не найден")
+
+# Добавляем посредник для логирования запросов
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    # Логируем заголовки и пути
+    user_id = request.headers.get("x-telegram-user-id", "не определен")
+    logger.info(f"Запрос: {request.method} {request.url.path} | User ID: {user_id}")
+    
+    # Логируем все заголовки в режиме отладки
+    headers_str = ", ".join([f"{k}: {v}" for k, v in request.headers.items()])
+    logger.debug(f"Заголовки запроса: {headers_str}")
+    
+    # Продолжаем обработку запроса
+    response = await call_next(request)
+    return response

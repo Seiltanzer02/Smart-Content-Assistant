@@ -11,3 +11,4 @@ python-multipart
 beautifulsoup4
 python-unsplash
 gunicorn
+python-telegram-bot
