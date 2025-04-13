@@ -1494,9 +1494,7 @@ async def generate_keywords(post_text: str, language: str = "russian") -> Tuple[
 # Роут для обслуживания фронтенда (React SPA)
 @app.get("/", include_in_schema=False)
 async def serve_index():
-    global SPA_ROUTES_CONFIGURED
-    
-    # Если маршруты SPA уже настроены в конце файла, пропускаем этот обработчик
+    # Проверяем, установлен ли флаг SPA_ROUTES_CONFIGURED
     if SPA_ROUTES_CONFIGURED:
         logger.debug("Запрос к / пропущен, так как SPA_ROUTES_CONFIGURED=True")
         # Возвращаем 404, чтобы FastAPI перешел к следующему обработчику
@@ -1512,9 +1510,7 @@ async def serve_index():
 # Роут для перенаправления всех неизвестных путей на React Router
 @app.get("/{full_path:path}", include_in_schema=False)
 async def serve_spa(full_path: str):
-    global SPA_ROUTES_CONFIGURED
-    
-    # Если маршруты SPA уже настроены в конце файла, пропускаем этот обработчик
+    # Проверяем, установлен ли флаг SPA_ROUTES_CONFIGURED
     if SPA_ROUTES_CONFIGURED:
         logger.debug(f"Запрос к /{full_path} пропущен, так как SPA_ROUTES_CONFIGURED=True")
         # Возвращаем 404, чтобы FastAPI перешел к следующему обработчику
@@ -1563,9 +1559,8 @@ async def log_requests(request: Request, call_next):
 # Это гарантирует, что API-эндпоинты будут иметь приоритет
 if SHOULD_MOUNT_STATIC:
     # Устанавливаем флаг, что мы используем новые маршруты
-    global SPA_ROUTES_CONFIGURED
-    logger.info("Установлен флаг SPA_ROUTES_CONFIGURED=True для предотвращения конфликтов маршрутов")
     SPA_ROUTES_CONFIGURED = True
+    logger.info("Установлен флаг SPA_ROUTES_CONFIGURED=True для предотвращения конфликтов маршрутов")
     
     # Перечисляем все API-маршруты, чтобы исключить их из обработки static middleware
     API_PATHS = [
