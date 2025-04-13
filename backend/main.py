@@ -504,7 +504,8 @@ async def get_telegram_posts_via_telethon(username: str) -> Tuple[List[Dict[str,
         except Exception as e:
             logger.error(f"Ошибка при закрытии соединения: {e}")
 
-async def analyze_channel(request: AnalyzeRequest) -> AnalyzeResponse:
+@app.post("/analyze", response_model=AnalyzeResponse)
+async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeResponse:
     """Анализ канала Telegram на основе запроса."""
     # Получение telegram_user_id из заголовков
     telegram_user_id = None
@@ -518,7 +519,7 @@ async def analyze_channel(request: AnalyzeRequest) -> AnalyzeResponse:
         logger.error(f"Ошибка при получении Telegram User ID из заголовков: {e}")
 
     # Обработка имени пользователя/канала
-    username = request.username.replace("@", "").strip()
+    username = req.username.replace("@", "").strip()
     logger.info(f"Запрос анализа канала @{username}")
     
     posts = []
@@ -555,7 +556,7 @@ async def analyze_channel(request: AnalyzeRequest) -> AnalyzeResponse:
     # Если не удалось получить посты ни через Telethon, ни через HTTP
     if not posts:
         logger.warning(f"Используем примеры постов для канала {username}")
-        sample_posts = get_sample_posts()
+        sample_posts = get_sample_posts(username)
         posts = [{"text": post} for post in sample_posts]
         error_message = "Не удалось получить реальные посты. Используются примеры для демонстрации."
     
@@ -623,7 +624,8 @@ async def analyze_channel(request: AnalyzeRequest) -> AnalyzeResponse:
         sample_posts=sample_posts,
         best_posting_time=best_posting_time,
         posts_count=len(posts),
-        error=error_message
+        error=error_message,
+        message="Анализ успешно выполнен"
     )
 
 @app.post("/generate-plan", response_model=List[SuggestedIdeaResponse])
