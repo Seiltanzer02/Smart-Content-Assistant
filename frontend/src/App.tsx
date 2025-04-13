@@ -97,7 +97,7 @@ const LOCAL_STORAGE_KEYS = {
 };
 
 // Базовый URL API
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = ''; // Пустая строка - запросы будут относительными (к тому же домену)
 
 // Тип ответа /upload-image
 interface UploadResponse {

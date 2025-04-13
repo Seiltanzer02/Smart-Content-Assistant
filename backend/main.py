@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Request, Form, Depends
 import uvicorn
 import os
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, Json
 from fastapi import HTTPException
 import logging
 import asyncio
@@ -14,7 +14,7 @@ from collections import Counter
 import re # Для очистки текста
 from openai import AsyncOpenAI, OpenAIError # Добавляем OpenAI
 import json # Для парсинга потенциального JSON ответа
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Union
 from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.types import Message
 import random # <--- Добавляем импорт random
@@ -26,6 +26,7 @@ import uuid # Для генерации уникальных имен файло
 import mimetypes # Для определения типа файла
 from telethon.errors import AuthKeyError, RPCError
 import getpass # Для получения пароля
+from fastapi.responses import FileResponse
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -101,6 +102,21 @@ app.add_middleware(
     allow_methods=["*"],         # Разрешить все методы (GET, POST, etc.)
     allow_headers=["*"],         # Разрешить все заголовки
 )
+
+# --- Настройка обслуживания статических файлов ---
+import os
+from fastapi.staticfiles import StaticFiles
+
+# Путь к папке со статическими файлами
+static_folder = os.path.join(os.path.dirname(__file__), "static")
+
+# Проверяем, существует ли папка static, и если да - монтируем её
+if os.path.exists(static_folder):
+    app.mount("/", StaticFiles(directory=static_folder, html=True), name="static")
+    logger.info(f"Статические файлы будут обслуживаться из папки: {static_folder}")
+else:
+    logger.warning(f"Папка статических файлов не найдена: {static_folder}")
+    logger.warning("Статические файлы не будут обслуживаться. Только API endpoints доступны.")
 
 class AnalyzeRequest(BaseModel):
     username: str
@@ -1449,3 +1465,33 @@ async def generate_keywords(post_text: str, language: str = "russian") -> Tuple[
         logger.error(f"Ошибка при генерации ключевых слов: {str(e)}")
         # Возвращаем запасные ключевые слова в случае ошибки
         return get_fallback_keywords("general"), "general"
+
+# Роут для обслуживания фронтенда (React SPA)
+@app.get("/", include_in_schema=False)
+async def serve_index():
+    index_path = os.path.join(static_folder, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    else:
+        logging.error(f"Файл index.html не найден по пути: {index_path}")
+        raise HTTPException(status_code=404, detail="Файл index.html не найден")
+
+# Роут для перенаправления всех неизвестных путей на React Router
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_spa(full_path: str):
+    # Если запрашивается API-эндпоинт, не обрабатываем его здесь
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API endpoint not found")
+    
+    # Проверяем, существует ли файл статики
+    requested_file = os.path.join(static_folder, full_path)
+    if os.path.exists(requested_file) and os.path.isfile(requested_file):
+        return FileResponse(requested_file)
+    
+    # Для остальных запросов возвращаем index.html (для работы React Router)
+    index_path = os.path.join(static_folder, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    else:
+        logging.error(f"Файл index.html не найден по пути: {index_path}")
+        raise HTTPException(status_code=404, detail="Файл index.html не найден")
