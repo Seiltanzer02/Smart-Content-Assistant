@@ -4,7 +4,7 @@ import os
 from pydantic import BaseModel, Field, Json
 from fastapi import HTTPException
 import logging
-import asyncio
+import asyncio  # Для асинхронных операций и sleep
 from fastapi.middleware.cors import CORSMiddleware
 from telethon import TelegramClient
 from telethon.errors import ChannelInvalidError, ChannelPrivateError, UsernameNotOccupiedError
@@ -32,6 +32,7 @@ import time # Добавляем модуль time для работы с вре
 import requests
 from bs4 import BeautifulSoup
 import telethon
+import aiohttp
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -528,39 +529,42 @@ async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeRespo
     error_message = None
     errors_list = []  # Список для накопления ошибок
     
-    # Попытка получить посты через Telethon
+    # --- НАЧАЛО: ПОПЫТКА ПОЛУЧЕНИЯ ЧЕРЕЗ HTTP ПАРСИНГ (ПЕРВЫЙ ПРИОРИТЕТ) ---
     try:
-        logger.info(f"Пытаемся получить посты канала @{username} через Telethon")
-        telethon_posts, telethon_error = await get_telegram_posts_via_telethon(username)
-        
-        if telethon_error:
-            logger.warning(f"Ошибка Telethon для канала @{username}: {telethon_error}")
-            errors_list.append(f"Telethon: {telethon_error}")
-            # Если ошибка связана с ботами или другими конкретными проблемами,
-            # попробуем HTTP парсинг
-            if "Бот не может получить историю сообщений" in telethon_error or "Канал не найден" in telethon_error:
-                logger.info(f"Попытка получения постов через HTTP парсинг для канала @{username}")
-                try:
-                    http_posts = await get_telegram_posts_via_http(username)
-                    if http_posts:
-                        posts = [{"text": post} for post in http_posts]
-                        logger.info(f"Успешно получено {len(posts)} постов через HTTP парсинг")
-                    else:
-                        logger.warning(f"HTTP парсинг не вернул постов для канала @{username}")
-                        errors_list.append("HTTP: Не удалось получить посты")
-                except Exception as http_error:
-                    logger.error(f"Ошибка при HTTP парсинге для канала @{username}: {http_error}")
-                    errors_list.append(f"HTTP: {str(http_error)}")
+        logger.info(f"Попытка получения постов через HTTP парсинг для канала @{username}")
+        http_posts = await get_telegram_posts_via_http(username)
+        if http_posts and len(http_posts) > 0:
+            posts = [{"text": post} for post in http_posts]
+            logger.info(f"Успешно получено {len(posts)} постов через HTTP парсинг")
         else:
-            # Если Telethon успешно получил посты
-            posts = telethon_posts
-            logger.info(f"Успешно получено {len(posts)} постов через Telethon")
-        
-    except Exception as e:
-        logger.error(f"Непредвиденная ошибка при получении постов канала @{username}: {e}")
-        errors_list.append(f"Ошибка: {str(e)}")
+            logger.warning(f"HTTP парсинг не вернул постов для канала @{username}, пробуем Telethon")
+            errors_list.append("HTTP: Не получены посты, пробуем Telethon")
+    except Exception as http_error:
+        logger.error(f"Ошибка при HTTP парсинге для канала @{username}: {http_error}")
+        errors_list.append(f"HTTP: {str(http_error)}")
+        logger.info("Переключаемся на метод Telethon")
     
-    # Если не удалось получить посты ни через Telethon, ни через HTTP
+    # --- НАЧАЛО: ПОПЫТКА ПОЛУЧЕНИЯ ЧЕРЕЗ TELETHON (ВТОРОЙ ПРИОРИТЕТ) ---
+    # Только если HTTP метод не дал результатов
+    if not posts:
+        try:
+            logger.info(f"Пытаемся получить посты канала @{username} через Telethon")
+            telethon_posts, telethon_error = await get_telegram_posts_via_telethon(username)
+            
+            if telethon_error:
+                logger.warning(f"Ошибка Telethon для канала @{username}: {telethon_error}")
+                errors_list.append(f"Telethon: {telethon_error}")
+            else:
+                # Если Telethon успешно получил посты
+                posts = telethon_posts
+                logger.info(f"Успешно получено {len(posts)} постов через Telethon")
+            
+        except Exception as e:
+            logger.error(f"Непредвиденная ошибка при получении постов канала @{username} через Telethon: {e}")
+            errors_list.append(f"Ошибка Telethon: {str(e)}")
+    
+    # --- НАЧАЛО: ИСПОЛЬЗУЕМ ПРИМЕРЫ КАК ПОСЛЕДНИЙ ВАРИАНТ ---
+    # Если не удалось получить посты ни через HTTP, ни через Telethon
     sample_data_used = False
     if not posts:
         logger.warning(f"Используем примеры постов для канала {username}")
@@ -1818,91 +1822,138 @@ async def get_telegram_posts_via_http(username: str) -> List[str]:
     logger.info(f"Запрос к веб-версии Telegram: {url}")
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
         "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
         "Cache-Control": "no-cache",
-        "Pragma": "no-cache"
+        "Pragma": "no-cache",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-User": "?1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Ch-Ua": '"Not.A/Brand";v="8", "Chromium";v="115"',
+        "Upgrade-Insecure-Requests": "1"
     }
     
     try:
-        logger.info(f"Отправка HTTP запроса к {url}")
-        response = requests.get(url, headers=headers, timeout=15)
+        # Пробуем несколько раз с разными User-Agent, если нужно
+        retry_count = 0
+        max_retries = 3
         
-        # Проверяем HTTP статус
-        if response.status_code != 200:
-            logger.error(f"HTTP ошибка при запросе к {url}: {response.status_code}")
-            if response.status_code == 404:
-                return []  # Канал не найден
-            else:
-                logger.error(f"Содержимое ответа: {response.text[:500]}...")
-                return []
-        
-        # Проверяем, что страница содержит контент канала
-        if "tgme_page_title" not in response.text:
-            logger.warning(f"Возможно, это не страница канала: {url}")
-            return []
-        
-        # Проверяем наличие сообщений об ошибках на странице
-        if "Channel not found" in response.text or "Канал не найден" in response.text:
-            logger.warning(f"Канал не найден: @{username}")
-            return []
+        while retry_count < max_retries:
+            logger.info(f"Отправка HTTP запроса к {url} (попытка {retry_count+1}/{max_retries})")
             
-        if "This channel is private" in response.text or "Этот канал является приватным" in response.text:
-            logger.warning(f"Канал является приватным: @{username}")
-            return []
-        
-        logger.info(f"Успешно получен HTML-ответ, размер: {len(response.text)} байт")
-        
-        # Парсим HTML с помощью BeautifulSoup
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Находим все сообщения на странице
-        messages = []
-        
-        # Поиск блоков с сообщениями
-        message_containers = soup.find_all('div', class_='tgme_widget_message_text')
-        
-        if not message_containers:
-            logger.warning(f"Не найдены блоки сообщений (class='tgme_widget_message_text') для канала @{username}")
-            # Попробуем поискать другие классы для контейнеров сообщений
-            message_containers = soup.find_all('div', class_='tgme_widget_message_bubble')
-        
-        # Подсчитываем найденные контейнеры
-        logger.info(f"Найдено {len(message_containers)} контейнеров сообщений")
-        
-        # Извлекаем текст сообщений
-        for container in message_containers:
-            # Ищем текст внутри контейнера
-            text_element = container.find('div', class_='tgme_widget_message_text')
-            if text_element:
-                text = text_element.get_text(strip=True)
-            else:
-                # Если нет специального элемента, берем весь текст контейнера
-                text = container.get_text(strip=True)
-                
-            if text and len(text) > 10:
-                messages.append(text)
-        
-        logger.info(f"Извлечено {len(messages)} текстовых сообщений из HTML")
-        
-        if messages:
-            return messages
-        else:
-            logger.warning(f"В канале @{username} не найдены текстовые сообщения")
-            return []
+            try:
+                async with aiohttp.ClientSession(headers=headers) as session:
+                    async with session.get(url, timeout=15) as response:
+                        if response.status != 200:
+                            logger.error(f"HTTP ошибка при запросе к {url}: {response.status}")
+                            retry_count += 1
+                            
+                            if response.status == 404:
+                                return []  # Канал не найден
+                            elif retry_count >= max_retries:
+                                logger.error(f"Достигнуто максимальное число попыток ({max_retries})")
+                                return []
+                            else:
+                                # Меняем User-Agent для следующей попытки
+                                headers["User-Agent"] = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{110+retry_count}.0.0.0 Safari/537.36"
+                                await asyncio.sleep(1)  # Маленькая пауза между попытками
+                                continue
+                        
+                        html_content = await response.text()
+                        
+                        # Проверка, что страница содержит контент канала
+                        if "tgme_page_title" not in html_content:
+                            logger.warning(f"Возможно, это не страница канала: {url}")
+                            retry_count += 1
+                            if retry_count >= max_retries:
+                                return []
+                            continue
+                        
+                        # Проверка наличия сообщений об ошибках на странице
+                        if "Channel not found" in html_content or "Канал не найден" in html_content:
+                            logger.warning(f"Канал не найден: @{username}")
+                            return []
+                            
+                        if "This channel is private" in html_content or "Этот канал является приватным" in html_content:
+                            logger.warning(f"Канал является приватным: @{username}")
+                            return []
+                        
+                        logger.info(f"Успешно получен HTML-ответ, размер: {len(html_content)} байт")
+                        
+                        # Парсим HTML с помощью BeautifulSoup
+                        soup = BeautifulSoup(html_content, 'html.parser')
+                        
+                        # Находим все сообщения на странице
+                        messages = []
+                        
+                        # Поиск блоков с сообщениями (проверяем разные классы)
+                        message_containers = soup.find_all('div', class_='tgme_widget_message_text')
+                        
+                        if not message_containers:
+                            logger.warning(f"Не найдены блоки сообщений (class='tgme_widget_message_text')")
+                            # Попробуем поискать другие классы для контейнеров сообщений
+                            message_containers = soup.find_all('div', class_='tgme_widget_message_bubble')
+                        
+                        if not message_containers:
+                            logger.warning(f"Не найдены блоки сообщений (class='tgme_widget_message_bubble')")
+                            # Попробуем найти сами сообщения
+                            message_containers = soup.find_all('div', class_='tgme_widget_message')
+                        
+                        # Подсчитываем найденные контейнеры
+                        logger.info(f"Найдено {len(message_containers)} контейнеров сообщений")
+                        
+                        # Извлекаем текст сообщений
+                        for container in message_containers:
+                            # Ищем текст внутри контейнера
+                            text_element = container.find('div', class_='tgme_widget_message_text')
+                            if text_element:
+                                text = text_element.get_text(strip=True)
+                                if text and len(text) > 10:  # Проверка минимальной длины текста
+                                    messages.append(text)
+                            elif container.get_text(strip=True):
+                                # Если нет специального элемента, берем весь текст контейнера
+                                text = container.get_text(strip=True)
+                                if len(text) > 10:  # Минимальная длина для исключения служебных текстов
+                                    messages.append(text)
+                        
+                        # Если сообщений всё ещё нет, пробуем последнее средство - поиск по тегам <p>
+                        if not messages:
+                            paragraphs = soup.find_all('p')
+                            for p in paragraphs:
+                                text = p.get_text(strip=True)
+                                if len(text) > 20:  # Более строгое ограничение длины
+                                    messages.append(text)
+                        
+                        logger.info(f"Извлечено {len(messages)} текстовых сообщений из HTML")
+                        
+                        if messages:
+                            return messages
+                        else:
+                            logger.warning(f"В канале @{username} не найдены текстовые сообщения")
+                            retry_count += 1
+                            if retry_count >= max_retries:
+                                return []
+                            continue
             
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"HTTP ошибка при получении канала @{username}: {str(e)}")
+            except asyncio.TimeoutError:
+                logger.error(f"Тайм-аут при запросе к {url}")
+                retry_count += 1
+                if retry_count >= max_retries:
+                    return []
+                await asyncio.sleep(1)
+            
+            except Exception as e:
+                logger.error(f"Ошибка при запросе к {url}: {str(e)}")
+                retry_count += 1
+                if retry_count >= max_retries:
+                    return []
+                await asyncio.sleep(1)
+        
+        # Если все попытки не удались
         return []
-    
-    except requests.exceptions.ConnectionError as e:
-        logger.error(f"Ошибка соединения при получении канала @{username}: {str(e)}")
-        return []
-    
-    except requests.exceptions.Timeout as e:
-        logger.error(f"Тайм-аут при получении канала @{username}: {str(e)}")
-        return []
-    
+            
     except Exception as e:
         logger.error(f"Непредвиденная ошибка при получении канала @{username} через HTTP: {str(e)}")
         return []
