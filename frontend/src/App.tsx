@@ -184,37 +184,56 @@ function App() {
   // Инициализация Telegram WebApp и получение User ID
   useEffect(() => {
     try {
-      WebApp.ready(); // Сообщаем Telegram, что приложение готово
-      const user = WebApp.initDataUnsafe?.user;
-      if (user?.id) {
-        console.log('Telegram User ID:', user.id);
-        setTelegramUserId(user.id);
-
-        // Настраиваем глобальные заголовки axios
-        axios.defaults.headers.common['X-Telegram-User-Id'] = user.id.toString();
-
+      console.log("Инициализация Telegram WebApp...");
+      
+      // Проверяем доступность Telegram WebApp
+      if (typeof WebApp !== 'undefined') {
+        // Сообщаем Telegram что приложение готово
+        WebApp.ready();
+        
+        // Получаем данные пользователя
+        const initData = WebApp.initData || '';
+        const user = WebApp.initDataUnsafe?.user;
+        
+        console.log("Telegram initData доступны:", !!initData);
+        console.log("Telegram user:", user);
+        
+        if (user?.id) {
+          console.log("Успешная авторизация в Telegram, user ID:", user.id);
+          setTelegramUserId(user.id);
+          
+          // Устанавливаем ID в заголовки запросов
+          axios.defaults.headers.common['X-Telegram-User-Id'] = user.id.toString();
+          setError(null); // Сбрасываем ошибку, если была
+        } else {
+          console.warn("Не удалось получить Telegram User ID из WebApp.initDataUnsafe.user");
+          setError("Не удалось идентифицировать пользователя Telegram. Проверьте, открыто ли приложение через Telegram.");
+          
+          // Временное решение для тестирования: фиксированный ID
+          if (window.location.hostname === 'localhost' || window.location.hostname.includes('127.0.0.1')) {
+            console.log("Тестовый режим: используем тестовый ID пользователя");
+            const testUserId = 12345678;
+            setTelegramUserId(testUserId);
+            axios.defaults.headers.common['X-Telegram-User-Id'] = testUserId.toString();
+          }
+        }
       } else {
-        console.warn('Не удалось получить Telegram User ID.');
-        setError("Не удалось идентифицировать пользователя Telegram. Функционал может быть ограничен.");
-        // Удаляем заголовок, если ID не получен
-        delete axios.defaults.headers.common['X-Telegram-User-Id'];
+        console.error("WebApp объект не найден. Приложение запущено вне Telegram?");
+        setError("Приложение должно быть открыто через Telegram. Обратитесь к @SmartContentHelperBot.");
+        
+        // Только для локальной разработки
+        if (window.location.hostname === 'localhost' || window.location.hostname.includes('127.0.0.1')) {
+          console.log("Локальная разработка: используем тестовый ID пользователя");
+          const testUserId = 12345678;
+          setTelegramUserId(testUserId);
+          axios.defaults.headers.common['X-Telegram-User-Id'] = testUserId.toString();
+        }
       }
-      // Дополнительные настройки WebApp (цвет хедера, кнопка назад и т.д.) - можно добавить позже
-      // WebApp.setHeaderColor('secondary_bg_color');
-      // WebApp.BackButton.show();
-      // WebApp.BackButton.onClick(() => { /* обработка нажатия кнопки назад */ });
-    } catch (e) {
-      console.error('Ошибка инициализации Telegram WebApp SDK:', e);
-      setError("Ошибка при инициализации интерфейса Telegram.");
-      // Удаляем заголовок в случае ошибки
-      delete axios.defaults.headers.common['X-Telegram-User-Id'];
+    } catch (error) {
+      console.error("Ошибка при инициализации Telegram WebApp:", error);
+      setError("Ошибка при инициализации Telegram WebApp. Попробуйте перезапустить приложение.");
     }
-
-    // Очистка при размонтировании (если нужно)
-    // return () => {
-    //   WebApp.BackButton.offClick(/* ... */);
-    // };
-  }, []); // Пустой массив зависимостей - выполнить один раз при монтировании
+  }, []);
 
   // Сохранение currentView в localStorage при изменении
   useEffect(() => {
