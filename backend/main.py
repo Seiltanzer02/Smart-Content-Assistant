@@ -29,6 +29,8 @@ import getpass # Для получения пароля
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import time # Добавляем модуль time для работы с временем
+import requests
+from bs4 import BeautifulSoup
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -403,235 +405,225 @@ class AnalyzeResponse(BaseModel):
     analyzed_posts_count: int
 
 # --- Функция для работы с Telegram --- 
-async def get_telegram_posts_via_telethon(username: str, limit: int = 20) -> tuple[List[str], Optional[str]]:
-    """Подключается к Telegram, получает посты и отключается."""
-    posts_text = []
-    error_message = None
-
-    if not (TELEGRAM_API_ID and TELEGRAM_API_HASH and SESSION_NAME):
-        return [], "Конфигурация Telegram (API_ID, API_HASH, SESSION_NAME) не найдена."
-
-    client = None # Инициализируем как None
-    try:
-        api_id_int = int(TELEGRAM_API_ID)
-        
-        # Проверяем существование файла сессии и его целостность
-        session_file = f"{SESSION_NAME}.session"
-        if os.path.exists(session_file):
-            logger.info(f"Найден файл сессии Telegram: {session_file}")
-            try:
-                # Попытка использовать существующий файл сессии
-                client = TelegramClient(SESSION_NAME, api_id_int, TELEGRAM_API_HASH)
-            except Exception as e:
-                logger.error(f"Ошибка при использовании существующего файла сессии: {e}")
-                # Пробуем создать новый файл сессии с временным именем
-                new_session_name = f"{SESSION_NAME}_new_{int(time.time())}"
-                logger.info(f"Создание новой сессии Telegram с именем: {new_session_name}")
-                client = TelegramClient(new_session_name, api_id_int, TELEGRAM_API_HASH)
-        else:
-            logger.warning(f"Файл сессии {session_file} не найден, создаем новый")
-            client = TelegramClient(SESSION_NAME, api_id_int, TELEGRAM_API_HASH)
-            
-        logger.info(f"Попытка подключения к Telegram (сессия: {client.session.filename})...")
-        
-        # Проверяем, есть ли бот-токен в переменных окружения
-        bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
-        
-        if bot_token:
-            # Используем бот-токен для авторизации вместо интерактивного ввода
-            logger.info("Используем бот-токен для авторизации в Telegram")
-            try:
-                await client.start(bot_token=bot_token)
-                logger.info("Авторизация с использованием бот-токена успешна")
-            except Exception as e:
-                logger.error(f"Ошибка при авторизации с бот-токеном: {e}")
-                # Вместо попытки создать гостевую сессию, используем примеры постов
-                error_message = "Невозможно авторизоваться в Telegram. Используем примеры постов."
-                return get_sample_posts(username), error_message
-        else:
-            # Без бот-токена сразу используем примеры постов
-            logger.warning("Бот-токен не найден, невозможно авторизоваться в Telegram")
-            error_message = "Бот-токен не настроен. Используем примеры постов."
-            return get_sample_posts(username), error_message
-            
-        # Проверка авторизации
-        try:
-            is_authorized = await client.is_user_authorized()
-            if is_authorized:
-                logger.info("Авторизация в Telegram успешна.")
-            else:
-                logger.warning("Не авторизован в Telegram. Используем примеры постов.")
-                return get_sample_posts(username), "Не авторизован в Telegram."
-        except Exception as e:
-            logger.error(f"Ошибка при проверке авторизации: {e}")
-            return get_sample_posts(username), f"Ошибка при проверке авторизации: {e}"
-        
-        # Попытка получения информации о канале
-        logger.info(f"Получение информации о канале @{username}...")
-        try:
-            # Пробуем получить сущность канала
-            channel = await client.get_entity(username)
-            logger.info(f"Канал @{username} найден. Получение последних {limit} постов...")
-            
-            # Получаем сообщения из канала
-            messages = await client.get_messages(channel, limit=limit)
-            for message in messages:
-                if isinstance(message, Message) and message.text: # Берем только сообщения с текстом
-                    posts_text.append(message.text)
-            logger.info(f"Получено {len(posts_text)} текстовых постов.")
-            
-            # Если не нашли текстовых постов, выполняем резервную стратегию
-            if not posts_text:
-                logger.warning(f"Текстовые посты не найдены в канале @{username}. Возвращаем заглушки.")
-                # Возвращаем заглушки для анализа (примеры постов)
-                return get_sample_posts(username), None
-                
-        except ValueError as e:
-            # Обработка ошибки, если username не является валидным entity
-            error_message = f"Не удалось найти канал или пользователя @{username}: {e}"
-            logger.error(error_message)
-            # Возвращаем заглушки для анализа (примеры постов)
-            return get_sample_posts(username), None
-        except Exception as e:
-            # Другие возможные ошибки Telethon при получении entity или сообщений
-            error_message = f"Ошибка при работе с каналом @{username}: {type(e).__name__}: {e}"
-            logger.exception(error_message)
-            # Возвращаем заглушки для анализа (примеры постов)
-            return get_sample_posts(username), None
-
-    except SessionPasswordNeededError:
-         error_message = "Требуется пароль двухфакторной аутентификации Telegram."
-         logger.error(error_message)
-    except PhoneNumberInvalidError:
-        error_message = "Введен неверный номер телефона для Telegram."
-        logger.error(error_message)
-    except FloodWaitError as e:
-        error_message = f"Telegram попросил подождать {e.seconds} секунд (флуд-контроль). Попробуйте позже."
-        logger.error(error_message)
-    except AuthKeyError:
-        error_message = "Проблема с ключом авторизации Telegram. Возможно, устаревшая сессия."
-        logger.error(error_message)
-    except ApiIdInvalidError:
-        error_message = "Недействительный API ID для Telegram. Проверьте настройки TELEGRAM_API_ID."
-        logger.error(error_message)
-    except RPCError as e:
-        error_message = f"Ошибка удаленного вызова процедур Telegram: {str(e)}"
-        logger.error(error_message)
-    except Exception as e:
-        error_message = f"Ошибка при подключении/авторизации в Telegram: {type(e).__name__}: {e}"
-        logger.exception(error_message)
-    finally:
-        # Отключаемся в любом случае, если клиент был создан и подключен
-        if client and client.is_connected():
-            try:
-                await client.disconnect()
-                logger.info("Отключено от Telegram.")
-            except Exception as e:
-                 logger.error(f"Ошибка при отключении от Telegram: {e}", exc_info=True)
-            
-    return posts_text, error_message
-
-@app.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_channel(request: Request, analyze_request: AnalyzeRequest):
-    # Получаем Telegram User ID из заголовка
-    user_id = None
-    try:
-        user_id = request.headers.get("x-telegram-user-id")
-        if user_id:
-            logger.info(f"Запрос на анализ канала от пользователя: {user_id}")
-    except Exception as e:
-        logger.error(f"Ошибка при получении User ID: {e}")
+async def get_telegram_posts_via_telethon(username: str) -> Tuple[List[Dict[str, str]], Optional[str]]:
+    """Получение постов канала через Telethon API."""
+    if not all([TELEGRAM_API_ID, TELEGRAM_API_HASH, SESSION_NAME]):
+        logger.warning("Отсутствуют необходимые параметры для Telethon. Проверьте TELEGRAM_API_ID, TELEGRAM_API_HASH и SESSION_NAME.")
+        return [], "Отсутствуют параметры конфигурации Telethon"
     
-    # Продолжаем с анализом канала
-    username = analyze_request.username.lstrip('@')
-    logger.info(f"Получен запрос на анализ канала: @{username}")
-
-    posts = []
-    error_messages = []
-
-    # --- СТРАТЕГИЯ 1: Получение постов через Telethon (как было раньше) ---
     try:
-        logger.info(f"Попытка получить посты через Telethon для канала @{username}")
+        # Инициализация клиента Telethon
+        client = TelegramClient(SESSION_NAME, TELEGRAM_API_ID, TELEGRAM_API_HASH)
+        await client.start()
+        
+        # Проверяем, авторизован ли клиент
+        if not await client.is_user_authorized():
+            # Пробуем использовать бот-токен, если он доступен
+            if BOT_TOKEN:
+                try:
+                    await client.start(bot_token=BOT_TOKEN)
+                    logger.info("Успешная авторизация через бот-токен")
+                except Exception as e:
+                    logger.error(f"Ошибка при авторизации через бот-токен: {e}")
+                    return [], f"Ошибка авторизации бота: {str(e)}"
+            else:
+                logger.warning("Клиент не авторизован, а BOT_TOKEN не установлен")
+                return [], "Телеграм клиент не авторизован"
+        
+        logger.info(f"Попытка получения информации о канале @{username}")
+        
+        # Получение сущности канала
+        try:
+            entity = await client.get_entity(username)
+            logger.info(f"Получена информация о канале @{username}")
+        except ValueError as e:
+            logger.error(f"Не удалось найти канал @{username}: {e}")
+            return [], f"Канал не найден: {str(e)}"
+        except Exception as e:
+            logger.error(f"Ошибка при получении информации о канале @{username}: {e}")
+            return [], f"Ошибка получения информации о канале: {str(e)}"
+        
+        # Получение сообщений
+        try:
+            logger.info(f"Попытка получения сообщений из канала @{username}")
+            messages = await client.get_messages(entity, limit=20)
+            logger.info(f"Получено {len(messages)} сообщений из канала @{username}")
+        except errors.RPCError as e:
+            # Особая обработка ошибки BotMethodInvalidError
+            if "BotMethodInvalidError" in str(e) or "BOT_METHOD_INVALID" in str(e):
+                logger.warning(f"Ошибка: бот не может получить историю сообщений. {e}")
+                return [], "Бот не может получить историю сообщений. Это ограничение API Telegram для ботов."
+            else:
+                logger.error(f"RPC ошибка при получении сообщений из канала @{username}: {e}")
+                return [], f"Ошибка Telegram API: {str(e)}"
+        except Exception as e:
+            logger.error(f"Непредвиденная ошибка при получении сообщений из канала @{username}: {e}")
+            return [], f"Ошибка при получении сообщений: {str(e)}"
+        
+        # Обработка сообщений и фильтрация только текстовых
+        try:
+            posts = []
+            for msg in messages:
+                if msg.text:
+                    posts.append({
+                        "text": msg.text,
+                        "date": msg.date.isoformat() if msg.date else None,
+                        "views": msg.views if hasattr(msg, 'views') else None
+                    })
+            
+            if not posts:
+                logger.warning(f"Не найдено текстовых сообщений в канале @{username}")
+                return [], "Не найдено текстовых сообщений"
+            
+            logger.info(f"Успешно получено {len(posts)} постов через Telethon")
+            await client.disconnect()
+            return posts, None
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке сообщений из канала @{username}: {e}")
+            return [], f"Ошибка обработки сообщений: {str(e)}"
+            
+    except errors.SessionPasswordNeededError:
+        logger.error("Требуется двухфакторная аутентификация")
+        return [], "Требуется двухфакторная аутентификация"
+    except errors.PhoneNumberInvalidError:
+        logger.error("Указан неверный номер телефона в конфигурации")
+        return [], "Неверный номер телефона"
+    except errors.FloodWaitError as e:
+        wait_time = getattr(e, 'seconds', 0)
+        logger.error(f"Flood wait error: необходимо подождать {wait_time} секунд")
+        return [], f"Слишком много запросов, подождите {wait_time} секунд"
+    except Exception as e:
+        logger.error(f"Непредвиденная ошибка в Telethon: {e}")
+        return [], f"Ошибка Telethon: {str(e)}"
+    finally:
+        try:
+            if 'client' in locals() and client.is_connected():
+                await client.disconnect()
+                logger.info("Соединение с Telegram закрыто")
+        except Exception as e:
+            logger.error(f"Ошибка при закрытии соединения: {e}")
+
+async def analyze_channel(request: AnalyzeRequest) -> AnalyzeResponse:
+    """Анализ канала Telegram на основе запроса."""
+    # Получение telegram_user_id из заголовков
+    telegram_user_id = None
+    try:
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if telegram_user_id:
+            logger.info(f"Запрос анализа от пользователя Telegram ID: {telegram_user_id}")
+        else:
+            logger.warning("Запрос анализа без идентификации пользователя Telegram")
+    except Exception as e:
+        logger.error(f"Ошибка при получении Telegram User ID из заголовков: {e}")
+
+    # Обработка имени пользователя/канала
+    username = request.username.replace("@", "").strip()
+    logger.info(f"Запрос анализа канала @{username}")
+    
+    posts = []
+    error_message = None
+    
+    # Попытка получить посты через Telethon
+    try:
+        logger.info(f"Пытаемся получить посты канала @{username} через Telethon")
         telethon_posts, telethon_error = await get_telegram_posts_via_telethon(username)
         
-        if telethon_posts:
-            logger.info(f"Успешно получено {len(telethon_posts)} постов через Telethon")
+        if telethon_error:
+            logger.warning(f"Ошибка Telethon для канала @{username}: {telethon_error}")
+            # Если ошибка связана с ботами или другими конкретными проблемами,
+            # попробуем HTTP парсинг
+            if "Бот не может получить историю сообщений" in telethon_error or "Канал не найден" in telethon_error:
+                logger.info(f"Попытка получения постов через HTTP парсинг для канала @{username}")
+                try:
+                    http_posts = await get_telegram_posts_via_http(username)
+                    if http_posts:
+                        posts = [{"text": post} for post in http_posts]
+                        logger.info(f"Успешно получено {len(posts)} постов через HTTP парсинг")
+                    else:
+                        logger.warning(f"HTTP парсинг не вернул постов для канала @{username}")
+                except Exception as http_error:
+                    logger.error(f"Ошибка при HTTP парсинге для канала @{username}: {http_error}")
+        else:
+            # Если Telethon успешно получил посты
             posts = telethon_posts
-            error_message = None
-        elif telethon_error:
-            error_messages.append(f"Ошибка Telethon: {telethon_error}")
-            logger.warning(f"Не удалось получить посты через Telethon: {telethon_error}")
+            logger.info(f"Успешно получено {len(posts)} постов через Telethon")
+        
     except Exception as e:
-        error_message = f"Непредвиденная ошибка Telethon: {str(e)}"
-        error_messages.append(error_message)
-        logger.error(f"Непредвиденная ошибка при получении постов через Telethon: {error_message}")
+        logger.error(f"Непредвиденная ошибка при получении постов канала @{username}: {e}")
     
-    # --- СТРАТЕГИЯ 2: Если Telethon не сработал, пробуем через HTTP парсинг ---
+    # Если не удалось получить посты ни через Telethon, ни через HTTP
     if not posts:
-        try:
-            logger.info(f"Попытка получить посты через HTTP парсинг для канала @{username}")
-            http_posts = await get_telegram_posts_via_http(username)
-            
-            if http_posts and len(http_posts) > 0:
-                logger.info(f"Успешно получено {len(http_posts)} постов через HTTP парсинг")
-                posts = http_posts
-            else:
-                logger.warning(f"Не удалось получить посты через HTTP парсинг (пустой результат)")
-                error_messages.append("HTTP парсинг вернул пустой результат")
-        except Exception as e:
-            error_message = f"Ошибка HTTP парсинга: {str(e)}"
-            error_messages.append(error_message)
-            logger.error(f"Ошибка при получении постов через HTTP парсинг: {error_message}")
+        logger.warning(f"Используем примеры постов для канала {username}")
+        sample_posts = get_sample_posts()
+        posts = [{"text": post} for post in sample_posts]
+        error_message = "Не удалось получить реальные посты. Используются примеры для демонстрации."
     
-    # --- СТРАТЕГИЯ 3: Если оба метода не сработали, используем примеры постов ---
-    if not posts:
-        logger.warning(f"Не удалось получить посты ни через Telethon, ни через HTTP. Используем примеры.")
-        posts = get_sample_posts(username)
-        error_messages.append("Использованы примеры постов, так как не удалось получить реальные данные")
+    # Ограничиваем анализ первыми 20 постами
+    posts = posts[:20]
+    logger.info(f"Анализируем {len(posts)} постов")
     
-    # Проверяем, есть ли посты после всех попыток
-    if len(posts) == 0:
-        # Если совсем нет постов (что маловероятно, т.к. у нас есть заглушки), возвращаем ошибку
-        detail = "Не удалось получить посты для анализа: " + "; ".join(error_messages)
-        raise HTTPException(status_code=404, detail=detail)
-    
-    # --- АНАЛИЗ КОНТЕНТА ---
-    logger.info(f"Анализ {len(posts)} постов канала @{username}...")
+    # Анализ контента
+    themes = []
+    styles = []
+    sample_posts = []
     
     try:
-        themes, styles, post_samples = await analyze_content_with_deepseek(posts, OPENROUTER_API_KEY)
+        # Подготовка списка текстов для анализа
+        texts = [post.get("text", "") for post in posts if post.get("text")]
         
-        # Если не получили темы/стили из API, добавим примеры для демонстрации
-        if not themes:
-            logger.warning("Не получены темы от API анализа. Используем заглушки.")
-            themes = ["Информационные технологии", "Образование", "Саморазвитие", "Бизнес", "Маркетинг"]
+        # Анализ через deepseek
+        analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
         
-        if not styles:
-            logger.warning("Не получены стили от API анализа. Используем заглушки.")
-            styles = ["Новость/Анонс", "Список советов", "Инструкция"]
+        # Сохранение результата анализа в базу данных (если есть telegram_user_id)
+        if telegram_user_id:
+            try:
+                # Преобразуем analysis_result в объект SuggestedIdeaRequest
+                # и сохраняем в базу данных
+                idea_request = SuggestedIdeaRequest(
+                    channel_name=username,
+                    themes=analysis_result.get("themes", []),
+                    styles=analysis_result.get("styles", []),
+                    user_id=telegram_user_id
+                )
+                await save_suggested_idea(idea_request)
+                logger.info(f"Результаты анализа сохранены для пользователя {telegram_user_id}, канал @{username}")
+            except Exception as db_error:
+                logger.error(f"Ошибка при сохранении результатов анализа в БД: {db_error}")
         
-        logger.info(f"Анализ канала @{username} завершен успешно")
+        # Извлечение результатов анализа
+        themes = analysis_result.get("themes", [])
+        styles = analysis_result.get("styles", [])
+        
+        # Подготовка образцов постов для ответа
+        sample_texts = [post.get("text", "") for post in posts[:5] if post.get("text")]
+        sample_posts = sample_texts
+        
     except Exception as e:
-        logger.error(f"Ошибка при анализе контента: {str(e)}")
-        # Используем заглушки в случае ошибки
-        themes = ["Информационные технологии", "Образование", "Саморазвитие", "Бизнес", "Маркетинг"]
-        styles = ["Новость/Анонс", "Список советов", "Инструкция"]
-        post_samples = posts[:3] if len(posts) >= 3 else posts
+        logger.error(f"Ошибка при анализе контента: {e}")
+        # Если произошла ошибка при анализе, возвращаем ошибку 500
+        if not error_message:
+            error_message = f"Ошибка при анализе контента: {str(e)}"
     
-    # Временная заглушка для лучшего времени публикации
+    # Временная заглушка для определения лучшего времени публикации
     best_posting_time = "18:00 - 20:00 МСК"
     
-    # Формируем сообщение на основе способа получения постов
-    using_samples = len(error_messages) > 0 and "примеры" in error_messages[-1]
-    message = f"Анализ для канала @{username} завершен." + (" (использованы примеры постов)" if using_samples else "")
+    # Если не удалось найти ни одного поста, возвращаем 404
+    if not posts:
+        logger.error(f"Не удалось найти посты для канала @{username}")
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Не удалось найти текстовые посты в канале @{username} или доступ запрещен."
+        )
     
+    # Возвращаем результат анализа
     return AnalyzeResponse(
-        message=message,
-        themes=themes, 
+        themes=themes,
         styles=styles,
-        analyzed_posts_sample=post_samples if post_samples else posts[:min(3, len(posts))],
+        sample_posts=sample_posts,
         best_posting_time=best_posting_time,
-        analyzed_posts_count=len(posts) 
+        posts_count=len(posts),
+        error=error_message
     )
 
 @app.post("/generate-plan", response_model=List[SuggestedIdeaResponse])
@@ -1789,3 +1781,109 @@ def get_sample_posts(channel_name: str) -> List[str]:
     ]
     
     return sample_posts
+
+async def get_telegram_posts_via_http(username: str) -> List[str]:
+    """
+    Получает посты из публичного Telegram канала через HTTP запрос.
+    
+    Args:
+        username: Имя канала (без символа @)
+        
+    Returns:
+        Список текстовых сообщений из канала
+        
+    Raises:
+        HTTPException: Если канал недоступен или возникла ошибка при получении данных
+    """
+    url = f"https://t.me/s/{username}"
+    logger.info(f"Запрос к веб-версии Telegram: {url}")
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache"
+    }
+    
+    try:
+        logger.info(f"Отправка HTTP запроса к {url}")
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        # Проверяем HTTP статус
+        if response.status_code != 200:
+            logger.error(f"HTTP ошибка при запросе к {url}: {response.status_code}")
+            if response.status_code == 404:
+                return []  # Канал не найден
+            else:
+                logger.error(f"Содержимое ответа: {response.text[:500]}...")
+                return []
+        
+        # Проверяем, что страница содержит контент канала
+        if "tgme_page_title" not in response.text:
+            logger.warning(f"Возможно, это не страница канала: {url}")
+            return []
+        
+        # Проверяем наличие сообщений об ошибках на странице
+        if "Channel not found" in response.text or "Канал не найден" in response.text:
+            logger.warning(f"Канал не найден: @{username}")
+            return []
+            
+        if "This channel is private" in response.text or "Этот канал является приватным" in response.text:
+            logger.warning(f"Канал является приватным: @{username}")
+            return []
+        
+        logger.info(f"Успешно получен HTML-ответ, размер: {len(response.text)} байт")
+        
+        # Парсим HTML с помощью BeautifulSoup
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Находим все сообщения на странице
+        messages = []
+        
+        # Поиск блоков с сообщениями
+        message_containers = soup.find_all('div', class_='tgme_widget_message_text')
+        
+        if not message_containers:
+            logger.warning(f"Не найдены блоки сообщений (class='tgme_widget_message_text') для канала @{username}")
+            # Попробуем поискать другие классы для контейнеров сообщений
+            message_containers = soup.find_all('div', class_='tgme_widget_message_bubble')
+        
+        # Подсчитываем найденные контейнеры
+        logger.info(f"Найдено {len(message_containers)} контейнеров сообщений")
+        
+        # Извлекаем текст сообщений
+        for container in message_containers:
+            # Ищем текст внутри контейнера
+            text_element = container.find('div', class_='tgme_widget_message_text')
+            if text_element:
+                text = text_element.get_text(strip=True)
+            else:
+                # Если нет специального элемента, берем весь текст контейнера
+                text = container.get_text(strip=True)
+                
+            if text and len(text) > 10:
+                messages.append(text)
+        
+        logger.info(f"Извлечено {len(messages)} текстовых сообщений из HTML")
+        
+        if messages:
+            return messages
+        else:
+            logger.warning(f"В канале @{username} не найдены текстовые сообщения")
+            return []
+            
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"HTTP ошибка при получении канала @{username}: {str(e)}")
+        return []
+    
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Ошибка соединения при получении канала @{username}: {str(e)}")
+        return []
+    
+    except requests.exceptions.Timeout as e:
+        logger.error(f"Тайм-аут при получении канала @{username}: {str(e)}")
+        return []
+    
+    except Exception as e:
+        logger.error(f"Непредвиденная ошибка при получении канала @{username} через HTTP: {str(e)}")
+        return []
