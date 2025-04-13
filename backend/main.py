@@ -31,6 +31,7 @@ from fastapi.staticfiles import StaticFiles
 import time # Добавляем модуль time для работы с временем
 import requests
 from bs4 import BeautifulSoup
+import telethon
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -449,7 +450,7 @@ async def get_telegram_posts_via_telethon(username: str) -> Tuple[List[Dict[str,
             logger.info(f"Попытка получения сообщений из канала @{username}")
             messages = await client.get_messages(entity, limit=20)
             logger.info(f"Получено {len(messages)} сообщений из канала @{username}")
-        except errors.RPCError as e:
+        except telethon.errors.RPCError as e:  # Используем правильный импорт
             # Особая обработка ошибки BotMethodInvalidError
             if "BotMethodInvalidError" in str(e) or "BOT_METHOD_INVALID" in str(e):
                 logger.warning(f"Ошибка: бот не может получить историю сообщений. {e}")
@@ -484,13 +485,13 @@ async def get_telegram_posts_via_telethon(username: str) -> Tuple[List[Dict[str,
             logger.error(f"Ошибка при обработке сообщений из канала @{username}: {e}")
             return [], f"Ошибка обработки сообщений: {str(e)}"
             
-    except errors.SessionPasswordNeededError:
+    except telethon.errors.SessionPasswordNeededError:  # Используем правильный импорт
         logger.error("Требуется двухфакторная аутентификация")
         return [], "Требуется двухфакторная аутентификация"
-    except errors.PhoneNumberInvalidError:
+    except telethon.errors.PhoneNumberInvalidError:  # Используем правильный импорт
         logger.error("Указан неверный номер телефона в конфигурации")
         return [], "Неверный номер телефона"
-    except errors.FloodWaitError as e:
+    except telethon.errors.FloodWaitError as e:  # Используем правильный импорт
         wait_time = getattr(e, 'seconds', 0)
         logger.error(f"Flood wait error: необходимо подождать {wait_time} секунд")
         return [], f"Слишком много запросов, подождите {wait_time} секунд"
