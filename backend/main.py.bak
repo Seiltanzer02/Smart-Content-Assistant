@@ -317,37 +317,39 @@ async def save_suggested_idea(idea_data: Dict[str, Any]) -> str:
         return f"Ошибка: {str(e)}"
 
 # --- Функция для анализа контента с помощью DeepSeek ---
-async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[str, List[str]]:
+async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict:
     """Анализ контента с использованием модели DeepSeek через OpenRouter API."""
-    # Если нет текстов или API ключа, возвращаем пустой результат
+    # Проверка входных данных
     if not texts or not api_key:
         logger.error("Отсутствуют тексты или API ключ для анализа")
         return {"themes": [], "styles": []}
     
-    # Объединяем тексты для анализа
-    combined_text = "\n\n".join([f"Пост {i+1}: {text}" for i, text in enumerate(texts)])
-    logger.info(f"Подготовлено {len(texts)} текстов для анализа через DeepSeek")
-    
-    # Подготавливаем промпты
-    system_prompt = """Ты - аналитик контента для Telegram-каналов. 
-    Определи основные темы и форматы контента канала. 
-    Выдай в JSON формате с полями "themes" и "styles", где каждое содержит массив строк."""
-    
-    user_prompt = f"""Проанализируй следующие посты и определи основные темы и форматы:
-{combined_text}
-Выдели 5-7 основных тем и 5-7 форматов подачи. Только JSON формат."""
-    
-    # Делаем запрос к API
-    analysis_result = {"themes": [], "styles": []}
-    
+    # Подготовка текста для анализа
     try:
-        # Инициализируем клиент
+        combined_text = "\n\n".join([f"Пост {i+1}: {text}" for i, text in enumerate(texts)])
+        logger.info(f"Подготовлено {len(texts)} текстов для анализа через DeepSeek")
+    except Exception as e:
+        logger.error(f"Ошибка при подготовке текстов для анализа: {e}")
+        return {"themes": [], "styles": []}
+    
+    # Создание промптов
+    system_prompt = """Ты - аналитик контента, который специализируется на анализе Telegram-каналов. 
+    Твоя задача - определить основные темы и форматы контента канала на основе предоставленных постов. 
+    Отвечай только в JSON формате с полями "themes" и "styles", каждое из которых содержит массив строк."""
+    
+    user_prompt = f"""Проанализируй следующие посты из Telegram-канала и определи основные темы и форматы контента:
+
+{combined_text}
+
+Выдели 5-7 основных тем, которые затрагиваются в канале, и 5-7 форматов/стилей подачи контента. Ответ только в JSON формате."""
+    
+    # Запрос к API
+    try:
         client = AsyncOpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key
         )
         
-        # Запрашиваем ответ от API
         response = await client.chat.completions.create(
             model="deepseek/deepseek-chat",
             messages=[
@@ -363,65 +365,80 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
             }
         )
         
-        # Получаем текст ответа
         analysis_text = response.choices[0].message.content.strip()
         logger.info(f"Получен ответ от DeepSeek: {analysis_text[:100]}...")
-        
-        # Извлекаем JSON из ответа
+    except Exception as e:
+        logger.error(f"Ошибка при запросе к API: {e}")
+        return {"themes": [], "styles": []}
+    
+    # Обработка JSON ответа
+    try:
+        # Поиск JSON в тексте
         json_match = re.search(r'(\{.*\})', analysis_text, re.DOTALL)
         if json_match:
             analysis_text = json_match.group(1)
         
-        # Парсим JSON
+        # Парсинг JSON
         analysis_json = json.loads(analysis_text)
         
-        # Проверяем структуру JSON
+        # Проверка структуры
         if "themes" in analysis_json and "styles" in analysis_json:
-            analysis_result = analysis_json
+            return analysis_json
         else:
             logger.warning(f"Некорректная структура JSON: {analysis_json}")
-    
+            return {"themes": [], "styles": []}
+            
     except json.JSONDecodeError as e:
-        # Если не удалось распарсить JSON, используем регулярные выражения
         logger.error(f"Ошибка парсинга JSON: {e}, текст: {analysis_text}")
         
+        # Извлечение через регулярные выражения
         themes_match = re.findall(r'"themes":\s*\[(.*?)\]', analysis_text, re.DOTALL)
+        styles_match = re.findall(r'"styles":\s*\[(.*?)\]', analysis_text, re.DOTALL)
+        
+        extracted_themes = []
         if themes_match:
             theme_items = re.findall(r'"([^"]+)"', themes_match[0])
-            analysis_result["themes"] = theme_items
+            extracted_themes = theme_items
         
-        styles_match = re.findall(r'"styles":\s*\[(.*?)\]', analysis_text, re.DOTALL)
+        extracted_styles = []
         if styles_match:
             style_items = re.findall(r'"([^"]+)"', styles_match[0])
-            analysis_result["styles"] = style_items
-    
+            extracted_styles = style_items
+        
+        return {
+            "themes": extracted_themes,
+            "styles": extracted_styles
+        }
     except Exception as e:
-        # Обрабатываем любые другие ошибки
-        logger.error(f"Ошибка при анализе контента через DeepSeek: {e}")
-    
-    return analysis_result
+        logger.error(f"Непредвиденная ошибка при обработке ответа: {e}")
+        return {"themes": [], "styles": []}
 
 @app.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_channel(request: Request, req: AnalyzeRequest):
+async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeResponse:
     """Анализ канала Telegram на основе запроса."""
     # Получение telegram_user_id из заголовков
-    telegram_user_id = request.headers.get("X-Telegram-User-Id")
-    if telegram_user_id:
-        logger.info(f"Анализ для пользователя Telegram ID: {telegram_user_id}")
-    
-    # Обработка имени пользователя
+    telegram_user_id = None
+    try:
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if telegram_user_id:
+            logger.info(f"Запрос анализа от пользователя Telegram ID: {telegram_user_id}")
+        else:
+            logger.warning("Запрос анализа без идентификации пользователя Telegram")
+    except Exception as e:
+        logger.error(f"Ошибка при получении Telegram User ID из заголовков: {e}")
+
+    # Обработка имени пользователя/канала
     username = req.username.replace("@", "").strip()
-    logger.info(f"Получен запрос на анализ канала @{username}")
+    logger.info(f"Запрос анализа канала @{username}")
     
     posts = []
-    errors_list = []
     error_message = None
+    errors_list = []  # Список для накопления ошибок
     
-    # --- НАЧАЛО: ПОПЫТКА ПОЛУЧЕНИЯ ЧЕРЕЗ HTTP (ПЕРВЫЙ ПРИОРИТЕТ) ---
+    # --- НАЧАЛО: ПОПЫТКА ПОЛУЧЕНИЯ ЧЕРЕЗ HTTP ПАРСИНГ (ПЕРВЫЙ ПРИОРИТЕТ) ---
     try:
-        logger.info(f"Пытаемся получить посты канала @{username} через HTTP парсинг")
+        logger.info(f"Попытка получения постов через HTTP парсинг для канала @{username}")
         http_posts = await get_telegram_posts_via_http(username)
-        
         if http_posts and len(http_posts) > 0:
             posts = [{"text": post} for post in http_posts]
             logger.info(f"Успешно получено {len(posts)} постов через HTTP парсинг")
@@ -447,7 +464,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                 # Если Telethon успешно получил посты
                 posts = telethon_posts
                 logger.info(f"Успешно получено {len(posts)} постов через Telethon")
-        except Exception as e:
+    except Exception as e:
             logger.error(f"Непредвиденная ошибка при получении постов канала @{username} через Telethon: {e}")
             errors_list.append(f"Ошибка Telethon: {str(e)}")
     
@@ -483,12 +500,9 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         if isinstance(analysis_result, dict):
             themes = analysis_result.get("themes", [])
             styles = analysis_result.get("styles", [])
-        elif isinstance(analysis_result, tuple) and len(analysis_result) >= 2:
-            themes, styles = analysis_result[0], analysis_result[1]
         else:
-            logger.warning(f"Неожиданный формат результата анализа: {type(analysis_result)}")
-            themes = []
-            styles = []
+            # Если результат пришел в виде кортежа (например, из предыдущей версии функции)
+            themes, styles = analysis_result[0], analysis_result[1]
         
         # Сохранение результата анализа в базу данных (если есть telegram_user_id)
         if telegram_user_id:
