@@ -140,6 +140,16 @@ class AnalysisResult(BaseModel):
     best_posting_time: str # Пока строка
     analyzed_posts_count: int
     
+# Добавляем пропущенное определение класса AnalyzeResponse
+class AnalyzeResponse(BaseModel):
+    themes: List[str]
+    styles: List[str]
+    analyzed_posts_sample: List[str] 
+    best_posting_time: str
+    analyzed_posts_count: int
+    message: Optional[str] = None
+    error: Optional[str] = None
+    
 # --- ДОБАВЛЯЕМ ОПРЕДЕЛЕНИЕ МОДЕЛИ PlanGenerationRequest ---
 class PlanGenerationRequest(BaseModel):
     themes: List[str]
