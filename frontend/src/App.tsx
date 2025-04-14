@@ -3,7 +3,8 @@ import axios from 'axios';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import './App.css';
-import WebApp from '@twa-dev/sdk'; // <-- РАСКОММЕНТИРОВАЛИ
+import WebApp from '@twa-dev/sdk';
+import { TelegramAuth } from './components/TelegramAuth';
 
 // --- ТИПЫ --- 
 
@@ -117,7 +118,7 @@ function App() {
   const [error, setError] = useState<string | null>(null); 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   // НОВОЕ СОСТОЯНИЕ для ID пользователя Telegram
-  const [telegramUserId, setTelegramUserId] = useState<number | null>(null);
+  const [telegramUserId, setTelegramUserId] = useState<string | null>(null);
 
   // Анализ
   // Читаем из localStorage при инициализации
@@ -179,61 +180,53 @@ function App() {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [selectedPreviewIndex, setSelectedPreviewIndex] = useState<number>(0); // Индекс выбранного превью
 
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
+
   // --- ЭФФЕКТЫ --- 
 
-  // Инициализация Telegram WebApp и получение User ID
   useEffect(() => {
-    try {
-      console.log("Инициализация Telegram WebApp...");
-      
-      // Проверяем доступность Telegram WebApp
-      if (typeof WebApp !== 'undefined') {
-        // Сообщаем Telegram что приложение готово
+    const initApp = async () => {
+      try {
+        // Инициализация Telegram WebApp
         WebApp.ready();
         
-        // Получаем данные пользователя
-        const initData = WebApp.initData || '';
-        const user = WebApp.initDataUnsafe?.user;
-        
-        console.log("Telegram initData доступны:", !!initData);
-        console.log("Telegram user:", user);
-        
+        // Получение user.id из WebApp
+        const user = WebApp.initDataUnsafe.user;
         if (user?.id) {
-          console.log("Успешная авторизация в Telegram, user ID:", user.id);
-          setTelegramUserId(user.id);
+          setTelegramUserId(user.id.toString());
+          setIsAuthenticated(true);
           
-          // Устанавливаем ID в заголовки запросов
+          // Установка заголовка для всех запросов
           axios.defaults.headers.common['X-Telegram-User-Id'] = user.id.toString();
-          setError(null); // Сбрасываем ошибку, если была
-        } else {
-          console.warn("Не удалось получить Telegram User ID из WebApp.initDataUnsafe.user");
-          setError("Не удалось идентифицировать пользователя Telegram. Проверьте, открыто ли приложение через Telegram.");
-          
-          // Временное решение для тестирования: фиксированный ID
-          if (window.location.hostname === 'localhost' || window.location.hostname.includes('127.0.0.1')) {
-            console.log("Тестовый режим: используем тестовый ID пользователя");
-            const testUserId = 12345678;
-            setTelegramUserId(testUserId);
-            axios.defaults.headers.common['X-Telegram-User-Id'] = testUserId.toString();
-          }
         }
-      } else {
-        console.error("WebApp объект не найден. Приложение запущено вне Telegram?");
-        setError("Приложение должно быть открыто через Telegram. Обратитесь к @SmartContentHelperBot.");
-        
-        // Только для локальной разработки
-        if (window.location.hostname === 'localhost' || window.location.hostname.includes('127.0.0.1')) {
-          console.log("Локальная разработка: используем тестовый ID пользователя");
-          const testUserId = 12345678;
-          setTelegramUserId(testUserId);
-          axios.defaults.headers.common['X-Telegram-User-Id'] = testUserId.toString();
-        }
+      } catch (error) {
+        console.error('Ошибка при инициализации Telegram WebApp:', error);
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      console.error("Ошибка при инициализации Telegram WebApp:", error);
-      setError("Ошибка при инициализации Telegram WebApp. Попробуйте перезапустить приложение.");
-    }
+    };
+
+    initApp();
   }, []);
+
+  const handleAuthSuccess = (userId: string) => {
+    setTelegramUserId(userId);
+    setIsAuthenticated(true);
+    axios.defaults.headers.common['X-Telegram-User-Id'] = userId;
+  };
+
+  if (loading) {
+    return (
+      <div className="loading-container">
+        <div className="loading-spinner" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
+  }
 
   // Сохранение currentView в localStorage при изменении
   useEffect(() => {
