@@ -50,12 +50,12 @@ logger = logging.getLogger(__name__)
 # Убираем отладочные print для load_dotenv
 dotenv_loaded = load_dotenv(override=True)
 
+# Переменные из Render имеют приоритет над .env файлом
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID")
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
-# СНОВА используем os.getenv для Supabase, проблема была в .env файле
 SUPABASE_URL = os.getenv("SUPABASE_URL") 
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY") 
 
@@ -64,26 +64,47 @@ SESSION_NAME = "telegram_session" # <-- Определяем имя файла �
 IMAGE_SEARCH_COUNT = 15 # Сколько изображений запрашивать у Unsplash
 IMAGE_RESULTS_COUNT = 5 # Сколько изображений показывать пользователю
 
-# --- Теперь проверки ключей --- 
+# --- Валидация переменных окружения без аварийного завершения --- 
+missing_keys = []
 if not OPENROUTER_API_KEY:
-    logger.error("Ключ OPENROUTER_API_KEY не найден в .env файле!")
-    exit(1)
-if not TELEGRAM_API_ID or not TELEGRAM_API_HASH:
-    logger.error("TELEGRAM_API_ID или TELEGRAM_API_HASH не найдены в .env файле!")
-    exit(1)
-if not UNSPLASH_ACCESS_KEY:
-    logger.warning("Ключ UNSPLASH_ACCESS_KEY не найден в .env файле! Поиск Unsplash будет недоступен.")
-if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-    logger.error("SUPABASE_URL или SUPABASE_ANON_KEY не найдены в .env файле!")
-    exit(1)
+    logger.warning("Ключ OPENROUTER_API_KEY не найден! Функции анализа контента будут недоступны.")
+    missing_keys.append("OPENROUTER_API_KEY")
 
-# --- Инициализация Supabase клиента --- 
-try:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-    logger.info("Клиент Supabase успешно инициализирован.")
-except Exception as e:
-    logger.error(f"Ошибка инициализации клиента Supabase: {e}")
-    supabase = None # Устанавливаем в None, чтобы потом проверять
+if not TELEGRAM_API_ID or not TELEGRAM_API_HASH:
+    logger.warning("TELEGRAM_API_ID или TELEGRAM_API_HASH не найдены! Функции работы с Telegram API будут недоступны.")
+    if not TELEGRAM_API_ID:
+        missing_keys.append("TELEGRAM_API_ID")
+    if not TELEGRAM_API_HASH:
+        missing_keys.append("TELEGRAM_API_HASH")
+
+if not UNSPLASH_ACCESS_KEY:
+    logger.warning("Ключ UNSPLASH_ACCESS_KEY не найден! Поиск изображений через Unsplash будет недоступен.")
+    missing_keys.append("UNSPLASH_ACCESS_KEY")
+
+if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+    logger.warning("SUPABASE_URL или SUPABASE_ANON_KEY не найдены! Функции сохранения данных будут недоступны.")
+    if not SUPABASE_URL:
+        missing_keys.append("SUPABASE_URL")
+    if not SUPABASE_ANON_KEY:
+        missing_keys.append("SUPABASE_ANON_KEY")
+
+# Вывод информации о состоянии переменных окружения
+if missing_keys:
+    logger.warning(f"Отсутствуют следующие переменные окружения: {', '.join(missing_keys)}")
+    logger.warning("Некоторые функции приложения могут быть недоступны.")
+else:
+    logger.info("Все необходимые переменные окружения найдены.")
+
+# --- Инициализация Supabase клиента, только если есть ключи --- 
+supabase = None
+if SUPABASE_URL and SUPABASE_ANON_KEY:
+    try:
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        logger.info("Клиент Supabase успешно инициализирован.")
+    except Exception as e:
+        logger.error(f"Ошибка инициализации клиента Supabase: {e}")
+else:
+    logger.warning("Клиент Supabase не инициализирован из-за отсутствия ключей.")
 # ---------------------------------------
 
 # --- Инициализация FastAPI --- 
@@ -319,6 +340,15 @@ async def save_suggested_idea(idea_data: Dict[str, Any]) -> str:
 # --- Функция для анализа контента с помощью DeepSeek ---
 async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[str, List[str]]:
     """Анализ контента с использованием модели DeepSeek через OpenRouter API."""
+    
+    # Проверяем наличие API ключа
+    if not api_key:
+        logger.warning("Анализ контента с DeepSeek невозможен: отсутствует OPENROUTER_API_KEY")
+        return {
+            "themes": ["Тема 1", "Тема 2", "Тема 3", "Тема 4", "Тема 5"],
+            "styles": ["Формат 1", "Формат 2", "Формат 3", "Формат 4", "Формат 5"]
+        }
+    
     # Если нет текстов или API ключа, возвращаем пустой результат
     if not texts or not api_key:
         logger.error("Отсутствуют тексты или API ключ для анализа")
@@ -630,6 +660,25 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
             return PlanGenerationResponse(
                 message="Необходимо указать темы и стили для генерации плана",
                 plan=[]
+            )
+            
+        # Проверяем наличие API ключа
+        if not OPENROUTER_API_KEY:
+            logger.warning("Генерация плана невозможна: отсутствует OPENROUTER_API_KEY")
+            # Генерируем простой план без использования API
+            plan_items = []
+            for day in range(1, period_days + 1):
+                random_theme = random.choice(themes)
+                random_style = random.choice(styles)
+                plan_items.append(PlanItem(
+                    day=day,
+                    topic_idea=f"Пост о {random_theme}",
+                    format_style=random_style
+                ))
+            logger.info(f"Создан базовый план из {len(plan_items)} идей (без использования API)")
+            return PlanGenerationResponse(
+                plan=plan_items,
+                message="План сгенерирован с базовыми идеями (API недоступен)"
             )
             
         # Формируем системный промпт
@@ -981,6 +1030,169 @@ async def serve_spa(rest_of_path: str):
         return FileResponse(os.path.join(static_folder, "index.html"))
     else:
         return {"message": "API работает, но статические файлы не настроены. Обратитесь к API напрямую."}
+
+# --- Функция для поиска изображений в Unsplash ---
+async def search_unsplash_images(query: str, count: int = 5) -> List[FoundImage]:
+    """Поиск изображений в Unsplash API."""
+    # Проверяем наличие ключа
+    if not UNSPLASH_ACCESS_KEY:
+        logger.warning(f"Поиск изображений в Unsplash невозможен: отсутствует UNSPLASH_ACCESS_KEY")
+        # Возвращаем заглушки с изображениями-заполнителями
+        placeholder_images = []
+        for i in range(min(count, 5)):  # Ограничиваем до 5 заглушек
+            placeholder_images.append(FoundImage(
+                id=f"placeholder_{i}",
+                source="unsplash",
+                preview_url=f"https://via.placeholder.com/150x100?text=Image+{i+1}",
+                regular_url=f"https://via.placeholder.com/800x600?text=Unsplash+API+key+required",
+                description=f"Placeholder image {i+1}",
+                author_name="Demo",
+                author_url="https://unsplash.com"
+            ))
+        return placeholder_images
+    
+    try:
+        # Инициализация клиента для работы с Unsplash API
+        auth = UnsplashAuth(client_id=UNSPLASH_ACCESS_KEY)
+        api = UnsplashApi(auth)
+        
+        # Поиск изображений
+        logger.info(f"Поиск изображений в Unsplash по запросу: {query}")
+        search_results = api.search.photos(query, per_page=count)
+        
+        # Формирование результата
+        images = []
+        for photo in search_results['results']:
+            images.append(FoundImage(
+                id=photo['id'],
+                source="unsplash",
+                preview_url=photo['urls']['small'],
+                regular_url=photo['urls']['regular'],
+                description=photo.get('description') or photo.get('alt_description') or query,
+                author_name=photo['user']['name'],
+                author_url=photo['user']['links']['html']
+            ))
+        
+        logger.info(f"Найдено {len(images)} изображений в Unsplash по запросу '{query}'")
+        return images
+    except Exception as e:
+        logger.error(f"Ошибка при поиске изображений в Unsplash: {e}")
+        return []
+
+# --- Endpoint для генерации деталей поста ---
+@app.post("/generate-post-details", response_model=PostDetailsResponse)
+async def generate_post_details(request: Request, req: GeneratePostDetailsRequest):
+    """Генерация деталей поста: текст и изображения."""
+    try:
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            logger.warning("Запрос генерации деталей поста без идентификации пользователя Telegram")
+            return PostDetailsResponse(
+                generated_text="Для генерации деталей поста необходимо авторизоваться через Telegram",
+                found_images=[],
+                message="Ошибка авторизации"
+            )
+            
+        topic_idea = req.topic_idea
+        format_style = req.format_style
+        keywords = req.keywords or []
+        post_samples = req.post_samples or []
+        
+        # Извлекаем имя канала из параметров, если есть
+        channel_name = request.query_params.get("channel_name", "Unknown")
+        
+        # Если нет ключа API для OpenRouter, используем заглушку
+        if not OPENROUTER_API_KEY:
+            logger.warning("Генерация текста поста невозможна: отсутствует OPENROUTER_API_KEY")
+            
+            # Генерируем заглушечный текст
+            generated_text = f"""Пример текста для поста на тему "{topic_idea}" в стиле "{format_style}".
+            
+Это заглушка, так как отсутствует API ключ для генерации текста. 
+В реальном приложении здесь будет сгенерированный ИИ контент на основе темы и стиля.
+
+#контент #демо #пример"""
+            
+            # Поиск изображений по ключевым словам или теме
+            search_query = " ".join(keywords) if keywords else topic_idea
+            images = await search_unsplash_images(search_query, IMAGE_SEARCH_COUNT)
+            
+            return PostDetailsResponse(
+                generated_text=generated_text,
+                found_images=images[:IMAGE_RESULTS_COUNT],  # Ограничиваем количество
+                message="Текст и изображения сгенерированы в демо-режиме (API ключи недоступны)"
+            )
+            
+        # Формируем системный промпт
+        system_prompt = """Ты - опытный копирайтер, специализирующийся на создании контента для социальных сетей.
+Твоя задача - написать текст поста для Telegram-канала на основе предоставленной идеи, стиля и примеров постов.
+
+Пост должен быть:
+1. Содержательным и интересным
+2. Соответствовать указанной теме/идее
+3. Выдержан в указанном стиле/формате
+4. Включать хештеги, если уместно
+5. Иметь длину, подходящую для Telegram (рекомендуется 500-1500 символов)
+
+Анализируй примеры постов, чтобы понять тональность и стиль канала. Не копируй примеры напрямую, а используй их как ориентир."""
+
+        # Формируем запрос к пользователю
+        user_prompt = f"""Напиши текст поста для Telegram-канала "@{channel_name}" на тему/идею:
+"{topic_idea}"
+
+Стиль/формат поста:
+"{format_style}"
+
+Примеры постов из этого канала для анализа стиля:
+{' '.join([f'Пример {i+1}: "{sample[:100]}..."' for i, sample in enumerate(post_samples[:3])])}"
+
+Ключевые слова и фразы для включения в текст (опционально):
+{', '.join(keywords) if keywords else 'Нет конкретных ключевых слов, ориентируйся на тему'}"""
+
+        # Настройка клиента OpenAI для использования OpenRouter
+        client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY
+        )
+        
+        # Запрос к API для генерации текста
+        logger.info(f"Отправка запроса на генерацию текста поста на тему '{topic_idea}'")
+        response = await client.chat.completions.create(
+            model="deepseek/deepseek-chat",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7,  # Средняя креативность
+            max_tokens=1500,
+            timeout=60,
+            extra_headers={
+                "HTTP-Referer": "https://content-manager.onrender.com",
+                "X-Title": "Smart Content Assistant"
+            }
+        )
+        
+        # Извлечение сгенерированного текста
+        generated_text = response.choices[0].message.content.strip()
+        logger.info(f"Получен текст поста длиной {len(generated_text)} символов")
+        
+        # Поиск изображений по ключевым словам или теме
+        search_query = " ".join(keywords[:2]) if keywords else topic_idea
+        images = await search_unsplash_images(search_query, IMAGE_SEARCH_COUNT)
+        
+        return PostDetailsResponse(
+            generated_text=generated_text,
+            found_images=images[:IMAGE_RESULTS_COUNT],  # Ограничиваем количество
+            message="Текст и изображения успешно сгенерированы"
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при генерации деталей поста: {e}")
+        return PostDetailsResponse(
+            generated_text=f"Произошла ошибка при генерации текста: {str(e)}",
+            found_images=[],  # Пустой список при ошибке
+            message=f"Ошибка: {str(e)}"
+        )
 
 # Монтирование статических файлов для обслуживания из /static
 if SHOULD_MOUNT_STATIC and not SPA_ROUTES_CONFIGURED:
