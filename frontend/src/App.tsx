@@ -100,6 +100,35 @@ const LOCAL_STORAGE_KEYS = {
 // Базовый URL API
 const API_BASE_URL = ''; // Пустая строка - запросы будут относительными (к тому же домену)
 
+// Добавляем перехватчик для логирования запросов
+axios.interceptors.request.use(
+  config => {
+    console.log(`API запрос: ${config.method?.toUpperCase()} ${config.url}`, {
+      headers: config.headers,
+      data: config.data
+    });
+    return config;
+  },
+  error => {
+    console.error('Ошибка при отправке запроса:', error);
+    return Promise.reject(error);
+  }
+);
+
+// Добавляем перехватчик для логирования ответов
+axios.interceptors.response.use(
+  response => {
+    console.log(`API ответ: ${response.status} ${response.config.url}`, {
+      data: response.data
+    });
+    return response;
+  },
+  error => {
+    console.error('Ошибка при получении ответа:', error);
+    return Promise.reject(error);
+  }
+);
+
 // Тип ответа /upload-image
 interface UploadResponse {
     image_url: string;
@@ -188,20 +217,20 @@ function App() {
   useEffect(() => {
     const initApp = async () => {
       try {
-        // Инициализация Telegram WebApp
-        WebApp.ready();
+        console.log('Инициализация приложения...');
         
-        // Получение user.id из WebApp
-        const user = WebApp.initDataUnsafe.user;
-        if (user?.id) {
-          setTelegramUserId(user.id.toString());
-          setIsAuthenticated(true);
-          
-          // Установка заголовка для всех запросов
-          axios.defaults.headers.common['X-Telegram-User-Id'] = user.id.toString();
+        // Проверяем, есть ли ID пользователя в URL (для тестирования)
+        const urlParams = new URLSearchParams(window.location.search);
+        const userId = urlParams.get('user_id');
+        
+        if (userId) {
+          console.log('ID пользователя найден в URL параметрах:', userId);
+          handleAuthSuccess(userId);
+        } else {
+          console.log('ID пользователя не найден в URL параметрах, ожидаем инициализацию через TelegramAuth');
         }
       } catch (error) {
-        console.error('Ошибка при инициализации Telegram WebApp:', error);
+        console.error('Ошибка при инициализации приложения:', error);
       } finally {
         setLoading(false);
       }
@@ -211,22 +240,33 @@ function App() {
   }, []);
 
   const handleAuthSuccess = (userId: string) => {
+    console.log('Авторизация успешна, ID пользователя:', userId);
     setTelegramUserId(userId);
     setIsAuthenticated(true);
     axios.defaults.headers.common['X-Telegram-User-Id'] = userId;
+    console.log('Заголовок X-Telegram-User-Id установлен:', axios.defaults.headers.common['X-Telegram-User-Id']);
   };
+
+  // Добавляем эффект для отслеживания изменений состояния авторизации
+  useEffect(() => {
+    console.log('Состояние авторизации изменилось:', { isAuthenticated, telegramUserId });
+  }, [isAuthenticated, telegramUserId]);
 
   if (loading) {
     return (
       <div className="loading-container">
         <div className="loading-spinner" />
+        <p>Загрузка приложения...</p>
       </div>
     );
   }
 
   if (!isAuthenticated) {
+    console.log('Пользователь не авторизован, отображаем компонент TelegramAuth');
     return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
   }
+
+  console.log('Пользователь авторизован, отображаем основной интерфейс');
 
   // Сохранение currentView в localStorage при изменении
   useEffect(() => {

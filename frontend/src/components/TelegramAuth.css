@@ -7,51 +7,44 @@
 }
 
 .auth-card {
-  background: white;
-  padding: 2rem;
-  border-radius: 12px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 24px;
   width: 100%;
   max-width: 400px;
   text-align: center;
 }
 
 .auth-title {
+  margin-top: 0;
+  margin-bottom: 24px;
   color: #333;
-  margin-bottom: 1.5rem;
-  font-size: 1.5rem;
-  font-weight: 600;
+  font-size: 24px;
 }
 
 .auth-input {
   width: 100%;
-  padding: 0.75rem;
-  margin-bottom: 1rem;
+  padding: 12px;
+  margin-bottom: 16px;
   border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 1rem;
-  transition: border-color 0.2s;
-}
-
-.auth-input:focus {
-  outline: none;
-  border-color: #0088cc;
+  border-radius: 4px;
+  font-size: 16px;
 }
 
 .auth-button {
   width: 100%;
-  padding: 0.75rem;
+  padding: 12px;
   background-color: #0088cc;
   color: white;
   border: none;
-  border-radius: 6px;
-  font-size: 1rem;
-  font-weight: 500;
+  border-radius: 4px;
+  font-size: 16px;
   cursor: pointer;
   transition: background-color 0.2s;
 }
 
-.auth-button:hover:not(:disabled) {
+.auth-button:hover {
   background-color: #006699;
 }
 
@@ -61,25 +54,51 @@
 }
 
 .auth-error {
-  color: #dc3545;
-  margin-top: 1rem;
-  padding: 0.5rem;
-  background-color: #fff5f5;
-  border-radius: 4px;
-  font-size: 0.875rem;
+  color: #e53935;
+  margin-top: 16px;
+  font-size: 14px;
 }
 
 .auth-loading {
+  display: inline-block;
   width: 24px;
   height: 24px;
-  margin: 1rem auto;
-  border: 3px solid #f3f3f3;
-  border-top: 3px solid #0088cc;
+  border: 3px solid rgba(0, 136, 204, 0.3);
   border-radius: 50%;
-  animation: spin 1s linear infinite;
+  border-top-color: #0088cc;
+  animation: spin 1s ease-in-out infinite;
+  margin: 16px auto;
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Стили для отладочной информации */
+.debug-info {
+  margin-top: 24px;
+  text-align: left;
+  background-color: #f8f9fa;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 16px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.debug-info h3 {
+  margin-top: 0;
+  font-size: 16px;
+  color: #333;
+}
+
+.debug-info pre {
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  color: #555;
 } 
