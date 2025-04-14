@@ -292,12 +292,13 @@ async def save_suggested_idea(idea_data: Dict[str, Any]) -> str:
             logger.error("Клиент Supabase не инициализирован")
             return "Ошибка: Клиент Supabase не инициализирован"
         
-        # Преобразование списков в JSON строки для хранения в БД
+        # Проверяем структуру таблицы, возможно столбец называется иначе или имеет другой формат
         idea_to_save = {
             "channel_name": idea_data.get("channel_name", ""),
-            "themes": json.dumps(idea_data.get("themes", [])),
-            "styles": json.dumps(idea_data.get("styles", [])),
-            "user_id": idea_data.get("user_id")
+            "user_id": idea_data.get("user_id"),
+            "themes_json": json.dumps(idea_data.get("themes", [])),
+            "styles_json": json.dumps(idea_data.get("styles", []))
+            # Используем themes_json и styles_json вместо themes и styles
         }
         
         # Сохранение в Supabase
@@ -473,7 +474,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeRespo
                 # Если Telethon успешно получил посты
                 posts = telethon_posts
                 logger.info(f"Успешно получено {len(posts)} постов через Telethon")
-            
+                
         except Exception as e:
             logger.error(f"Непредвиденная ошибка при получении постов канала @{username} через Telethon: {e}")
             errors_list.append(f"Ошибка Telethon: {str(e)}")
@@ -549,4 +550,325 @@ async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeRespo
         analyzed_posts_sample=sample_posts,
         best_posting_time=best_posting_time,
         analyzed_posts_count=len(posts)
-    ) 
+    )
+
+# --- Модель для ответа от /ideas ---
+class SuggestedIdeasResponse(BaseModel):
+    ideas: List[Dict[str, Any]] = []
+    message: Optional[str] = None
+
+# --- Маршрут для получения ранее сохраненных результатов анализа ---
+@app.get("/ideas", response_model=SuggestedIdeasResponse)
+async def get_saved_ideas(request: Request, channel_name: Optional[str] = None):
+    """Получение ранее сохраненных результатов анализа."""
+    try:
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            logger.warning("Запрос идей без идентификации пользователя Telegram")
+            return SuggestedIdeasResponse(
+                message="Для доступа к идеям необходимо авторизоваться через Telegram",
+                ideas=[]
+            )
+        
+        if not supabase:
+            logger.error("Клиент Supabase не инициализирован")
+            return SuggestedIdeasResponse(
+                message="Ошибка: не удалось подключиться к базе данных",
+                ideas=[]
+            )
+        
+        # Строим запрос к базе данных
+        query = supabase.table("suggested_ideas").select("*").eq("user_id", telegram_user_id)
+        
+        # Если указано имя канала, фильтруем по нему
+        if channel_name:
+            query = query.eq("channel_name", channel_name)
+            
+        # Выполняем запрос
+        result = query.order("created_at", desc=True).execute()
+        
+        # Обрабатываем результат
+        if not hasattr(result, 'data'):
+            logger.error(f"Ошибка при получении идей из БД: {result}")
+            return SuggestedIdeasResponse(
+                message="Не удалось получить сохраненные идеи",
+                ideas=[]
+            )
+            
+        # Преобразуем данные
+        ideas = []
+        for item in result.data:
+            try:
+                # Пробуем распарсить JSON-строки
+                themes = json.loads(item.get("themes_json", "[]")) if "themes_json" in item else []
+                styles = json.loads(item.get("styles_json", "[]")) if "styles_json" in item else []
+                
+                # Создаем словарь с данными
+                idea = {
+                    "id": item.get("id"),
+                    "channel_name": item.get("channel_name"),
+                    "themes": themes,
+                    "styles": styles,
+                    "created_at": item.get("created_at")
+                }
+                ideas.append(idea)
+            except Exception as e:
+                logger.error(f"Ошибка при обработке идеи {item.get('id')}: {e}")
+                
+        logger.info(f"Получено {len(ideas)} идей для пользователя {telegram_user_id}")
+        return SuggestedIdeasResponse(ideas=ideas)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении идей: {e}")
+        return SuggestedIdeasResponse(
+            message=f"Ошибка при получении идей: {str(e)}",
+            ideas=[]
+        )
+
+# --- Модель ответа для генерации плана ---
+class PlanGenerationResponse(BaseModel):
+    plan: List[PlanItem] = []
+    message: Optional[str] = None
+
+# --- Маршрут для генерации плана публикаций ---
+@app.post("/generate-plan", response_model=PlanGenerationResponse)
+async def generate_content_plan(request: Request, req: PlanGenerationRequest):
+    """Генерация и сохранение плана контента на основе тем и стилей."""
+    try:
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            logger.warning("Запрос генерации плана без идентификации пользователя Telegram")
+            return PlanGenerationResponse(
+                message="Для генерации плана необходимо авторизоваться через Telegram",
+                plan=[]
+            )
+            
+        themes = req.themes
+        styles = req.styles
+        period_days = req.period_days
+        channel_name = req.channel_name
+        
+        if not themes or not styles:
+            logger.warning(f"Запрос с пустыми темами или стилями: themes={themes}, styles={styles}")
+            return PlanGenerationResponse(
+                message="Необходимо указать темы и стили для генерации плана",
+                plan=[]
+            )
+            
+        # Формируем системный промпт
+        system_prompt = """Ты - опытный контент-маркетолог и эксперт по планированию публикаций. 
+Твоя задача - сгенерировать план публикаций для Telegram-канала на основе указанных тем и стилей/форматов.
+
+Для каждого дня периода предложи идею поста, которая сочетает одну из указанных тем с одним из указанных стилей/форматов.
+План должен быть разнообразным - старайся использовать разные комбинации тем и стилей.
+
+Каждая идея должна включать:
+1. День периода (число от 1 до заданного количества дней)
+2. Конкретную идею поста по выбранной теме (в формате понятного заголовка/концепции, не абстрактно)
+3. Формат/стиль поста (из списка указанных стилей)
+
+Ответ должен быть в формате: план публикаций из нескольких идей постов."""
+
+        # Формируем запрос к пользователю
+        user_prompt = f"""Сгенерируй план контента для Telegram-канала "@{channel_name}" на {period_days} дней.
+
+Темы канала:
+{", ".join(themes)}
+
+Стили/форматы постов:
+{", ".join(styles)}
+
+Создай план из {period_days} публикаций (по одной на каждый день), используя указанные темы и стили. 
+Для каждого поста укажи день, конкретную идею (не общую тему, а конкретный заголовок или концепцию поста) и стиль/формат."""
+
+        # Настройка клиента OpenAI для использования OpenRouter
+        client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY
+        )
+        
+        # Запрос к API
+        logger.info(f"Отправка запроса на генерацию плана контента для канала @{channel_name}")
+        response = await client.chat.completions.create(
+            model="deepseek/deepseek-chat",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.8,  # Более высокая температура для разнообразия
+            max_tokens=2000,
+            timeout=120,
+            extra_headers={
+                "HTTP-Referer": "https://content-manager.onrender.com",
+                "X-Title": "Smart Content Assistant"
+            }
+        )
+        
+        # Извлечение ответа
+        plan_text = response.choices[0].message.content.strip()
+        logger.info(f"Получен ответ с планом публикаций: {plan_text[:100]}...")
+        
+        # Анализ ответа для извлечения плана
+        plan_items = []
+        
+        # Пробуем извлечь идеи из текста
+        # Паттерн: число (день), затем тема и стиль
+        lines = plan_text.split('\n')
+        current_day = None
+        current_topic = ""
+        current_style = ""
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Пробуем найти упоминание дня
+            day_match = re.search(r'(?:день|день)\s*(\d+)[:\.]', line.lower())
+            if day_match:
+                # Если у нас есть текущий день, сохраняем предыдущую идею
+                if current_day is not None and current_topic:
+                    plan_items.append(PlanItem(
+                        day=current_day,
+                        topic_idea=current_topic.strip(),
+                        format_style=current_style.strip() if current_style else "Без указания стиля"
+                    ))
+                
+                # Начинаем новую идею
+                current_day = int(day_match.group(1))
+                # Извлекаем тему из оставшейся части строки
+                rest_of_line = line[day_match.end():].strip(' -:.')
+                if rest_of_line:
+                    current_topic = rest_of_line
+                    current_style = ""
+                else:
+                    current_topic = ""
+                    current_style = ""
+            elif "стиль:" in line.lower() or "формат:" in line.lower():
+                # Извлекаем стиль
+                style_parts = re.split(r'(?:стиль|формат)[:\s]+', line, flags=re.IGNORECASE, maxsplit=1)
+                if len(style_parts) > 1:
+                    current_style = style_parts[1].strip()
+            elif current_day is not None:
+                # Если нет явного указания на день или стиль, добавляем текст к текущей теме
+                if not current_topic:
+                    current_topic = line
+                elif not current_style and ("стиль" in line.lower() or "формат" in line.lower()):
+                    current_style = line
+                else:
+                    current_topic += " " + line
+        
+        # Добавляем последнюю идею, если она есть
+        if current_day is not None and current_topic:
+            plan_items.append(PlanItem(
+                day=current_day,
+                topic_idea=current_topic.strip(),
+                format_style=current_style.strip() if current_style else "Без указания стиля"
+            ))
+            
+        # Если не удалось извлечь идеи через регулярные выражения, используем более простой подход
+        if not plan_items:
+            day_counter = 1
+            for line in lines:
+                line = line.strip()
+                if not line or len(line) < 10:  # Игнорируем короткие строки
+                    continue
+                
+                # Проверяем, не заголовок ли это
+                if re.match(r'^(план|идеи|публикации|контент|posts|список).*$', line.lower()):
+                    continue
+                    
+                # Пытаемся найти стиль в строке
+                style_match = re.search(r'(?:стиль|формат)[:\s]+(.*?)$', line, re.IGNORECASE)
+                if style_match:
+                    format_style = style_match.group(1).strip()
+                    topic_idea = line[:style_match.start()].strip()
+                else:
+                    # Если явно не указан стиль, берем случайный из списка
+                    format_style = random.choice(styles)
+                    topic_idea = line
+                
+                plan_items.append(PlanItem(
+                    day=day_counter,
+                    topic_idea=topic_idea,
+                    format_style=format_style
+                ))
+                day_counter += 1
+                
+                # Ограничиваем количество дней
+                if day_counter > period_days:
+                    break
+        
+        # Если и сейчас нет идей, генерируем вручную
+        if not plan_items:
+            for day in range(1, period_days + 1):
+                random_theme = random.choice(themes)
+                random_style = random.choice(styles)
+                plan_items.append(PlanItem(
+                    day=day,
+                    topic_idea=f"Пост о {random_theme}",
+                    format_style=random_style
+                ))
+                
+        # Сортируем по дням
+        plan_items.sort(key=lambda x: x.day)
+        
+        # Обрезаем до запрошенного количества дней
+        plan_items = plan_items[:period_days]
+        
+        # Если план получился короче запрошенного периода, дополняем
+        if len(plan_items) < period_days:
+            existing_days = set(item.day for item in plan_items)
+            for day in range(1, period_days + 1):
+                if day not in existing_days:
+                    random_theme = random.choice(themes)
+                    random_style = random.choice(styles)
+                    plan_items.append(PlanItem(
+                        day=day,
+                        topic_idea=f"Пост о {random_theme}",
+                        format_style=random_style
+                    ))
+        
+        # Сортируем по дням еще раз
+        plan_items.sort(key=lambda x: x.day)
+        
+        logger.info(f"Сгенерирован план из {len(plan_items)} идей для канала @{channel_name}")
+        return PlanGenerationResponse(plan=plan_items)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при генерации плана: {e}")
+        return PlanGenerationResponse(
+            message=f"Ошибка при генерации плана: {str(e)}",
+            plan=[]
+        )
+
+# --- Настройка обработки корневого маршрута для обслуживания статических файлов ---
+@app.get("/")
+async def root():
+    """Обслуживание корневого маршрута - возвращает index.html"""
+    if SHOULD_MOUNT_STATIC:
+        return FileResponse(os.path.join(static_folder, "index.html"))
+    else:
+        return {"message": "API работает, но статические файлы не настроены. Обратитесь к API напрямую."}
+
+# --- Настраиваем обработку всех путей SPA для обслуживания статических файлов (в конце файла) ---
+@app.get("/{rest_of_path:path}")
+async def serve_spa(rest_of_path: str):
+    """Обслуживает все запросы к путям SPA, возвращая index.html"""
+    # Проверяем, есть ли запрошенный файл
+    if SHOULD_MOUNT_STATIC:
+        file_path = os.path.join(static_folder, rest_of_path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        
+        # Если файл не найден, возвращаем index.html для поддержки SPA-роутинга
+        return FileResponse(os.path.join(static_folder, "index.html"))
+    else:
+        return {"message": "API работает, но статические файлы не настроены. Обратитесь к API напрямую."}
+
+# Монтирование статических файлов для обслуживания из /static
+if SHOULD_MOUNT_STATIC and not SPA_ROUTES_CONFIGURED:
+    app.mount("/assets", StaticFiles(directory=os.path.join(static_folder, "assets")), name="assets")
+    logger.info(f"Статические файлы смонтированы по пути /assets из {os.path.join(static_folder, 'assets')}")
+    SPA_ROUTES_CONFIGURED = True 
