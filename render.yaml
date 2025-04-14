@@ -12,9 +12,15 @@ services:
         value: 18
       - key: SUPABASE_URL
         sync: false
-      - key: SUPABASE_KEY
+      - key: SUPABASE_ANON_KEY
         sync: false
-      - key: OPENAI_API_KEY
+      - key: OPENROUTER_API_KEY
         sync: false
-      - key: STABILITYAI_API_KEY
+      - key: TELEGRAM_API_ID
+        sync: false
+      - key: TELEGRAM_API_HASH
+        sync: false
+      - key: UNSPLASH_ACCESS_KEY
+        sync: false
+      - key: PEXELS_API_KEY
         sync: false 
