@@ -284,6 +284,37 @@ def get_sample_posts(channel_name: str) -> List[str]:
     else:
         return generic_posts
 
+# --- Функция для сохранения результатов анализа в базу данных ---
+async def save_suggested_idea(idea_data: Dict[str, Any]) -> str:
+    """Сохраняет предложенную идею в базу данных."""
+    try:
+        if not supabase:
+            logger.error("Клиент Supabase не инициализирован")
+            return "Ошибка: Клиент Supabase не инициализирован"
+        
+        # Преобразование списков в JSON строки для хранения в БД
+        idea_to_save = {
+            "channel_name": idea_data.get("channel_name", ""),
+            "themes": json.dumps(idea_data.get("themes", [])),
+            "styles": json.dumps(idea_data.get("styles", [])),
+            "user_id": idea_data.get("user_id")
+        }
+        
+        # Сохранение в Supabase
+        result = supabase.table("suggested_ideas").insert(idea_to_save).execute()
+        
+        # Проверка результата
+        if hasattr(result, 'data') and len(result.data) > 0:
+            logger.info(f"Успешно сохранена идея для канала {idea_data.get('channel_name')}")
+            return "success"
+        else:
+            logger.error(f"Ошибка при сохранении идеи: {result}")
+            return "error"
+            
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении идеи: {e}")
+        return f"Ошибка: {str(e)}"
+
 # --- Функция для анализа контента с помощью DeepSeek ---
 async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[str, List[str]]:
     """Анализ текстов постов с помощью DeepSeek модели через OpenRouter API."""
@@ -330,19 +361,23 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
         
         # Запрос к API
         response = await client.chat.completions.create(
-            model="anthropic/claude-3-haiku-20240307",  # Используем Claude, т.к. DeepSeek недоступен
+            model="deepseek/deepseek-chat",  # Исправленный ID модели
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.1,  # Низкая температура для более детерминированных результатов
             max_tokens=600,
-            timeout=60
+            timeout=60,
+            extra_headers={
+                "HTTP-Referer": "https://content-manager.onrender.com",
+                "X-Title": "Smart Content Assistant"
+            }
         )
         
         # Извлечение ответа
         analysis_text = response.choices[0].message.content.strip()
-        logger.info(f"Получен ответ от модели: {analysis_text[:100]}...")
+        logger.info(f"Получен ответ от DeepSeek: {analysis_text[:100]}...")
         
         # Попытка извлечь JSON
         try:
@@ -387,46 +422,6 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
         logger.error(f"Ошибка при анализе контента через DeepSeek: {e}")
         return {"themes": [], "styles": []}
 
-# --- Функция для сохранения предложенной идеи в Supabase ---
-async def save_suggested_idea(idea_data: Dict) -> str:
-    """Сохранение предложенной идеи контент-плана в базу данных Supabase."""
-    try:
-        # Проверка обязательных полей
-        required_fields = ["channel_name", "themes", "styles"]
-        for field in required_fields:
-            if field not in idea_data:
-                logger.warning(f"Отсутствует обязательное поле {field} в данных идеи")
-                return None
-        
-        # Форматирование данных для сохранения
-        data_to_save = {
-            "channel_name": idea_data["channel_name"],
-            "themes": idea_data["themes"],
-            "styles": idea_data["styles"],
-        }
-        
-        # Добавляем user_id, если есть
-        if "user_id" in idea_data and idea_data["user_id"]:
-            data_to_save["user_id"] = idea_data["user_id"]
-        
-        # Сохранение в Supabase
-        logger.info(f"Сохранение идеи для канала {idea_data['channel_name']}")
-        result = supabase.table("suggested_ideas").insert(data_to_save).execute()
-        
-        # Проверка результата
-        if result.data and len(result.data) > 0:
-            idea_id = result.data[0].get("id")
-            logger.info(f"Идея успешно сохранена с ID: {idea_id}")
-            return idea_id
-        else:
-            logger.warning("Идея сохранена, но ID не получен")
-            return None
-            
-    except Exception as e:
-        logger.error(f"Ошибка при сохранении идеи в Supabase: {e}")
-        raise
-
-# --- Функция для работы с Telegram --- 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeResponse:
     """Анализ канала Telegram на основе запроса."""
