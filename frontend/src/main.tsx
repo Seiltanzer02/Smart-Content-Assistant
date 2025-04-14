@@ -6,6 +6,9 @@ import WebApp from '@twa-dev/sdk'
 
 const container = document.getElementById('root')
 
+console.log('main.tsx: Инициализация приложения');
+console.log('main.tsx: WebApp объект:', WebApp);
+
 if (container) {
   const root = createRoot(container)
   root.render(
@@ -17,4 +20,6 @@ if (container) {
   console.error('Failed to find the root element')
 }
 
+console.log('main.tsx: Вызов WebApp.ready()');
 WebApp.ready() // Сообщаем Telegram, что приложение готово
+console.log('main.tsx: WebApp.ready() вызван');

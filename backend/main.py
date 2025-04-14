@@ -355,7 +355,7 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
 Выдели 5-7 основных тем, которые затрагиваются в канале, и 5-7 форматов/стилей подачи контента. Ответ только в JSON формате."""
 
         # Настройка клиента OpenAI для использования OpenRouter
-        client = AsyncOpenAI(
+    client = AsyncOpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key
         )
@@ -419,7 +419,7 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
                 "styles": extracted_styles
             }
             
-    except Exception as e:
+            except Exception as e:
         logger.error(f"Ошибка при анализе контента через DeepSeek: {e}")
         return {"themes": [], "styles": []}
 
@@ -474,7 +474,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeRespo
                 # Если Telethon успешно получил посты
                 posts = telethon_posts
                 logger.info(f"Успешно получено {len(posts)} постов через Telethon")
-        except Exception as e:
+    except Exception as e:
             logger.error(f"Непредвиденная ошибка при получении постов канала @{username} через Telethon: {e}")
             errors_list.append(f"Ошибка Telethon: {str(e)}")
     
@@ -690,8 +690,8 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
         
         # Запрос к API
         logger.info(f"Отправка запроса на генерацию плана контента для канала @{channel_name}")
-        response = await client.chat.completions.create(
-            model="deepseek/deepseek-chat",
+            response = await client.chat.completions.create(
+                model="deepseek/deepseek-chat",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -742,7 +742,7 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
                 if rest_of_line:
                     current_topic = rest_of_line
                     current_style = ""
-                else:
+    else:
                     current_topic = ""
                     current_style = ""
             elif "стиль:" in line.lower() or "формат:" in line.lower():
@@ -778,7 +778,7 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
                 # Проверяем, не заголовок ли это
                 if re.match(r'^(план|идеи|публикации|контент|posts|список).*$', line.lower()):
                     continue
-                    
+                
                 # Пытаемся найти стиль в строке
                 style_match = re.search(r'(?:стиль|формат)[:\s]+(.*?)$', line, re.IGNORECASE)
                 if style_match:
@@ -798,8 +798,8 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
                 
                 # Ограничиваем количество дней
                 if day_counter > period_days:
-                    break
-        
+                        break
+                    
         # Если и сейчас нет идей, генерируем вручную
         if not plan_items:
             for day in range(1, period_days + 1):
@@ -835,8 +835,8 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
         
         logger.info(f"Сгенерирован план из {len(plan_items)} идей для канала @{channel_name}")
         return PlanGenerationResponse(plan=plan_items)
-        
-    except Exception as e:
+                
+            except Exception as e:
         logger.error(f"Ошибка при генерации плана: {e}")
         return PlanGenerationResponse(
             message=f"Ошибка при генерации плана: {str(e)}",
@@ -863,7 +863,7 @@ async def get_posts(request: Request, channel_name: Optional[str] = None):
             logger.warning("Запрос постов без идентификации пользователя Telegram")
             raise HTTPException(status_code=401, detail="Для доступа к постам необходимо авторизоваться через Telegram")
         
-        if not supabase:
+    if not supabase:
             logger.error("Клиент Supabase не инициализирован")
             raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
         
@@ -871,7 +871,7 @@ async def get_posts(request: Request, channel_name: Optional[str] = None):
         query = supabase.table("saved_posts").select("*").eq("user_id", telegram_user_id)
         
         # Если указано имя канала, фильтруем по нему
-        if channel_name:
+                if channel_name:
             query = query.eq("channel_name", channel_name)
             
         # Выполняем запрос
