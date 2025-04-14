@@ -474,7 +474,6 @@ async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeRespo
                 # Если Telethon успешно получил посты
                 posts = telethon_posts
                 logger.info(f"Успешно получено {len(posts)} постов через Telethon")
-                
         except Exception as e:
             logger.error(f"Непредвиденная ошибка при получении постов канала @{username} через Telethon: {e}")
             errors_list.append(f"Ошибка Telethon: {str(e)}")
@@ -513,7 +512,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeRespo
             styles = analysis_result.get("styles", [])
         else:
             # Если результат пришел в виде кортежа (например, из предыдущей версии функции)
-            themes, styles, _ = analysis_result
+            themes, styles = analysis_result[0], analysis_result[1]
         
         # Сохранение результата анализа в базу данных (если есть telegram_user_id)
         if telegram_user_id:
@@ -549,7 +548,8 @@ async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeRespo
         styles=styles,
         analyzed_posts_sample=sample_posts,
         best_posting_time=best_posting_time,
-        analyzed_posts_count=len(posts)
+        analyzed_posts_count=len(posts),
+        message=error_message
     )
 
 # --- Модель для ответа от /ideas ---
@@ -851,6 +851,148 @@ async def root():
         return FileResponse(os.path.join(static_folder, "index.html"))
     else:
         return {"message": "API работает, но статические файлы не настроены. Обратитесь к API напрямую."}
+
+# --- ДОБАВЛЯЕМ API ЭНДПОИНТЫ ДЛЯ РАБОТЫ С ПОСТАМИ ---
+@app.get("/posts", response_model=List[SavedPostResponse])
+async def get_posts(request: Request, channel_name: Optional[str] = None):
+    """Получение сохраненных постов."""
+    try:
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            logger.warning("Запрос постов без идентификации пользователя Telegram")
+            raise HTTPException(status_code=401, detail="Для доступа к постам необходимо авторизоваться через Telegram")
+        
+        if not supabase:
+            logger.error("Клиент Supabase не инициализирован")
+            raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
+        
+        # Строим запрос к базе данных
+        query = supabase.table("saved_posts").select("*").eq("user_id", telegram_user_id)
+        
+        # Если указано имя канала, фильтруем по нему
+        if channel_name:
+            query = query.eq("channel_name", channel_name)
+            
+        # Выполняем запрос
+        result = query.order("target_date", desc=True).execute()
+        
+        # Проверка результата
+        if not hasattr(result, 'data'):
+            logger.error(f"Ошибка при получении постов из БД: {result}")
+            return []
+            
+        return result.data
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении постов: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/posts", response_model=SavedPostResponse)
+async def create_post(request: Request, post_data: PostData):
+    """Создание нового поста."""
+    try:
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            logger.warning("Запрос создания поста без идентификации пользователя Telegram")
+            raise HTTPException(status_code=401, detail="Для создания поста необходимо авторизоваться через Telegram")
+        
+        if not supabase:
+            logger.error("Клиент Supabase не инициализирован")
+            raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
+        
+        # Создаем словарь с данными для сохранения
+        post_to_save = post_data.dict()
+        post_to_save["user_id"] = telegram_user_id
+        
+        # Сохранение в Supabase
+        result = supabase.table("saved_posts").insert(post_to_save).execute()
+        
+        # Проверка результата
+        if not hasattr(result, 'data') or len(result.data) == 0:
+            logger.error(f"Ошибка при сохранении поста: {result}")
+            raise HTTPException(status_code=500, detail="Ошибка при сохранении поста")
+            
+        logger.info(f"Пользователь {telegram_user_id} создал пост: {post_data.topic_idea}")
+        return result.data[0]
+        
+    except Exception as e:
+        logger.error(f"Ошибка при создании поста: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/posts/{post_id}", response_model=SavedPostResponse)
+async def update_post(post_id: str, request: Request, post_data: PostData):
+    """Обновление существующего поста."""
+    try:
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            logger.warning("Запрос обновления поста без идентификации пользователя Telegram")
+            raise HTTPException(status_code=401, detail="Для обновления поста необходимо авторизоваться через Telegram")
+        
+        if not supabase:
+            logger.error("Клиент Supabase не инициализирован")
+            raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
+        
+        # Проверяем, что пост принадлежит пользователю
+        post_check = supabase.table("saved_posts").select("id").eq("id", post_id).eq("user_id", telegram_user_id).execute()
+        if not hasattr(post_check, 'data') or len(post_check.data) == 0:
+            logger.warning(f"Попытка обновить чужой или несуществующий пост: {post_id}")
+            raise HTTPException(status_code=404, detail="Пост не найден или нет прав на его редактирование")
+        
+        # Создаем словарь с данными для обновления
+        post_to_update = post_data.dict()
+        
+        # Обновление в Supabase
+        result = supabase.table("saved_posts").update(post_to_update).eq("id", post_id).execute()
+        
+        # Проверка результата
+        if not hasattr(result, 'data') or len(result.data) == 0:
+            logger.error(f"Ошибка при обновлении поста: {result}")
+            raise HTTPException(status_code=500, detail="Ошибка при обновлении поста")
+            
+        logger.info(f"Пользователь {telegram_user_id} обновил пост {post_id}")
+        return result.data[0]
+        
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении поста: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/posts/{post_id}")
+async def delete_post(post_id: str, request: Request):
+    """Удаление поста."""
+    try:
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            logger.warning("Запрос удаления поста без идентификации пользователя Telegram")
+            raise HTTPException(status_code=401, detail="Для удаления поста необходимо авторизоваться через Telegram")
+        
+        if not supabase:
+            logger.error("Клиент Supabase не инициализирован")
+            raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
+        
+        # Проверяем, что пост принадлежит пользователю
+        post_check = supabase.table("saved_posts").select("id").eq("id", post_id).eq("user_id", telegram_user_id).execute()
+        if not hasattr(post_check, 'data') or len(post_check.data) == 0:
+            logger.warning(f"Попытка удалить чужой или несуществующий пост: {post_id}")
+            raise HTTPException(status_code=404, detail="Пост не найден или нет прав на его удаление")
+        
+        # Удаление из Supabase
+        result = supabase.table("saved_posts").delete().eq("id", post_id).execute()
+        
+        # Проверка результата
+        if not hasattr(result, 'data'):
+            logger.error(f"Ошибка при удалении поста: {result}")
+            raise HTTPException(status_code=500, detail="Ошибка при удалении поста")
+            
+        logger.info(f"Пользователь {telegram_user_id} удалил пост {post_id}")
+        return {"message": "Пост успешно удален"}
+        
+    except Exception as e:
+        logger.error(f"Ошибка при удалении поста: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- Настраиваем обработку всех путей SPA для обслуживания статических файлов (в конце файла) ---
 @app.get("/{rest_of_path:path}")
