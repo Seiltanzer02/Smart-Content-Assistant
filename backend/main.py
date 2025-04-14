@@ -208,6 +208,185 @@ class SavedPostResponse(PostData): # Наследуем от PostData
     # Добавляем поле канала
     channel_name: Optional[str] = Field(None, description="Имя канала, к которому относится пост")
 
+# --- Функция для получения постов Telegram через HTTP парсинг ---
+async def get_telegram_posts_via_http(username: str) -> List[str]:
+    """Получение постов канала Telegram через HTTP парсинг."""
+    try:
+        url = f"https://t.me/s/{username}"
+        logger.info(f"Запрос HTTP парсинга для канала @{username}: {url}")
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url)
+            
+        if response.status_code != 200:
+            logger.warning(f"HTTP статус-код для @{username}: {response.status_code}")
+            return []
+            
+        # Используем BeautifulSoup для парсинга HTML
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Ищем блоки с сообщениями
+        message_blocks = soup.select('div.tgme_widget_message_bubble')
+        
+        if not message_blocks:
+            logger.warning(f"Не найдены блоки сообщений для @{username}")
+            return []
+            
+        # Извлекаем текст сообщений
+        posts = []
+        for block in message_blocks:
+            text_block = block.select_one('div.tgme_widget_message_text')
+            if text_block and text_block.text.strip():
+                posts.append(text_block.text.strip())
+        
+        logger.info(f"Найдено {len(posts)} постов через HTTP парсинг для @{username}")
+        return posts
+        
+    except Exception as e:
+        logger.error(f"Ошибка при HTTP парсинге канала @{username}: {e}")
+        raise
+
+# --- Функция для получения примеров постов ---
+def get_sample_posts(channel_name: str) -> List[str]:
+    """Возвращает пример постов для демонстрации в случае, если не удалось получить реальные посты."""
+    # Базовые примеры постов
+    generic_posts = [
+        "Добрый день, уважаемые подписчики! Сегодня мы обсудим важную тему, которая касается каждого.",
+        "Представляем вам новый обзор актуальных событий. Оставляйте свои комментарии и делитесь мнением.",
+        "Интересный факт: знаете ли вы, что статистика показывает, что 90% людей...",
+        "В этом посте мы разберем самые популярные вопросы от наших подписчиков.",
+        "Подводим итоги недели: что важного произошло и что нас ждет впереди."
+    ]
+    
+    # Можно добавить специфичные примеры для разных каналов
+    tech_posts = [
+        "Новый iPhone уже в продаже. Первые впечатления и обзор характеристик.",
+        "Обзор последних изменений в Android. Что нас ждет в новой версии?",
+        "ИИ и его влияние на современное программирование: полезные инструменты для разработчиков.",
+        "Какой язык программирования выбрать в 2024 году? Обзор популярных технологий.",
+        "Новые инструменты для веб-разработки, которые стоит попробовать каждому."
+    ]
+    
+    business_posts = [
+        "5 стратегий, которые помогут вашему бизнесу выйти на новый уровень.",
+        "Как правильно инвестировать в 2024 году? Советы экспертов.",
+        "Тайм-менеджмент для руководителя: как все успевать и не выгорать.",
+        "Анализ рынка: главные тренды и прогнозы на ближайшее будущее.",
+        "История успеха: как небольшой стартап превратился в миллионный бизнес."
+    ]
+    
+    # Выбираем подходящий набор примеров в зависимости от имени канала
+    channel_lower = channel_name.lower()
+    if any(keyword in channel_lower for keyword in ["tech", "code", "programming", "dev", "it"]):
+        return tech_posts
+    elif any(keyword in channel_lower for keyword in ["business", "finance", "money", "startup"]):
+        return business_posts
+    else:
+        return generic_posts
+
+# --- Функция для анализа контента с помощью DeepSeek ---
+async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[str, List[str]]:
+    """Анализ текстов постов с помощью DeepSeek модели через OpenRouter API."""
+    if not texts:
+        logger.warning("Пустой список текстов для анализа")
+        return {"themes": [], "styles": []}
+    
+    try:
+        # Объединяем тексты для анализа (ограничиваем размер)
+        combined_text = "\n\n---\n\n".join(texts[:10])  # Берем первые 10 постов для анализа
+        
+        # Ограничиваем размер текста
+        max_chars = 10000
+        if len(combined_text) > max_chars:
+            combined_text = combined_text[:max_chars] + "..."
+            logger.info(f"Текст обрезан до {max_chars} символов")
+        
+        # Формируем системный промпт
+        system_prompt = """Ты - опытный контент-маркетолог и аналитик. Твоя задача - проанализировать серию постов из Telegram-канала и выделить:
+1. Основные темы, которые затрагиваются в канале (5-7 тем)
+2. Стили/форматы подачи контента (5-7 форматов)
+
+Ответ должен быть в JSON формате:
+{
+  "themes": ["тема 1", "тема 2", ...],
+  "styles": ["формат 1", "формат 2", ...]
+}
+
+Примеры тем: "Новости технологий", "Обзоры гаджетов", "Советы по программированию", "Бизнес-стратегии" и т.д.
+Примеры форматов: "Подробные обзоры", "Короткие заметки", "Посты-истории", "Туториалы с пошаговыми инструкциями", "Интервью", "Дайджесты новостей" и т.д."""
+
+        # Формируем запрос к пользователю
+        user_prompt = f"""Проанализируй следующие посты из Telegram-канала и определи основные темы и форматы контента:
+
+{combined_text}
+
+Выдели 5-7 основных тем, которые затрагиваются в канале, и 5-7 форматов/стилей подачи контента. Ответ только в JSON формате."""
+
+        # Настройка клиента OpenAI для использования OpenRouter
+        client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key
+        )
+        
+        # Запрос к API
+        response = await client.chat.completions.create(
+            model="deepseek-ai/deepseek-chat-hybrid",  # Более мощная модель для анализа
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.1,  # Низкая температура для более детерминированных результатов
+            max_tokens=600,
+            timeout=60
+        )
+        
+        # Извлечение ответа
+        analysis_text = response.choices[0].message.content.strip()
+        logger.info(f"Получен ответ от DeepSeek: {analysis_text[:100]}...")
+        
+        # Попытка извлечь JSON
+        try:
+            # Поиск JSON в тексте (на случай, если модель добавила пояснения)
+            json_match = re.search(r'(\{.*\})', analysis_text, re.DOTALL)
+            if json_match:
+                analysis_text = json_match.group(1)
+            
+            analysis_json = json.loads(analysis_text)
+            
+            # Проверяем структуру JSON
+            if "themes" not in analysis_json or "styles" not in analysis_json:
+                logger.warning(f"Некорректная структура JSON: {analysis_json}")
+                # Возвращаем пустые списки, если структура неверная
+                return {"themes": [], "styles": []}
+            
+            return analysis_json
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Ошибка парсинга JSON: {e}, текст: {analysis_text}")
+            # Если не удалось распарсить JSON, пробуем извлечь данные через регулярные выражения
+            themes = re.findall(r'"themes":\s*\[(.*?)\]', analysis_text, re.DOTALL)
+            styles = re.findall(r'"styles":\s*\[(.*?)\]', analysis_text, re.DOTALL)
+            
+            extracted_themes = []
+            extracted_styles = []
+            
+            if themes:
+                theme_items = re.findall(r'"([^"]+)"', themes[0])
+                extracted_themes = theme_items
+            
+            if styles:
+                style_items = re.findall(r'"([^"]+)"', styles[0])
+                extracted_styles = style_items
+            
+            return {
+                "themes": extracted_themes,
+                "styles": extracted_styles
+            }
+            
+    except Exception as e:
+        logger.error(f"Ошибка при анализе контента через DeepSeek: {e}")
+        return {"themes": [], "styles": []}
+
 # --- Функция для работы с Telegram --- 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeResponse:
