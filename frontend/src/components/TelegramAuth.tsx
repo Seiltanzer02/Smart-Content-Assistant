@@ -13,14 +13,23 @@ export const TelegramAuth: React.FC<TelegramAuthProps> = ({ onAuthSuccess }) => 
   const [debugInfo, setDebugInfo] = useState<string>('');
 
   useEffect(() => {
+    console.log('TelegramAuth компонент загружен');
+    
     const initAuth = async () => {
       try {
         console.log('Инициализация Telegram WebApp...');
+        console.log('WebApp до инициализации:', WebApp);
         
         // Проверяем, доступен ли WebApp
         if (!WebApp) {
+          console.error('WebApp не доступен, объект не существует');
           throw new Error('WebApp не доступен');
         }
+        
+        // Более подробная информация о WebApp
+        console.log('WebApp тип:', typeof WebApp);
+        console.log('WebApp имеет метод ready:', typeof WebApp.ready === 'function');
+        console.log('WebApp имеет initDataUnsafe:', typeof WebApp.initDataUnsafe);
         
         // Инициализируем Telegram WebApp
         WebApp.ready();
@@ -29,6 +38,25 @@ export const TelegramAuth: React.FC<TelegramAuthProps> = ({ onAuthSuccess }) => 
         // Получаем данные пользователя
         const user = WebApp.initDataUnsafe?.user;
         console.log('Данные пользователя:', user);
+        
+        // Проверка содержимого данных
+        if (!WebApp.initDataUnsafe) {
+          console.warn('WebApp.initDataUnsafe отсутствует или null');
+        } else {
+          console.log('WebApp.initDataUnsafe имеет свойство user:', 'user' in WebApp.initDataUnsafe);
+        }
+        
+        // Проверяем данные запуска
+        console.log('WebApp.initData:', WebApp.initData);
+        console.log('Пытаемся распарсить initData');
+        try {
+          if (WebApp.initData) {
+            const parsedData = JSON.parse(decodeURIComponent(WebApp.initData));
+            console.log('Распарсенные данные:', parsedData);
+          }
+        } catch (parseError) {
+          console.error('Ошибка при парсинге initData:', parseError);
+        }
         
         // Собираем отладочную информацию
         const debugData = {
@@ -79,6 +107,14 @@ export const TelegramAuth: React.FC<TelegramAuthProps> = ({ onAuthSuccess }) => 
               console.log('ID пользователя найден в URL параметрах:', userId);
               onAuthSuccess(userId);
             } else {
+              console.error('ID пользователя не найден ни в WebApp, ни в URL параметрах');
+              // Предоставляем временный ID для тестирования (только для разработки!)
+              if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                console.warn('Используем тестовый ID пользователя для локальной разработки: 123456789');
+                onAuthSuccess('123456789');
+                return;
+              }
+              
               setError('Не удалось получить ID пользователя Telegram');
             }
           }
@@ -86,6 +122,12 @@ export const TelegramAuth: React.FC<TelegramAuthProps> = ({ onAuthSuccess }) => 
       } catch (err) {
         console.error('Ошибка при инициализации Telegram WebApp:', err);
         setError(`Ошибка при инициализации приложения: ${err instanceof Error ? err.message : String(err)}`);
+        
+        // Для тестирования в режиме разработки
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+          console.warn('Используем тестовый ID пользователя для локальной разработки после ошибки: 123456789');
+          onAuthSuccess('123456789');
+        }
       } finally {
         setLoading(false);
       }
@@ -112,6 +154,13 @@ export const TelegramAuth: React.FC<TelegramAuthProps> = ({ onAuthSuccess }) => 
           <h1 className="auth-title">Ошибка авторизации</h1>
           <div className="auth-error">{error}</div>
           <p>Пожалуйста, попробуйте открыть приложение через Telegram</p>
+          
+          <button 
+            className="auth-button"
+            onClick={() => onAuthSuccess('123456789')}
+          >
+            Продолжить с тестовым ID
+          </button>
           
           {debugInfo && (
             <div className="debug-info">
