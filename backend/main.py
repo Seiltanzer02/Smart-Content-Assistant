@@ -409,29 +409,31 @@ class AnalyzeResponse(BaseModel):
 
 # --- Функция для работы с Telegram --- 
 async def get_telegram_posts_via_telethon(username: str) -> Tuple[List[Dict[str, str]], Optional[str]]:
-    """Получение постов канала через Telethon API."""
+    """Получение постов канала через Telethon API с поддержкой пользовательской авторизации."""
     if not all([TELEGRAM_API_ID, TELEGRAM_API_HASH, SESSION_NAME]):
         logger.warning("Отсутствуют необходимые параметры для Telethon. Проверьте TELEGRAM_API_ID, TELEGRAM_API_HASH и SESSION_NAME.")
         return [], "Отсутствуют параметры конфигурации Telethon"
     
+    client = None
     try:
-        # Инициализация клиента Telethon
-        client = TelegramClient(SESSION_NAME, TELEGRAM_API_ID, TELEGRAM_API_HASH)
-        await client.start()
+        # Инициализация клиента Telethon с настройками для пользовательского аккаунта
+        client = TelegramClient(
+            SESSION_NAME,
+            TELEGRAM_API_ID,
+            TELEGRAM_API_HASH,
+            device_model="Content Manager",
+            system_version="Windows 10",
+            app_version="1.0",
+            lang_code="ru"
+        )
         
-        # Проверяем, авторизован ли клиент
+        # Подключаемся к Telegram
+        await client.connect()
+        
+        # Проверяем авторизацию
         if not await client.is_user_authorized():
-            # Пробуем использовать бот-токен, если он доступен
-            if BOT_TOKEN:
-                try:
-                    await client.start(bot_token=BOT_TOKEN)
-                    logger.info("Успешная авторизация через бот-токен")
-                except Exception as e:
-                    logger.error(f"Ошибка при авторизации через бот-токен: {e}")
-                    return [], f"Ошибка авторизации бота: {str(e)}"
-            else:
-                logger.warning("Клиент не авторизован, а BOT_TOKEN не установлен")
-                return [], "Телеграм клиент не авторизован"
+            logger.info("Требуется авторизация пользовательского аккаунта")
+            return [], "Требуется авторизация пользовательского аккаунта. Пожалуйста, авторизуйтесь через веб-интерфейс."
         
         logger.info(f"Попытка получения информации о канале @{username}")
         
@@ -446,24 +448,31 @@ async def get_telegram_posts_via_telethon(username: str) -> Tuple[List[Dict[str,
             logger.error(f"Ошибка при получении информации о канале @{username}: {e}")
             return [], f"Ошибка получения информации о канале: {str(e)}"
         
-        # Получение сообщений
+        # Получение сообщений с оптимизированными параметрами
         try:
             logger.info(f"Попытка получения сообщений из канала @{username}")
-            messages = await client.get_messages(entity, limit=20)
+            messages = await client.get_messages(
+                entity,
+                limit=20,
+                filter=lambda m: m.text is not None,  # Фильтруем только текстовые сообщения
+                reverse=True  # Получаем самые свежие сообщения
+            )
             logger.info(f"Получено {len(messages)} сообщений из канала @{username}")
-        except telethon.errors.RPCError as e:  # Используем правильный импорт
-            # Особая обработка ошибки BotMethodInvalidError
-            if "BotMethodInvalidError" in str(e) or "BOT_METHOD_INVALID" in str(e):
-                logger.warning(f"Ошибка: бот не может получить историю сообщений. {e}")
-                return [], "Бот не может получить историю сообщений. Это ограничение API Telegram для ботов."
-            else:
-                logger.error(f"RPC ошибка при получении сообщений из канала @{username}: {e}")
-                return [], f"Ошибка Telegram API: {str(e)}"
+        except telethon.errors.ChatAdminRequiredError:
+            logger.error(f"Требуются права администратора для доступа к каналу @{username}")
+            return [], "Требуются права администратора для доступа к каналу"
+        except telethon.errors.ChannelPrivateError:
+            logger.error(f"Канал @{username} является приватным")
+            return [], "Канал является приватным"
+        except telethon.errors.FloodWaitError as e:
+            wait_time = getattr(e, 'seconds', 0)
+            logger.error(f"Flood wait error: необходимо подождать {wait_time} секунд")
+            return [], f"Слишком много запросов, подождите {wait_time} секунд"
         except Exception as e:
-            logger.error(f"Непредвиденная ошибка при получении сообщений из канала @{username}: {e}")
+            logger.error(f"Ошибка при получении сообщений из канала @{username}: {e}")
             return [], f"Ошибка при получении сообщений: {str(e)}"
         
-        # Обработка сообщений и фильтрация только текстовых
+        # Обработка сообщений
         try:
             posts = []
             for msg in messages:
@@ -479,33 +488,22 @@ async def get_telegram_posts_via_telethon(username: str) -> Tuple[List[Dict[str,
                 return [], "Не найдено текстовых сообщений"
             
             logger.info(f"Успешно получено {len(posts)} постов через Telethon")
-            await client.disconnect()
             return posts, None
             
         except Exception as e:
             logger.error(f"Ошибка при обработке сообщений из канала @{username}: {e}")
             return [], f"Ошибка обработки сообщений: {str(e)}"
             
-    except telethon.errors.SessionPasswordNeededError:  # Используем правильный импорт
-        logger.error("Требуется двухфакторная аутентификация")
-        return [], "Требуется двухфакторная аутентификация"
-    except telethon.errors.PhoneNumberInvalidError:  # Используем правильный импорт
-        logger.error("Указан неверный номер телефона в конфигурации")
-        return [], "Неверный номер телефона"
-    except telethon.errors.FloodWaitError as e:  # Используем правильный импорт
-        wait_time = getattr(e, 'seconds', 0)
-        logger.error(f"Flood wait error: необходимо подождать {wait_time} секунд")
-        return [], f"Слишком много запросов, подождите {wait_time} секунд"
     except Exception as e:
         logger.error(f"Непредвиденная ошибка в Telethon: {e}")
         return [], f"Ошибка Telethon: {str(e)}"
     finally:
-        try:
-            if 'client' in locals() and client.is_connected():
+        if client:
+            try:
                 await client.disconnect()
                 logger.info("Соединение с Telegram закрыто")
-        except Exception as e:
-            logger.error(f"Ошибка при закрытии соединения: {e}")
+            except Exception as e:
+                logger.error(f"Ошибка при закрытии соединения: {e}")
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_channel(request: Request, req: AnalyzeRequest) -> AnalyzeResponse:
@@ -1996,3 +1994,141 @@ async def save_suggested_idea(idea_data):
     except Exception as e:
         logger.error(f"Ошибка при сохранении идеи: {e}")
         return None
+
+# --- Эндпоинты для авторизации Telegram ---
+@app.post("/telegram/auth/start")
+async def start_telegram_auth():
+    """Начало процесса авторизации Telegram."""
+    try:
+        client = TelegramClient(
+            SESSION_NAME,
+            TELEGRAM_API_ID,
+            TELEGRAM_API_HASH,
+            device_model="Content Manager",
+            system_version="Windows 10",
+            app_version="1.0",
+            lang_code="ru"
+        )
+        
+        await client.connect()
+        
+        if await client.is_user_authorized():
+            await client.disconnect()
+            return {"status": "success", "message": "Уже авторизован"}
+        
+        # Генерируем код для авторизации
+        phone = await client.send_code_request(phone=None)
+        
+        return {
+            "status": "success",
+            "message": "Код отправлен",
+            "phone_code_hash": phone.phone_code_hash
+        }
+    except Exception as e:
+        logger.error(f"Ошибка при начале авторизации: {e}")
+        return {"status": "error", "message": str(e)}
+    finally:
+        if 'client' in locals():
+            await client.disconnect()
+
+@app.post("/telegram/auth/verify")
+async def verify_telegram_auth(code: str, phone_code_hash: str):
+    """Подтверждение кода авторизации Telegram."""
+    try:
+        client = TelegramClient(
+            SESSION_NAME,
+            TELEGRAM_API_ID,
+            TELEGRAM_API_HASH,
+            device_model="Content Manager",
+            system_version="Windows 10",
+            app_version="1.0",
+            lang_code="ru"
+        )
+        
+        await client.connect()
+        
+        try:
+            await client.sign_in(phone=None, code=code, phone_code_hash=phone_code_hash)
+            return {"status": "success", "message": "Авторизация успешна"}
+        except telethon.errors.SessionPasswordNeededError:
+            return {"status": "2fa_required", "message": "Требуется двухфакторная аутентификация"}
+        except Exception as e:
+            logger.error(f"Ошибка при подтверждении кода: {e}")
+            return {"status": "error", "message": str(e)}
+    except Exception as e:
+        logger.error(f"Ошибка при верификации: {e}")
+        return {"status": "error", "message": str(e)}
+    finally:
+        if 'client' in locals():
+            await client.disconnect()
+
+@app.post("/telegram/auth/2fa")
+async def verify_2fa(password: str):
+    """Подтверждение двухфакторной аутентификации."""
+    try:
+        client = TelegramClient(
+            SESSION_NAME,
+            TELEGRAM_API_ID,
+            TELEGRAM_API_HASH,
+            device_model="Content Manager",
+            system_version="Windows 10",
+            app_version="1.0",
+            lang_code="ru"
+        )
+        
+        await client.connect()
+        
+        try:
+            await client.sign_in(password=password)
+            return {"status": "success", "message": "Двухфакторная аутентификация успешна"}
+        except Exception as e:
+            logger.error(f"Ошибка при 2FA: {e}")
+            return {"status": "error", "message": str(e)}
+    except Exception as e:
+        logger.error(f"Ошибка при 2FA: {e}")
+        return {"status": "error", "message": str(e)}
+    finally:
+        if 'client' in locals():
+            await client.disconnect()
+
+@app.get("/telegram/auth/status")
+async def check_auth_status():
+    """Проверка статуса авторизации."""
+    try:
+        client = TelegramClient(
+            SESSION_NAME,
+            TELEGRAM_API_ID,
+            TELEGRAM_API_HASH,
+            device_model="Content Manager",
+            system_version="Windows 10",
+            app_version="1.0",
+            lang_code="ru"
+        )
+        
+        await client.connect()
+        is_authorized = await client.is_user_authorized()
+        
+        if is_authorized:
+            me = await client.get_me()
+            return {
+                "status": "success",
+                "is_authorized": True,
+                "user": {
+                    "id": me.id,
+                    "username": me.username,
+                    "first_name": me.first_name,
+                    "last_name": me.last_name
+                }
+            }
+        else:
+            return {
+                "status": "success",
+                "is_authorized": False,
+                "message": "Требуется авторизация"
+            }
+    except Exception as e:
+        logger.error(f"Ошибка при проверке статуса: {e}")
+        return {"status": "error", "message": str(e)}
+    finally:
+        if 'client' in locals():
+            await client.disconnect()
