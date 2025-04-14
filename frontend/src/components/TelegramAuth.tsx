@@ -3,6 +3,15 @@ import axios from 'axios';
 import WebApp from '@twa-dev/sdk';
 import './TelegramAuth.css';
 
+// Добавляем определение типов для Telegram
+declare global {
+  interface Window {
+    Telegram?: {
+      WebApp?: any;
+    };
+  }
+}
+
 interface TelegramAuthProps {
   onAuthSuccess: (userId: string) => void;
 }
@@ -18,26 +27,46 @@ export const TelegramAuth: React.FC<TelegramAuthProps> = ({ onAuthSuccess }) => 
     const initAuth = async () => {
       try {
         console.log('Инициализация Telegram WebApp...');
-        console.log('WebApp до инициализации:', WebApp);
         
-        // Проверяем, доступен ли WebApp
-        if (!WebApp) {
-          console.error('WebApp не доступен, объект не существует');
-          throw new Error('WebApp не доступен');
+        // Проверка наличия WebApp в window
+        if (window.Telegram && window.Telegram.WebApp) {
+          console.log('Telegram.WebApp найден в window');
+          
+          // Используем нативный объект Telegram.WebApp вместо SDK
+          const nativeWebApp = window.Telegram.WebApp;
+          console.log('Используем нативный Telegram.WebApp');
+          console.log('WebApp имеет метод ready:', typeof nativeWebApp.ready === 'function');
+          
+          // Инициализируем нативный WebApp
+          if (typeof nativeWebApp.ready === 'function') {
+            nativeWebApp.ready();
+            console.log('nativeWebApp.ready() вызван');
+          }
+          
+          // Получаем данные пользователя из нативного WebApp
+          const user = nativeWebApp.initDataUnsafe?.user;
+          console.log('Данные пользователя из нативного WebApp:', user);
+          
+          if (user?.id) {
+            console.log('ID пользователя получен из нативного WebApp:', user.id);
+            onAuthSuccess(user.id.toString());
+            return;
+          }
+        } else {
+          console.log('Telegram.WebApp не найден в window, используем @twa-dev/sdk');
         }
         
-        // Более подробная информация о WebApp
-        console.log('WebApp тип:', typeof WebApp);
-        console.log('WebApp имеет метод ready:', typeof WebApp.ready === 'function');
-        console.log('WebApp имеет initDataUnsafe:', typeof WebApp.initDataUnsafe);
+        // Запасной вариант - используем SDK от @twa-dev/sdk
+        console.log('WebApp SDK тип:', typeof WebApp);
+        console.log('WebApp SDK имеет метод ready:', typeof WebApp.ready === 'function');
         
-        // Инициализируем Telegram WebApp
+        // Инициализируем SDK WebApp
         WebApp.ready();
         console.log('WebApp.ready() вызван');
         
-        // Получаем данные пользователя
+        // Получаем данные пользователя из SDK
         const user = WebApp.initDataUnsafe?.user;
-        console.log('Данные пользователя:', user);
+        console.log('Данные пользователя из SDK:', user);
         
         // Проверка содержимого данных
         if (!WebApp.initDataUnsafe) {
@@ -46,77 +75,43 @@ export const TelegramAuth: React.FC<TelegramAuthProps> = ({ onAuthSuccess }) => 
           console.log('WebApp.initDataUnsafe имеет свойство user:', 'user' in WebApp.initDataUnsafe);
         }
         
-        // Проверяем данные запуска
-        console.log('WebApp.initData:', WebApp.initData);
-        console.log('Пытаемся распарсить initData');
-        try {
-          if (WebApp.initData) {
-            const parsedData = JSON.parse(decodeURIComponent(WebApp.initData));
-            console.log('Распарсенные данные:', parsedData);
-          }
-        } catch (parseError) {
-          console.error('Ошибка при парсинге initData:', parseError);
-        }
-        
         // Собираем отладочную информацию
         const debugData = {
+          window_telegram_exists: Boolean(window.Telegram),
+          window_telegram_webapp_exists: Boolean(window.Telegram?.WebApp),
+          sdk_web_app_exists: Boolean(WebApp),
           initData: WebApp.initDataUnsafe,
           initDataRaw: WebApp.initData,
           platform: WebApp.platform,
           version: WebApp.version,
           colorScheme: WebApp.colorScheme,
-          themeParams: WebApp.themeParams,
-          isExpanded: WebApp.isExpanded,
-          viewportHeight: WebApp.viewportHeight,
-          viewportStableHeight: WebApp.viewportStableHeight,
-          headerColor: WebApp.headerColor,
-          backgroundColor: WebApp.backgroundColor,
-          isClosingConfirmationEnabled: WebApp.isClosingConfirmationEnabled,
-          BackButton: WebApp.BackButton,
-          MainButton: WebApp.MainButton,
-          HapticFeedback: WebApp.HapticFeedback,
-          close: WebApp.close,
-          expand: WebApp.expand,
-          showPopup: WebApp.showPopup,
-          showAlert: WebApp.showAlert,
-          showConfirm: WebApp.showConfirm,
-          ready: WebApp.ready,
-          initDataUnsafe: WebApp.initDataUnsafe,
         };
         
         setDebugInfo(JSON.stringify(debugData, null, 2));
         
         if (user?.id) {
-          console.log('ID пользователя получен:', user.id);
-          // Если есть ID пользователя, вызываем успешную авторизацию
+          console.log('ID пользователя получен из SDK:', user.id);
           onAuthSuccess(user.id.toString());
         } else {
           console.warn('ID пользователя не найден в WebApp.initDataUnsafe.user');
           
-          // Попробуем получить ID из initData
-          const initData = WebApp.initDataUnsafe;
-          if (initData?.user?.id) {
-            console.log('ID пользователя найден в initData:', initData.user.id);
-            onAuthSuccess(initData.user.id.toString());
+          // Попробуем получить ID из query параметров
+          const urlParams = new URLSearchParams(window.location.search);
+          const userId = urlParams.get('user_id');
+          
+          if (userId) {
+            console.log('ID пользователя найден в URL параметрах:', userId);
+            onAuthSuccess(userId);
           } else {
-            // Попробуем получить ID из query параметров
-            const urlParams = new URLSearchParams(window.location.search);
-            const userId = urlParams.get('user_id');
-            
-            if (userId) {
-              console.log('ID пользователя найден в URL параметрах:', userId);
-              onAuthSuccess(userId);
-            } else {
-              console.error('ID пользователя не найден ни в WebApp, ни в URL параметрах');
-              // Предоставляем временный ID для тестирования (только для разработки!)
-              if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-                console.warn('Используем тестовый ID пользователя для локальной разработки: 123456789');
-                onAuthSuccess('123456789');
-                return;
-              }
-              
-              setError('Не удалось получить ID пользователя Telegram');
+            console.error('ID пользователя не найден ни в WebApp, ни в URL параметрах');
+            // Предоставляем временный ID для тестирования (только для разработки!)
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+              console.warn('Используем тестовый ID пользователя для локальной разработки: 123456789');
+              onAuthSuccess('123456789');
+              return;
             }
+            
+            setError('Не удалось получить ID пользователя Telegram');
           }
         }
       } catch (err) {
