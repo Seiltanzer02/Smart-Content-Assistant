@@ -313,13 +313,15 @@ async def save_suggested_idea(idea_data: Dict[str, Any]) -> str:
             logger.error("Клиент Supabase не инициализирован")
             return "Ошибка: Клиент Supabase не инициализирован"
         
-        # Проверяем структуру таблицы, возможно столбец называется иначе или имеет другой формат
+        # Подготавливаем данные в соответствии со структурой таблицы suggested_ideas
         idea_to_save = {
+            "id": str(uuid.uuid4()),  # Генерируем UUID
             "channel_name": idea_data.get("channel_name", ""),
             "user_id": idea_data.get("user_id"),
-            "themes_json": json.dumps(idea_data.get("themes", [])),
-            "styles_json": json.dumps(idea_data.get("styles", []))
-            # Используем themes_json и styles_json вместо themes и styles
+            "topic_idea": idea_data.get("topic_idea", ""),
+            "format_style": idea_data.get("format_style", ""),
+            "relative_day": idea_data.get("day", 0),
+            "is_detailed": False  # Изначально идея не детализирована
         }
         
         # Сохранение в Supabase
@@ -1052,17 +1054,62 @@ async def search_unsplash_images(query: str, count: int = 5) -> List[FoundImage]
         return placeholder_images
     
     try:
-        # Инициализация клиента для работы с Unsplash API
-        auth = UnsplashAuth(client_id=UNSPLASH_ACCESS_KEY)
-        api = UnsplashApi(auth)
+        # Использование прямого API запроса вместо клиента, который требует дополнительные параметры
+        unsplash_api_url = f"https://api.unsplash.com/search/photos"
         
-        # Поиск изображений
-        logger.info(f"Поиск изображений в Unsplash по запросу: {query}")
-        search_results = api.search.photos(query, per_page=count)
+        # Увеличим количество запрашиваемых изображений для большего разнообразия
+        per_page = min(count * 3, 30)  # Запрашиваем в 3 раза больше, но не больше 30
         
-        # Формирование результата
+        headers = {
+            "Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}",
+            "Accept-Version": "v1"
+        }
+        
+        # Если запрос короткий, добавим случайные ключевые слова для лучших результатов
+        search_terms = query.split()
+        if len(search_terms) < 2:
+            # Добавляем случайные контекстные слова в зависимости от запроса
+            context_words = [
+                "business", "creative", "professional", "modern", 
+                "minimalist", "colorful", "abstract", "technology",
+                "nature", "office", "lifestyle", "social", "communication"
+            ]
+            # Выбираем 1-2 случайных слова и добавляем к запросу
+            additional_words = random.sample(context_words, min(2, len(context_words)))
+            enhanced_query = f"{query} {' '.join(additional_words)}"
+            logger.info(f"Расширенный поисковый запрос: '{enhanced_query}' (было: '{query}')")
+        else:
+            enhanced_query = query
+            
+        # Выполняем запрос
+        logger.info(f"Поиск изображений в Unsplash по запросу: {enhanced_query}")
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                unsplash_api_url,
+                headers=headers,
+                params={"query": enhanced_query, "per_page": per_page}
+            )
+            
+        if response.status_code != 200:
+            logger.error(f"Ошибка при запросе к Unsplash API: {response.status_code} {response.text}")
+            return []
+            
+        # Парсим результаты
+        results = response.json()
+        if 'results' not in results or not results['results']:
+            logger.warning(f"Нет результатов по запросу '{enhanced_query}'")
+            return []
+            
+        # Перемешиваем результаты для разнообразия
+        all_photos = results['results']
+        random.shuffle(all_photos)
+        
+        # Берем только нужное количество
+        selected_photos = all_photos[:count]
+        
+        # Формируем результат
         images = []
-        for photo in search_results['results']:
+        for photo in selected_photos:
             images.append(FoundImage(
                 id=photo['id'],
                 source="unsplash",
@@ -1073,7 +1120,7 @@ async def search_unsplash_images(query: str, count: int = 5) -> List[FoundImage]
                 author_url=photo['user']['links']['html']
             ))
         
-        logger.info(f"Найдено {len(images)} изображений в Unsplash по запросу '{query}'")
+        logger.info(f"Найдено и отобрано {len(images)} изображений из {len(all_photos)} в Unsplash по запросу '{enhanced_query}'")
         return images
     except Exception as e:
         logger.error(f"Ошибка при поиске изображений в Unsplash: {e}")
@@ -1135,6 +1182,12 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
 4. Включать хештеги, если уместно
 5. Иметь длину, подходящую для Telegram (рекомендуется 500-1500 символов)
 
+ВАЖНО:
+- НЕ ИСПОЛЬЗУЙ маркеры форматирования (**жирный**, *курсив*, ##заголовки)
+- Текст должен быть готов к публикации БЕЗ дополнительного редактирования
+- Используй только обычный текст и эмодзи
+- Не используй маркдаун или другие специальные форматы
+
 Анализируй примеры постов, чтобы понять тональность и стиль канала. Не копируй примеры напрямую, а используй их как ориентир."""
 
         # Формируем запрос к пользователю
@@ -1148,7 +1201,9 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
 {' '.join([f'Пример {i+1}: "{sample[:100]}..."' for i, sample in enumerate(post_samples[:3])])}"
 
 Ключевые слова и фразы для включения в текст (опционально):
-{', '.join(keywords) if keywords else 'Нет конкретных ключевых слов, ориентируйся на тему'}"""
+{', '.join(keywords) if keywords else 'Нет конкретных ключевых слов, ориентируйся на тему'}
+
+НАПОМИНАНИЕ: Текст должен быть готов к прямой публикации. НЕ используй маркеры форматирования (**, ##, --). Используй обычный текст."""
 
         # Настройка клиента OpenAI для использования OpenRouter
         client = AsyncOpenAI(
@@ -1177,13 +1232,92 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
         generated_text = response.choices[0].message.content.strip()
         logger.info(f"Получен текст поста длиной {len(generated_text)} символов")
         
-        # Поиск изображений по ключевым словам или теме
-        search_query = " ".join(keywords[:2]) if keywords else topic_idea
-        images = await search_unsplash_images(search_query, IMAGE_SEARCH_COUNT)
+        # Очистка текста от возможных маркеров форматирования
+        cleaned_text = generated_text
+        # Удаляем маркеры жирного текста
+        cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned_text)
+        # Удаляем маркеры курсива
+        cleaned_text = re.sub(r'\*(.*?)\*', r'\1', cleaned_text)
+        # Удаляем маркеры заголовков
+        cleaned_text = re.sub(r'#{1,6}\s+(.*?)(?:\n|$)', r'\1\n', cleaned_text)
+        # Удаляем другие возможные маркеры
+        cleaned_text = re.sub(r'__(.*?)__', r'\1', cleaned_text)
+        cleaned_text = re.sub(r'~~(.*?)~~', r'\1', cleaned_text)
+        cleaned_text = re.sub(r'\+\+(.*?)\+\+', r'\1', cleaned_text)
+        
+        logger.info(f"Текст очищен от маркеров форматирования")
+        
+        # Получаем ключевые слова из текста для поиска изображений
+        # Анализируем текст, чтобы выделить потенциальные ключевые слова
+        # Удаляем стоп-слова и общие слова
+        stop_words = ["и", "в", "на", "с", "по", "для", "а", "но", "что", "как", "так", "это", "от", "к", "вы", "мы", "он", "она", "они"]
+        # Разбиваем текст на слова и убираем знаки препинания
+        words = re.findall(r'\b[а-яА-Яa-zA-Z]{4,}\b', cleaned_text.lower())
+        # Фильтруем слова
+        filtered_words = [word for word in words if word not in stop_words]
+        # Считаем частоту слов
+        word_counts = Counter(filtered_words)
+        # Берем 10 самых частых слов
+        common_words = [word for word, _ in word_counts.most_common(10)]
+        
+        # Генерируем несколько запросов для поиска разнообразных изображений
+        search_queries = []
+        
+        # 1. Используем тему поста как первый запрос
+        search_queries.append(topic_idea)
+        
+        # 2. Используем комбинацию из 2-3 ключевых слов
+        if len(common_words) >= 3:
+            key_terms = random.sample(common_words, 3)
+            search_queries.append(" ".join(key_terms))
+        
+        # 3. Используем формат/стиль + случайное ключевое слово
+        if common_words:
+            random_word = random.choice(common_words)
+            search_queries.append(f"{format_style} {random_word}")
+        
+        # 4. Если были предоставлены ключевые слова, используем их тоже
+        if keywords:
+            search_queries.append(" ".join(random.sample(keywords, min(2, len(keywords)))))
+        
+        # Если у нас мало запросов, добавляем еще
+        while len(search_queries) < 3:
+            if common_words:
+                search_queries.append(random.choice(common_words))
+            else:
+                search_queries.append(topic_idea)
+        
+        # Ограничиваем количество запросов
+        search_queries = search_queries[:3]
+        logger.info(f"Сгенерированы поисковые запросы для изображений: {search_queries}")
+        
+        # Поиск изображений по нескольким запросам
+        all_images = []
+        images_per_query = max(3, IMAGE_SEARCH_COUNT // len(search_queries))
+        
+        for query in search_queries:
+            images = await search_unsplash_images(query, images_per_query)
+            all_images.extend(images)
+        
+        # Убираем возможные дубликаты по ID
+        unique_images = []
+        image_ids = set()
+        for img in all_images:
+            if img.id not in image_ids:
+                image_ids.add(img.id)
+                unique_images.append(img)
+        
+        # Перемешиваем для разнообразия
+        random.shuffle(unique_images)
+        
+        # Ограничиваем количество до нужного
+        final_images = unique_images[:IMAGE_RESULTS_COUNT]
+        
+        logger.info(f"Найдено {len(final_images)} уникальных изображений из {len(all_images)} по всем запросам")
         
         return PostDetailsResponse(
-            generated_text=generated_text,
-            found_images=images[:IMAGE_RESULTS_COUNT],  # Ограничиваем количество
+            generated_text=cleaned_text,
+            found_images=final_images,
             message="Текст и изображения успешно сгенерированы"
         )
     except Exception as e:
@@ -1193,6 +1327,136 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
             found_images=[],  # Пустой список при ошибке
             message=f"Ошибка: {str(e)}"
         )
+
+# --- Endpoint для сохранения идей постов ---
+@app.post("/save-ideas")
+async def save_ideas(request: Request):
+    """Сохранение идей постов в базу данных."""
+    try:
+        # Получаем данные из запроса
+        data = await request.json()
+        ideas = data.get("ideas", [])
+        channel_name = data.get("channel_name", "")
+        
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            logger.warning("Запрос сохранения идей без идентификации пользователя Telegram")
+            raise HTTPException(status_code=401, detail="Для сохранения идей необходимо авторизоваться через Telegram")
+        
+        if not supabase:
+            logger.error("Клиент Supabase не инициализирован")
+            raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
+        
+        # Сохраняем каждую идею
+        saved_ideas = []
+        for idea in ideas:
+            # Проверяем, что в идее есть все необходимые поля
+            if not idea.get("topic_idea") or not idea.get("format_style"):
+                continue
+                
+            # Подготавливаем данные
+            idea_data = {
+                "id": idea.get("id", str(uuid.uuid4())),
+                "channel_name": channel_name,
+                "user_id": telegram_user_id,
+                "topic_idea": idea.get("topic_idea", ""),
+                "format_style": idea.get("format_style", ""),
+                "relative_day": idea.get("day", 0),
+                "is_detailed": False
+            }
+            
+            # Сохраняем идею
+            try:
+                result = supabase.table("suggested_ideas").insert(idea_data).execute()
+                if hasattr(result, 'data') and len(result.data) > 0:
+                    saved_ideas.append(result.data[0])
+                    logger.info(f"Сохранена идея: {idea.get('topic_idea')}")
+            except Exception as e:
+                logger.error(f"Ошибка при сохранении идеи: {e}")
+        
+        return {"message": f"Сохранено {len(saved_ideas)} из {len(ideas)} идей", "saved_ideas": saved_ideas}
+        
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении идей: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- Обновленный Endpoint для получения идей ---
+@app.get("/ideas")
+async def get_ideas(request: Request, channel_name: Optional[str] = None):
+    """Получение идей постов из базы данных."""
+    try:
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            logger.warning("Запрос получения идей без идентификации пользователя Telegram")
+            raise HTTPException(status_code=401, detail="Для получения идей необходимо авторизоваться через Telegram")
+        
+        if not supabase:
+            logger.error("Клиент Supabase не инициализирован")
+            raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
+        
+        # Строим запрос к базе данных
+        query = supabase.table("suggested_ideas").select("*").eq("user_id", telegram_user_id)
+        
+        # Если указано имя канала, фильтруем по нему
+        if channel_name:
+            query = query.eq("channel_name", channel_name)
+            
+        # Выполняем запрос
+        result = query.order("created_at", desc=True).execute()
+        
+        # Проверка результата
+        if not hasattr(result, 'data'):
+            logger.error(f"Ошибка при получении идей из БД: {result}")
+            return {"ideas": []}
+            
+        logger.info(f"Получено {len(result.data)} идей для пользователя {telegram_user_id}")
+        return {"ideas": result.data}
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении идей: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- Endpoint для обновления статуса детализации идеи ---
+@app.put("/ideas/{idea_id}")
+async def update_idea(idea_id: str, request: Request):
+    """Обновление статуса детализации идеи."""
+    try:
+        # Получаем данные из запроса
+        data = await request.json()
+        is_detailed = data.get("is_detailed", False)
+        
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            logger.warning("Запрос обновления идеи без идентификации пользователя Telegram")
+            raise HTTPException(status_code=401, detail="Для обновления идеи необходимо авторизоваться через Telegram")
+        
+        if not supabase:
+            logger.error("Клиент Supabase не инициализирован")
+            raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
+        
+        # Проверяем, что идея принадлежит пользователю
+        idea_check = supabase.table("suggested_ideas").select("id").eq("id", idea_id).eq("user_id", telegram_user_id).execute()
+        if not hasattr(idea_check, 'data') or len(idea_check.data) == 0:
+            logger.warning(f"Попытка обновить чужую или несуществующую идею: {idea_id}")
+            raise HTTPException(status_code=404, detail="Идея не найдена или нет прав на ее редактирование")
+        
+        # Обновляем статус детализации
+        result = supabase.table("suggested_ideas").update({"is_detailed": is_detailed}).eq("id", idea_id).execute()
+        
+        # Проверка результата
+        if not hasattr(result, 'data') or len(result.data) == 0:
+            logger.error(f"Ошибка при обновлении идеи: {result}")
+            raise HTTPException(status_code=500, detail="Ошибка при обновлении идеи")
+            
+        logger.info(f"Пользователь {telegram_user_id} обновил статус детализации идеи {idea_id}")
+        return {"message": "Идея успешно обновлена", "idea": result.data[0]}
+        
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении идеи: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Монтирование статических файлов для обслуживания из /static
 if SHOULD_MOUNT_STATIC and not SPA_ROUTES_CONFIGURED:

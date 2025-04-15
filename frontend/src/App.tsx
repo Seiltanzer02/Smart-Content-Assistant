@@ -48,7 +48,7 @@ try {
 }
 
 // Определяем типы для данных приложения
-type ViewType = 'analyze' | 'suggestions' | 'plan' | 'details';
+type ViewType = 'analyze' | 'suggestions' | 'plan' | 'details' | 'calendar' | 'edit';
 
 // Тип для результата анализа
 interface AnalysisResult {
@@ -68,6 +68,8 @@ interface SuggestedIdea {
   topic_idea: string;
   format_style: string;
   day?: number;
+  is_detailed?: boolean;
+  user_id?: string;
 }
 
 // Тип для детализированного поста
@@ -91,6 +93,28 @@ interface PlanItem {
   format_style: string;
 }
 
+// Тип для сохраненного поста
+interface SavedPost {
+  id: string;
+  user_id: string;
+  created_at: string;
+  updated_at: string;
+  target_date: string;
+  topic_idea: string;
+  format_style: string;
+  final_text: string;
+  image_url?: string;
+  channel_name?: string;
+}
+
+// Тип для дня календаря
+interface CalendarDay {
+  date: Date;
+  posts: SavedPost[];
+  isCurrentMonth: boolean;
+  isToday: boolean;
+}
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -108,13 +132,341 @@ function App() {
   const [isDetailGenerating, setIsDetailGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  
+  // Новые состояния для календаря и сохраненных постов
+  const [savedPosts, setSavedPosts] = useState<SavedPost[]>([]);
+  const [loadingSavedPosts, setLoadingSavedPosts] = useState(false);
+  const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
+  
+  // Состояния для редактирования постов
+  const [editingPost, setEditingPost] = useState<SavedPost | null>(null);
+  const [editedText, setEditedText] = useState<string>('');
+  const [editedImageUrl, setEditedImageUrl] = useState<string>('');
+  const [isSavingPost, setIsSavingPost] = useState(false);
+  const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
+  const [allChannels, setAllChannels] = useState<string[]>([]);
 
   // Быстрая инициализация без localStorage
   useEffect(() => {
+    // Восстанавливаем состояние из localStorage
+    const storedChannel = localStorage.getItem('channelName');
+    if (storedChannel) {
+      setChannelName(storedChannel);
+    }
+    
+    const storedSelectedChannels = localStorage.getItem('selectedChannels');
+    if (storedSelectedChannels) {
+      try {
+        setSelectedChannels(JSON.parse(storedSelectedChannels));
+      } catch (e) {
+        console.error('Ошибка при восстановлении выбранных каналов:', e);
+      }
+    }
+    
     setTimeout(() => {
       setLoading(false);
     }, 500);
   }, []);
+  
+  // Сохраняем канал в localStorage при изменении
+  useEffect(() => {
+    if (channelName) {
+      localStorage.setItem('channelName', channelName);
+      
+      // Добавляем канал в список всех каналов, если его там нет
+      if (!allChannels.includes(channelName)) {
+        const updatedChannels = [...allChannels, channelName];
+        setAllChannels(updatedChannels);
+        localStorage.setItem('allChannels', JSON.stringify(updatedChannels));
+      }
+      
+      // Добавляем канал в список выбранных, если его там нет
+      if (!selectedChannels.includes(channelName)) {
+        const updatedSelected = [...selectedChannels, channelName];
+        setSelectedChannels(updatedSelected);
+        localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
+      }
+    }
+  }, [channelName]);
+  
+  // Загружаем список всех каналов при авторизации
+  useEffect(() => {
+    if (isAuthenticated) {
+      const storedChannels = localStorage.getItem('allChannels');
+      if (storedChannels) {
+        try {
+          setAllChannels(JSON.parse(storedChannels));
+        } catch (e) {
+          console.error('Ошибка при восстановлении списка каналов:', e);
+        }
+      }
+      
+      // Загружаем сохраненные посты
+      fetchSavedPosts();
+    }
+  }, [isAuthenticated]);
+  
+  // Формируем дни календаря при изменении месяца или сохраненных постов
+  useEffect(() => {
+    if (currentMonth) {
+      generateCalendarDays();
+    }
+  }, [currentMonth, savedPosts]);
+  
+  // Функция для генерации дней календаря
+  const generateCalendarDays = () => {
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+    
+    // Первый день месяца
+    const firstDay = new Date(year, month, 1);
+    // Последний день месяца
+    const lastDay = new Date(year, month + 1, 0);
+    
+    // День недели первого дня (0 - воскресенье, 1 - понедельник и т.д.)
+    let firstDayOfWeek = firstDay.getDay();
+    // Преобразуем для начала недели с понедельника (0 - понедельник, 6 - воскресенье)
+    firstDayOfWeek = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
+    
+    // Создаем массив дней для календаря
+    const days: CalendarDay[] = [];
+    
+    // Добавляем дни предыдущего месяца
+    const prevMonthLastDay = new Date(year, month, 0).getDate();
+    for (let i = firstDayOfWeek - 1; i >= 0; i--) {
+      const date = new Date(year, month - 1, prevMonthLastDay - i);
+      days.push({
+        date,
+        posts: savedPosts.filter(post => new Date(post.target_date).toDateString() === date.toDateString()),
+        isCurrentMonth: false,
+        isToday: date.toDateString() === new Date().toDateString()
+      });
+    }
+    
+    // Добавляем дни текущего месяца
+    for (let i = 1; i <= lastDay.getDate(); i++) {
+      const date = new Date(year, month, i);
+      days.push({
+        date,
+        posts: savedPosts.filter(post => new Date(post.target_date).toDateString() === date.toDateString()),
+        isCurrentMonth: true,
+        isToday: date.toDateString() === new Date().toDateString()
+      });
+    }
+    
+    // Добавляем дни следующего месяца
+    const daysToAdd = 42 - days.length; // 6 строк по 7 дней
+    for (let i = 1; i <= daysToAdd; i++) {
+      const date = new Date(year, month + 1, i);
+      days.push({
+        date,
+        posts: savedPosts.filter(post => new Date(post.target_date).toDateString() === date.toDateString()),
+        isCurrentMonth: false,
+        isToday: date.toDateString() === new Date().toDateString()
+      });
+    }
+    
+    setCalendarDays(days);
+  };
+  
+  // Функция для перемещения календаря на предыдущий месяц
+  const goToPrevMonth = () => {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
+  };
+  
+  // Функция для перемещения календаря на следующий месяц
+  const goToNextMonth = () => {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
+  };
+  
+  // Функция для загрузки сохраненных постов
+  const fetchSavedPosts = async () => {
+    setLoadingSavedPosts(true);
+    setError(null);
+    
+    try {
+      const channelParam = selectedChannels.length > 0 ? selectedChannels[0] : '';
+      const response = await axios.get('/posts', {
+        params: { channel_name: channelParam }
+      });
+      
+      if (response.data && Array.isArray(response.data)) {
+        setSavedPosts(response.data);
+        
+        // Собираем уникальные каналы из постов
+        const channels = [...new Set(response.data
+          .map(post => post.channel_name)
+          .filter(channel => channel) // Удаляем undefined и пустые строки
+        )];
+        
+        // Обновляем список всех каналов
+        if (channels.length > 0) {
+          const updatedChannels = [...new Set([...allChannels, ...channels])];
+          setAllChannels(updatedChannels);
+          localStorage.setItem('allChannels', JSON.stringify(updatedChannels));
+        }
+      }
+    } catch (err: any) {
+      console.error('Ошибка при загрузке сохраненных постов:', err);
+      setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке сохраненных постов');
+    } finally {
+      setLoadingSavedPosts(false);
+    }
+  };
+  
+  // Функция для сохранения поста
+  const savePost = async (postDate: Date) => {
+    if (!detailedPost || !selectedIdea) return;
+    
+    setIsSavingPost(true);
+    setError(null);
+    
+    try {
+      // Выбираем первое изображение из списка, если есть
+      const imageUrl = detailedPost.images.length > 0 ? detailedPost.images[0].url : '';
+      
+      const postData = {
+        target_date: postDate.toISOString().split('T')[0], // Формат YYYY-MM-DD
+        topic_idea: selectedIdea.topic_idea,
+        format_style: selectedIdea.format_style,
+        final_text: detailedPost.post_text,
+        image_url: imageUrl,
+        channel_name: selectedIdea.channel_name
+      };
+      
+      const response = await axios.post('/posts', postData);
+      
+      if (response.data) {
+        // Добавляем новый пост в список сохраненных
+        setSavedPosts([...savedPosts, response.data]);
+        setSuccess('Пост успешно сохранен');
+        
+        // Обновляем статус детализации идеи
+        await axios.put(`/ideas/${selectedIdea.id}`, { is_detailed: true });
+        
+        // Обновляем список идей, чтобы отразить изменения
+        fetchSavedIdeas();
+      }
+    } catch (err: any) {
+      console.error('Ошибка при сохранении поста:', err);
+      setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении поста');
+    } finally {
+      setIsSavingPost(false);
+    }
+  };
+  
+  // Функция для обновления поста
+  const updatePost = async () => {
+    if (!editingPost) return;
+    
+    setIsSavingPost(true);
+    setError(null);
+    
+    try {
+      const postData = {
+        ...editingPost,
+        final_text: editedText,
+        image_url: editedImageUrl
+      };
+      
+      const response = await axios.put(`/posts/${editingPost.id}`, postData);
+      
+      if (response.data) {
+        // Обновляем пост в списке сохраненных
+        setSavedPosts(savedPosts.map(post => 
+          post.id === editingPost.id ? response.data : post
+        ));
+        setSuccess('Пост успешно обновлен');
+        setCurrentView('calendar');
+        setEditingPost(null);
+      }
+    } catch (err: any) {
+      console.error('Ошибка при обновлении поста:', err);
+      setError(err.response?.data?.detail || err.message || 'Ошибка при обновлении поста');
+    } finally {
+      setIsSavingPost(false);
+    }
+  };
+  
+  // Функция для удаления поста
+  const deletePost = async (postId: string) => {
+    if (!confirm('Вы уверены, что хотите удалить этот пост?')) return;
+    
+    try {
+      await axios.delete(`/posts/${postId}`);
+      
+      // Удаляем пост из списка сохраненных
+      setSavedPosts(savedPosts.filter(post => post.id !== postId));
+      setSuccess('Пост успешно удален');
+    } catch (err: any) {
+      console.error('Ошибка при удалении поста:', err);
+      setError(err.response?.data?.detail || err.message || 'Ошибка при удалении поста');
+    }
+  };
+  
+  // Функция для открытия редактирования поста
+  const startEditingPost = (post: SavedPost) => {
+    setEditingPost(post);
+    setEditedText(post.final_text);
+    setEditedImageUrl(post.image_url || '');
+    setCurrentView('edit');
+  };
+  
+  // Функция для сохранения идей в базу данных
+  const saveIdeasToDatabase = async () => {
+    if (suggestedIdeas.length === 0) return;
+    
+    setIsGeneratingIdeas(true);
+    setError(null);
+    
+    try {
+      const response = await axios.post('/save-ideas', {
+        ideas: suggestedIdeas,
+        channel_name: channelName
+      });
+      
+      if (response.data && response.data.message) {
+        setSuccess(response.data.message);
+      }
+    } catch (err: any) {
+      console.error('Ошибка при сохранении идей:', err);
+      setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении идей');
+    } finally {
+      setIsGeneratingIdeas(false);
+    }
+  };
+  
+  // Функция для фильтрации постов по каналам
+  const filterPostsByChannels = async () => {
+    if (selectedChannels.length === 0) return;
+    
+    setLoadingSavedPosts(true);
+    setError(null);
+    
+    try {
+      // Получаем посты для каждого выбранного канала и объединяем результаты
+      const allPosts: SavedPost[] = [];
+      
+      for (const channel of selectedChannels) {
+        const response = await axios.get('/posts', {
+          params: { channel_name: channel }
+        });
+        
+        if (response.data && Array.isArray(response.data)) {
+          allPosts.push(...response.data);
+        }
+      }
+      
+      setSavedPosts(allPosts);
+    } catch (err: any) {
+      console.error('Ошибка при фильтрации постов:', err);
+      setError(err.response?.data?.detail || err.message || 'Ошибка при фильтрации постов');
+    } finally {
+      setLoadingSavedPosts(false);
+    }
+  };
 
   // Обработчик успешной авторизации
   const handleAuthSuccess = (authUserId: string) => {
@@ -190,6 +542,21 @@ function App() {
       setSuggestedIdeas(processedPlan);
       setSuccess('Идеи успешно сгенерированы');
       setCurrentView('suggestions');
+      
+      // Сохраняем идеи в базу данных
+      try {
+        const saveResponse = await axios.post('/save-ideas', {
+          ideas: processedPlan,
+          channel_name: channelName
+        });
+        
+        if (saveResponse.data && saveResponse.data.message) {
+          setSuccess(`Идеи успешно сгенерированы и сохранены: ${saveResponse.data.message}`);
+        }
+      } catch (saveErr: any) {
+        console.error('Ошибка при сохранении идей:', saveErr);
+        // Не показываем ошибку пользователю, так как идеи уже сгенерированы
+      }
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Ошибка при генерации идей');
       console.error('Ошибка при генерации идей:', err);
@@ -318,6 +685,30 @@ function App() {
           >
             План
           </button>
+          <button 
+            onClick={() => {
+              setCurrentView('calendar');
+              fetchSavedPosts();
+            }} 
+            className={`action-button ${currentView === 'calendar' ? 'active' : ''}`}
+          >
+            Календарь
+          </button>
+        </div>
+
+        {/* Выбор канала */}
+        <div className="channel-selector">
+          <label>Каналы: </label>
+          <select 
+            value={channelName} 
+            onChange={(e) => setChannelName(e.target.value)}
+            className="channel-select"
+          >
+            <option value="">Выберите канал</option>
+            {allChannels.map(channel => (
+              <option key={channel} value={channel}>{channel}</option>
+            ))}
+          </select>
         </div>
 
         {/* Контент */}
@@ -494,6 +885,27 @@ function App() {
                       </div>
                     </div>
                   )}
+                  
+                  {/* Добавляем кнопку сохранения поста */}
+                  <div className="actions-section">
+                    <h3>Сохранить пост:</h3>
+                    <div className="date-picker-container">
+                      <label>Выберите дату публикации: </label>
+                      <input 
+                        type="date" 
+                        value={selectedDate.toISOString().split('T')[0]}
+                        onChange={(e) => setSelectedDate(new Date(e.target.value))}
+                        className="date-input"
+                      />
+                    </div>
+                    <button 
+                      onClick={() => savePost(selectedDate)}
+                      className="action-button save-button"
+                      disabled={isSavingPost}
+                    >
+                      {isSavingPost ? 'Сохранение...' : 'Сохранить пост'}
+                    </button>
+                  </div>
                 </div>
               )}
               
@@ -505,6 +917,195 @@ function App() {
                   Сгенерировать детализацию
                 </button>
               )}
+            </div>
+          )}
+          
+          {/* Вид календаря */}
+          {currentView === 'calendar' && (
+            <div className="view calendar-view">
+              <h2>Календарь публикаций</h2>
+              
+              {/* Фильтр по каналам */}
+              <div className="channels-filter">
+                <h3>Фильтр по каналам:</h3>
+                <div className="channels-checkboxes">
+                  {allChannels.map(channel => (
+                    <label key={channel} className="channel-checkbox">
+                      <input 
+                        type="checkbox"
+                        checked={selectedChannels.includes(channel)}
+                        onChange={() => {
+                          const newSelected = selectedChannels.includes(channel)
+                            ? selectedChannels.filter(ch => ch !== channel)
+                            : [...selectedChannels, channel];
+                          setSelectedChannels(newSelected);
+                          localStorage.setItem('selectedChannels', JSON.stringify(newSelected));
+                        }}
+                      />
+                      {channel}
+                    </label>
+                  ))}
+                </div>
+                <button 
+                  onClick={filterPostsByChannels}
+                  className="action-button"
+                  disabled={loadingSavedPosts}
+                >
+                  Применить фильтр
+                </button>
+              </div>
+              
+              {loadingSavedPosts ? (
+                <div className="loading-indicator">
+                  <div className="loading-spinner"></div>
+                  <p>Загрузка постов...</p>
+                </div>
+              ) : (
+                <>
+                  {/* Навигация по месяцам */}
+                  <div className="calendar-navigation">
+                    <button onClick={goToPrevMonth} className="calendar-nav-button">
+                      &lt; Предыдущий
+                    </button>
+                    <h3>
+                      {currentMonth.toLocaleString('ru-RU', { month: 'long', year: 'numeric' })}
+                    </h3>
+                    <button onClick={goToNextMonth} className="calendar-nav-button">
+                      Следующий &gt;
+                    </button>
+                  </div>
+                  
+                  {/* Сетка календаря */}
+                  <div className="calendar-grid">
+                    {/* Заголовки дней недели */}
+                    <div className="calendar-weekdays">
+                      {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map(day => (
+                        <div key={day} className="calendar-weekday">{day}</div>
+                      ))}
+                    </div>
+                    
+                    {/* Дни календаря */}
+                    <div className="calendar-days">
+                      {calendarDays.map((day, index) => (
+                        <div 
+                          key={index} 
+                          className={`calendar-day ${!day.isCurrentMonth ? 'other-month' : ''} ${day.isToday ? 'today' : ''}`}
+                        >
+                          <div className="day-number">{day.date.getDate()}</div>
+                          
+                          {day.posts.length > 0 && (
+                            <div className="day-posts">
+                              {day.posts.map(post => (
+                                <div key={post.id} className="calendar-post">
+                                  <div className="post-summary">
+                                    <strong>{post.topic_idea}</strong>
+                                    <span className="post-format">{post.format_style}</span>
+                                    {post.channel_name && (
+                                      <span className="post-channel">@{post.channel_name}</span>
+                                    )}
+                                  </div>
+                                  <div className="post-actions">
+                                    <button 
+                                      onClick={() => startEditingPost(post)}
+                                      className="action-button small"
+                                    >
+                                      Изменить
+                                    </button>
+                                    <button 
+                                      onClick={() => deletePost(post.id)}
+                                      className="action-button small delete"
+                                    >
+                                      Удалить
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          
+          {/* Вид редактирования поста */}
+          {currentView === 'edit' && editingPost && (
+            <div className="view edit-view">
+              <button onClick={() => {
+                setCurrentView('calendar');
+                setEditingPost(null);
+              }} className="back-button">
+                ← Назад к календарю
+              </button>
+              
+              <h2>Редактирование поста</h2>
+              
+              <div className="post-source-info">
+                <p><strong>Тема:</strong> {editingPost.topic_idea}</p>
+                <p><strong>Формат:</strong> {editingPost.format_style}</p>
+                <p><strong>Дата публикации:</strong> {new Date(editingPost.target_date).toLocaleDateString()}</p>
+                {editingPost.channel_name && (
+                  <p><strong>Канал:</strong> @{editingPost.channel_name}</p>
+                )}
+              </div>
+              
+              <div className="edit-form">
+                <div className="edit-text-section">
+                  <h3>Текст поста:</h3>
+                  <textarea 
+                    className="edit-textarea" 
+                    value={editedText} 
+                    onChange={(e) => setEditedText(e.target.value)}
+                  />
+                </div>
+                
+                <div className="edit-image-section">
+                  <h3>Изображение:</h3>
+                  <input 
+                    type="text"
+                    className="image-url-input"
+                    value={editedImageUrl}
+                    onChange={(e) => setEditedImageUrl(e.target.value)}
+                    placeholder="URL изображения"
+                  />
+                  
+                  {editedImageUrl && (
+                    <div className="image-preview">
+                      <img 
+                        src={editedImageUrl} 
+                        alt="Предпросмотр изображения"
+                        className="preview-image"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x200?text=Ошибка+загрузки';
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+                
+                <div className="edit-actions">
+                  <button 
+                    onClick={updatePost}
+                    className="action-button save-button"
+                    disabled={isSavingPost}
+                  >
+                    {isSavingPost ? 'Сохранение...' : 'Сохранить изменения'}
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setCurrentView('calendar');
+                      setEditingPost(null);
+                    }}
+                    className="action-button cancel-button"
+                    disabled={isSavingPost}
+                  >
+                    Отмена
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
