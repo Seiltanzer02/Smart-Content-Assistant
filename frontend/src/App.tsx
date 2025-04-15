@@ -48,7 +48,7 @@ try {
 }
 
 // Определяем типы для данных приложения
-type ViewType = 'analyze' | 'suggestions' | 'plan';
+type ViewType = 'analyze' | 'suggestions' | 'plan' | 'details';
 
 // Тип для результата анализа
 interface AnalysisResult {
@@ -70,6 +70,20 @@ interface SuggestedIdea {
   day?: number;
 }
 
+// Тип для детализированного поста
+interface DetailedPost {
+  post_text: string;
+  images: PostImage[];
+}
+
+// Тип для изображения поста
+interface PostImage {
+  url: string;
+  alt?: string;
+  author?: string;
+  author_url?: string;
+}
+
 // Тип для плана публикаций
 interface PlanItem {
   day: number;
@@ -89,6 +103,9 @@ function App() {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [isGeneratingIdeas, setIsGeneratingIdeas] = useState(false);
   const [suggestedIdeas, setSuggestedIdeas] = useState<SuggestedIdea[]>([]);
+  const [selectedIdea, setSelectedIdea] = useState<SuggestedIdea | null>(null);
+  const [detailedPost, setDetailedPost] = useState<DetailedPost | null>(null);
+  const [isDetailGenerating, setIsDetailGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -150,15 +167,27 @@ function App() {
         channel_name: channelName
       });
       
-      setSuggestedIdeas(response.data.plan.map((item: PlanItem) => ({
-        id: `idea-${Date.now()}-${Math.random()}`,
-        created_at: new Date().toISOString(),
-        channel_name: channelName,
-        topic_idea: item.topic_idea,
-        format_style: item.format_style,
-        day: item.day
-      })));
+      // Обработка и очистка полученных данных от маркдаун форматирования
+      const processedPlan = response.data.plan.map((item: any, index: number) => {
+        // Извлекаем тему и формат из строки, удаляя markdown-форматирование и лишние символы
+        let topic = item.topic_idea || '';
+        let format = item.format_style || '';
+        
+        // Очищаем от маркдаун-разметки и других элементов форматирования
+        topic = topic.replace(/\*\*/g, '').replace(/"/g, '').trim();
+        format = format.replace(/\*\*/g, '').replace(/"/g, '').replace(/\(/g, '').replace(/\)/g, '').trim();
+        
+        return {
+          id: `idea-${Date.now()}-${index}`,
+          created_at: new Date().toISOString(),
+          channel_name: channelName,
+          topic_idea: topic,
+          format_style: format,
+          day: item.day || index + 1
+        };
+      });
       
+      setSuggestedIdeas(processedPlan);
       setSuccess('Идеи успешно сгенерированы');
       setCurrentView('suggestions');
     } catch (err: any) {
@@ -188,6 +217,51 @@ function App() {
     } finally {
       setIsGeneratingIdeas(false);
     }
+  };
+
+  // Функция для детализации идеи
+  const handleDetailIdea = async (idea: SuggestedIdea) => {
+    setSelectedIdea(idea);
+    setIsDetailGenerating(true);
+    setDetailedPost(null);
+    setError(null);
+    setSuccess(null);
+    setCurrentView('details');
+
+    try {
+      // Запрос на детализацию идеи через API
+      const response = await axios.post('/generate-post-details', {
+        topic_idea: idea.topic_idea,
+        format_style: idea.format_style,
+        channel_name: idea.channel_name
+      });
+
+      // Обработка полученных данных
+      if (response.data) {
+        setDetailedPost({
+          post_text: response.data.generated_text || 'Не удалось сгенерировать текст поста.',
+          images: response.data.found_images.map((img: any) => ({
+            url: img.regular_url || img.preview_url,
+            alt: img.description,
+            author: img.author_name,
+            author_url: img.author_url
+          })) || []
+        });
+        setSuccess('Детализация успешно создана');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message || 'Ошибка при детализации идеи');
+      console.error('Ошибка при детализации:', err);
+    } finally {
+      setIsDetailGenerating(false);
+    }
+  };
+
+  // Возврат к списку идей
+  const backToIdeas = () => {
+    setCurrentView('suggestions');
+    setSelectedIdea(null);
+    setDetailedPost(null);
   };
 
   // Компонент загрузки
@@ -248,6 +322,7 @@ function App() {
 
         {/* Контент */}
         <div className="view-container">
+          {/* Вид анализа */}
           {currentView === 'analyze' && (
             <div className="view analyze-view">
               <h2>Анализ Telegram-канала</h2>
@@ -300,6 +375,7 @@ function App() {
             </div>
           )}
 
+          {/* Вид идей */}
           {currentView === 'suggestions' && (
             <div className="view suggestions-view">
               <h2>Идеи контента</h2>
@@ -322,7 +398,12 @@ function App() {
                         </div>
                         {idea.day && <div className="idea-day">День {idea.day}</div>}
                       </div>
-                      <button className="action-button small">Детализировать</button>
+                      <button 
+                        className="action-button small"
+                        onClick={() => handleDetailIdea(idea)}
+                      >
+                        Детализировать
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -337,10 +418,93 @@ function App() {
             </div>
           )}
 
+          {/* Вид плана */}
           {currentView === 'plan' && (
             <div className="view plan-view">
               <h2>План публикаций</h2>
-              <p>Здесь будет отображаться календарь с планом публикаций для канала @{channelName || 'Не выбран'}</p>
+              {suggestedIdeas.length > 0 ? (
+                <div className="plan-display">
+                  <h3>План публикаций для канала @{channelName}</h3>
+                  <ul className="plan-list">
+                    {suggestedIdeas
+                      .sort((a, b) => (a.day || 0) - (b.day || 0))
+                      .map((idea) => (
+                        <li key={idea.id} className="plan-list-item-clickable" onClick={() => handleDetailIdea(idea)}>
+                          <strong>День {idea.day}:</strong> {idea.topic_idea} <em>({idea.format_style})</em>
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+              ) : (
+                <p>Сначала сгенерируйте идеи на вкладке "Идеи"</p>
+              )}
+            </div>
+          )}
+
+          {/* Вид детализации */}
+          {currentView === 'details' && selectedIdea && (
+            <div className="view post-view">
+              <button onClick={backToIdeas} className="back-button">
+                ← Назад к идеям
+              </button>
+              
+              <h2>Детализация идеи</h2>
+              
+              <div className="post-source-info">
+                <p><strong>Тема:</strong> {selectedIdea.topic_idea}</p>
+                <p><strong>Формат:</strong> {selectedIdea.format_style}</p>
+                <p><strong>День:</strong> {selectedIdea.day}</p>
+                <p><strong>Канал:</strong> @{selectedIdea.channel_name}</p>
+              </div>
+              
+              {isDetailGenerating && (
+                <div className="loading-indicator">
+                  <div className="loading-spinner"></div>
+                  <p>Генерация детализации...</p>
+                </div>
+              )}
+              
+              {detailedPost && !isDetailGenerating && (
+                <div className="generated-content">
+                  <div className="post-text-section">
+                    <h3>Текст поста:</h3>
+                    <textarea 
+                      className="post-textarea" 
+                      value={detailedPost.post_text} 
+                      readOnly 
+                    />
+                  </div>
+                  
+                  {detailedPost.images && detailedPost.images.length > 0 && (
+                    <div className="image-section">
+                      <h3>Изображения:</h3>
+                      <div className="image-thumbnails">
+                        {detailedPost.images.map((img, index) => (
+                          <div key={index} className="image-item">
+                            <img 
+                              src={img.url} 
+                              alt={img.alt || "Изображение для поста"} 
+                              className="thumbnail"
+                            />
+                            {img.author && (
+                              <span className="image-author">{img.author}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {!detailedPost && !isDetailGenerating && (
+                <button
+                  onClick={() => handleDetailIdea(selectedIdea)}
+                  className="action-button generate-button"
+                >
+                  Сгенерировать детализацию
+                </button>
+              )}
             </div>
           )}
         </div>
