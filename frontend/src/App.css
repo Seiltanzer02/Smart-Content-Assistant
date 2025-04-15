@@ -576,63 +576,120 @@ h1 {
 
 .image-thumbnails {
     display: flex;
-    flex-wrap: wrap; /* Перенос миниатюр */
-    gap: 10px; /* Отступ между миниатюрами */
-    margin-bottom: 15px;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 20px;
 }
 
-.thumbnail {
-    width: 100px; /* Фиксированная ширина миниатюры */
-    height: 60px; /* Фиксированная высота */
-    object-fit: cover; /* Масштабируем и обрезаем изображение */
-    border-radius: 4px;
+.image-item {
+    position: relative;
+    width: 150px;
+    height: 150px;
+    overflow: hidden;
+    border-radius: 8px;
+    border: 2px solid #e0e0e0;
+    transition: all 0.3s ease;
     cursor: pointer;
-    border: 2px solid transparent; /* Рамка для выделения */
-    transition: border-color 0.2s ease, transform 0.2s ease;
 }
 
-.thumbnail:hover {
+.image-item.selected {
+    border-color: #2196f3;
+    box-shadow: 0 0 10px rgba(33, 150, 243, 0.5);
+}
+
+.image-item img.thumbnail {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+}
+
+.image-item:hover img.thumbnail {
     transform: scale(1.05);
 }
 
-.thumbnail.selected {
-    border-color: #3498db; /* Синяя рамка у выбранной */
-    box-shadow: 0 0 5px rgba(52, 152, 219, 0.5);
+.image-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 5px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    display: flex;
+    justify-content: center;
+}
+
+.image-item:hover .image-overlay,
+.image-item.selected .image-overlay {
+    opacity: 1;
+}
+
+.select-image-button {
+    background: transparent;
+    color: white;
+    border: 1px solid white;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.image-item.selected .select-image-button {
+    background: #2196f3;
+    border-color: #2196f3;
+}
+
+.select-image-button:hover {
+    background: rgba(255, 255, 255, 0.2);
 }
 
 .selected-image-preview {
-    margin-top: 15px;
-    text-align: center;
+    margin: 20px 0;
+    padding: 15px;
+    background: #f5f5f5;
+    border-radius: 8px;
 }
 
-.selected-image-preview h4 {
-    margin-bottom: 10px;
+.preview-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 
-.selected-image-preview img {
+.preview-image {
     max-width: 100%;
-    max-height: 300px; /* Ограничиваем высоту превью */
-    border-radius: 4px;
-    margin-bottom: 10px;
+    max-height: 400px;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    margin: 10px 0;
 }
 
-.unsplash-attribution {
-    font-size: 0.8em;
-    color: #777;
+.image-credit {
+    font-size: 12px;
+    color: #666;
+    margin-top: 5px;
 }
 
-.unsplash-attribution a {
-    color: #555;
+.image-credit a {
+    color: #2196f3;
     text-decoration: none;
 }
 
-.unsplash-attribution a:hover {
+.image-credit a:hover {
     text-decoration: underline;
 }
 
-.save-post-button {
-    align-self: center; /* Кнопку сохранения тоже по центру */
-    margin-top: 15px;
+.custom-image-upload {
+    margin-top: 20px;
+    padding: 15px;
+    border: 1px dashed #ccc;
+    border-radius: 8px;
+    background: #f9f9f9;
 }
 
 /* Стили для Settings (пока простые) */
@@ -1566,23 +1623,33 @@ h1 {
 
 /* Стили для секции сохранения поста */
 .actions-section {
-  margin-top: 20px;
-  padding-top: 20px;
-  border-top: 1px solid #e0e0e0;
+  margin-top: 30px;
+  padding: 20px;
+  background: #f5f5f5;
+  border-radius: 8px;
 }
 
 .date-picker-container {
   margin-bottom: 15px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 
-.date-input {
-  padding: 8px 12px;
+.save-button {
+  background-color: #4CAF50;
+  color: white;
+  padding: 10px 20px;
+  border: none;
   border-radius: 4px;
-  border: 1px solid #ddd;
-  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.save-button:hover {
+  background-color: #45a049;
+}
+
+.save-button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
 }
 
 /* Адаптивные стили для мобильных устройств */
@@ -1684,9 +1751,11 @@ h1 {
 }
 
 .custom-image-upload {
-  margin-top: 10px;
-  border-top: 1px solid #e0e0e0;
-  padding-top: 10px;
+  margin-top: 20px;
+  padding: 15px;
+  border: 1px dashed #ccc;
+  border-radius: 8px;
+  background: #f9f9f9;
 }
 
 .custom-image-upload h4 {
