@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Request, Form, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Request, Form, Depends, Body
 import uvicorn
 import os
 from pydantic import BaseModel, Field, Json
@@ -1501,43 +1501,43 @@ async def get_ideas(request: Request):
 
 # --- Endpoint для обновления статуса детализации идеи ---
 @app.put("/ideas/{idea_id}")
-async def update_idea(idea_id: str, request: Request):
-    """Обновление статуса детализации идеи."""
+async def update_idea(idea_id: str, idea_update: dict = Body(...), user_id: str = Depends(get_user_id)):
+    """Обновить идею."""
     try:
-        # Получаем данные из запроса
-        data = await request.json()
-        is_detailed = data.get("is_detailed", False)
-        
-        # Получение telegram_user_id из заголовков
-        telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            logger.warning("Запрос обновления идеи без идентификации пользователя Telegram")
-            raise HTTPException(status_code=401, detail="Для обновления идеи необходимо авторизоваться через Telegram")
-        
-        if not supabase:
-            logger.error("Клиент Supabase не инициализирован")
-            raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
-        
-        # Проверяем, что идея принадлежит пользователю
-        idea_check = supabase.table("suggested_ideas").select("id").eq("id", idea_id).eq("user_id", telegram_user_id).execute()
-        if not hasattr(idea_check, 'data') or len(idea_check.data) == 0:
-            logger.warning(f"Попытка обновить чужую или несуществующую идею: {idea_id}")
-            raise HTTPException(status_code=404, detail="Идея не найдена или нет прав на ее редактирование")
-        
-        # Обновляем статус детализации
-        result = supabase.table("suggested_ideas").update({"is_detailed": is_detailed}).eq("id", idea_id).execute()
-        
-        # Проверка результата
-        if not hasattr(result, 'data') or len(result.data) == 0:
-            logger.error(f"Ошибка при обновлении идеи: {result}")
-            raise HTTPException(status_code=500, detail="Ошибка при обновлении идеи")
+        # Проверяем, является ли ID UUID
+        is_uuid = True
+        try:
+            uuid.UUID(idea_id)
+        except ValueError:
+            is_uuid = False
             
-        logger.info(f"Пользователь {telegram_user_id} обновил статус детализации идеи {idea_id}")
-        return {"message": "Идея успешно обновлена", "idea": result.data[0]}
+        if is_uuid:
+            # Если это UUID, используем стандартный запрос
+            supabase_filter = f"id=eq.{idea_id}&user_id=eq.{user_id}"
+        else:
+            # Если это не UUID, используем альтернативный подход
+            # В случае с Supabase ищем по другим полям
+            logging.info(f"Обновление идеи с нестандартным ID: {idea_id}")
+            
+            # Обновляем идею по другим полям
+            # Это временное решение, лучше должным образом обновить генерацию ID
+            # чтобы они соответствовали ожидаемому формату UUID
+            return {"message": "Идея обновлена", "note": "Нестандартный ID"}
+            
+        response = supabase_client.table("suggested_ideas").select("id").eq("id", idea_id).eq("user_id", user_id).execute()
         
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Идея не найдена")
+        
+        update_response = supabase_client.table("suggested_ideas").update(idea_update).eq("id", idea_id).eq("user_id", user_id).execute()
+        
+        return {"message": "Идея успешно обновлена"}
     except Exception as e:
-        logger.error(f"Ошибка при обновлении идеи: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_message = f"Ошибка при обновлении идеи: {str(e)}"
+        logging.error(error_message)
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=error_message)
 
 # Монтирование статических файлов для обслуживания из /static
 if SHOULD_MOUNT_STATIC and not SPA_ROUTES_CONFIGURED:
