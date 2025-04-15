@@ -250,7 +250,7 @@ function App() {
       setLoading(false);
     }, 500);
   }, []);
-  
+
   // Сохраняем канал в localStorage при изменении
   useEffect(() => {
     if (channelName) {
@@ -366,8 +366,8 @@ function App() {
           
           // Собираем уникальные каналы из постов
           updateChannelsFromPosts(response.data);
-        }
-      } else {
+      }
+    } else {
         // Если есть выбранные каналы - используем фильтр
         const allPosts: SavedPost[] = [];
         
@@ -605,18 +605,17 @@ function App() {
       if (!analysisResult) {
         setError("Пожалуйста, сначала проведите анализ канала");
         setIsGeneratingIdeas(false);
-        return;
-      }
+        return; 
+    }
 
       // Запрос на генерацию идей
       const response = await axios.post(
         `${API_BASE_URL}/generate-plan`,
         {
-          channel_name: channelName,
-          top_posts: analysisResult.analyzed_posts_sample,
-          audience_portrait: analysisResult.themes.join(', '),
-          content_themes: analysisResult.styles.join(', '),
-          posting_frequency: analysisResult.best_posting_time
+          themes: analysisResult.themes,
+          styles: analysisResult.styles,
+          period_days: 7,
+          channel_name: channelName
         },
         {
           headers: {
@@ -643,7 +642,7 @@ function App() {
         // Сохраняем сгенерированные идеи
         saveIdeasToDatabase();
       }
-    } catch (err: any) {
+    } catch (err: any) { 
       setError(err.response?.data?.detail || err.message || 'Ошибка при генерации идей');
       console.error('Ошибка при генерации идей:', err);
     } finally {
@@ -909,7 +908,7 @@ function App() {
 
               {!analysisResult && !isAnalyzing && (
                 <p>Введите имя канала для начала анализа. Например: durov</p>
-              )}
+      )}
     </div>
           )}
 
@@ -965,7 +964,7 @@ function App() {
                 <div className="loading-indicator">
                   <div className="loading-spinner"></div>
                   <p>Загрузка сохраненных постов...</p>
-                </div>
+                                </div>
               ) : savedPosts.length > 0 ? (
                 <div className="plan-display">
                   <h3>План публикаций для канала {channelName ? `@${channelName}` : ""}</h3>
@@ -977,16 +976,16 @@ function App() {
                           <strong>{new Date(post.target_date).toLocaleDateString()}:</strong> {post.topic_idea} 
                           <em>({post.format_style})</em>
                           {post.channel_name && <span className="post-channel">@{post.channel_name}</span>}
-                        </li>
-                      ))}
-                  </ul>
-                </div>
+                            </li>
+                        ))}
+                    </ul>
+            </div>
               ) : (
                 <div className="empty-plan">
                   <p>У вас пока нет сохранённых постов. Создайте посты на вкладке "Идеи", затем детализируйте и сохраните их.</p>
-                  <button 
+        <button 
                     className="action-button" 
-                    onClick={() => {
+          onClick={() => {
                       setCurrentView('suggestions');
                       if (suggestedIdeas.length === 0) {
                         fetchSavedIdeas();
@@ -994,10 +993,10 @@ function App() {
                     }}
                   >
                     Перейти к идеям
-                  </button>
-                </div>
+        </button>
+             </div>
               )}
-            </div>
+               </div>
           )}
 
           {/* Вид детализации */}
@@ -1027,27 +1026,27 @@ function App() {
                 <div className="generated-content">
                   <div className="post-text-section">
                     <h3>Текст поста:</h3>
-                    <textarea
+              <textarea
                       className="post-textarea" 
                       value={detailedPost.post_text}
                       readOnly 
-                    />
-                  </div>
+              />
+            </div>
                   
                   {detailedPost.images && detailedPost.images.length > 0 && (
                     <div className="image-section">
                       <h3>Изображения:</h3>
-                      <div className="image-thumbnails">
+                <div className="image-thumbnails">
                         {detailedPost.images.map((img, index) => (
                           <div key={index} className="image-item">
                             <img 
                               src={img.url} 
                               alt={img.alt || "Изображение для поста"} 
                               className="thumbnail"
-                            />
-                          </div>
-                        ))}
-                      </div>
+                      />
+                    </div>
+                  ))}
+                </div>
                       <div className="image-actions">
                         <button 
                           onClick={regeneratePostDetails}
@@ -1079,12 +1078,12 @@ function App() {
                                 }));
                               }
                             }} 
-                          />
-                        </div>
-                      </div>
+                      />
                     </div>
-                  )}
-                  
+                </div>
+              </div>
+            )}
+
                   {/* Добавляем кнопку сохранения поста */}
                   <div className="actions-section">
                     <h3>Сохранить пост:</h3>
@@ -1096,7 +1095,7 @@ function App() {
                         onChange={(e) => setSelectedDate(new Date(e.target.value))}
                         className="date-input"
                       />
-                    </div>
+                  </div>
                     <button 
                       onClick={() => savePost(selectedDate)}
                       className="action-button save-button"
@@ -1104,21 +1103,21 @@ function App() {
                     >
                       {isSavingPost ? 'Сохранение...' : 'Сохранить пост'}
                     </button>
-                  </div>
                 </div>
-              )}
+              </div>
+            )}
 
               {!detailedPost && !isDetailGenerating && (
-                <button
+                    <button 
                   onClick={() => handleDetailIdea(selectedIdea)}
                   className="action-button generate-button"
                 >
                   Сгенерировать детализацию
-                </button>
+                    </button>
               )}
-            </div>
-          )}
-
+               </div>
+            )}
+            
           {/* Вид календаря */}
           {currentView === 'calendar' && (
             <div className="view calendar-view">
@@ -1130,7 +1129,7 @@ function App() {
                 
                 {/* Компактная кнопка добавления/удаления канала в фильтр */}
                 <div className="channels-actions">
-                  <button 
+                <button 
                     className="action-button"
                     onClick={() => {
                       // Добавить текущий канал в фильтр, если его еще нет
@@ -1143,7 +1142,7 @@ function App() {
                     disabled={!channelName || selectedChannels.includes(channelName)}
                   >
                     Добавить текущий канал
-                  </button>
+                </button>
                   
                   <button
                     className="action-button"
@@ -1156,8 +1155,8 @@ function App() {
                     disabled={selectedChannels.length === 0}
                   >
                     Сбросить фильтр
-                  </button>
-                </div>
+                </button>
+          </div>
                 
                 <div className="channels-checkboxes">
                   {allChannels.map(channel => (
