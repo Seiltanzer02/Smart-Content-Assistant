@@ -5,7 +5,7 @@ import { TelegramAuth } from './components/TelegramAuth';
 import { v4 as uuidv4 } from 'uuid';
 
 // Определяем базовый URL API
-const API_BASE_URL = '/api';
+const API_BASE_URL = '';
 
 // Simple error boundary component
 class SimpleErrorBoundary extends React.Component<
@@ -560,7 +560,7 @@ function App() {
   const analyzeChannel = async () => {
     if (!channelName) {
       setError("Введите имя канала");
-      return;
+        return; 
     }
 
     setIsAnalyzing(true);
@@ -586,7 +586,7 @@ function App() {
           localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
         }
       }
-    } catch (err: any) {
+    } catch (err: any) { 
       setError(err.response?.data?.detail || err.message || 'Ошибка при анализе канала');
       console.error('Ошибка при анализе:', err);
     } finally {
@@ -613,7 +613,7 @@ function App() {
       if (!analysisResult) {
         setError("Пожалуйста, сначала проведите анализ канала");
         setIsGeneratingIdeas(false);
-        return; 
+      return;
     }
 
       // Запрос на генерацию идей
