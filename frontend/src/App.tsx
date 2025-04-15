@@ -97,6 +97,55 @@ const LOCAL_STORAGE_KEYS = {
     POSTS: 'contentApp_savedPosts',
 };
 
+// Проверка доступности localStorage
+const isLocalStorageAvailable = () => {
+  try {
+    const testKey = '__test__';
+    localStorage.setItem(testKey, testKey);
+    localStorage.removeItem(testKey);
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
+// Резервное хранилище в памяти (используется, когда localStorage недоступен)
+const memoryStorage: Record<string, any> = {};
+
+// Безопасные функции для работы с хранилищем
+const safeGetItem = (key: string): string | null => {
+  try {
+    if (isLocalStorageAvailable()) {
+      return localStorage.getItem(key);
+    }
+  } catch (e) {
+    console.warn(`Не удалось получить ${key} из localStorage:`, e);
+  }
+  return memoryStorage[key] || null;
+};
+
+const safeSetItem = (key: string, value: string): void => {
+  try {
+    if (isLocalStorageAvailable()) {
+      localStorage.setItem(key, value);
+    }
+  } catch (e) {
+    console.warn(`Не удалось сохранить ${key} в localStorage:`, e);
+  }
+  memoryStorage[key] = value;
+};
+
+const safeRemoveItem = (key: string): void => {
+  try {
+    if (isLocalStorageAvailable()) {
+      localStorage.removeItem(key);
+    }
+  } catch (e) {
+    console.warn(`Не удалось удалить ${key} из localStorage:`, e);
+  }
+  delete memoryStorage[key];
+};
+
 // Базовый URL API
 const API_BASE_URL = ''; // Пустая строка - запросы будут относительными (к тому же домену)
 
@@ -138,9 +187,9 @@ function App() {
   // --- СОСТОЯНИЯ --- 
 
   // Глобальные
-  // Читаем из localStorage при инициализации
+  // Читаем из localStorage при инициализации с защитой от ошибок
   const [currentView, setCurrentView] = useState<View>(() => {
-     const savedView = localStorage.getItem(LOCAL_STORAGE_KEYS.VIEW);
+     const savedView = safeGetItem(LOCAL_STORAGE_KEYS.VIEW);
      return (savedView as View) || 'analyze'; // По умолчанию 'analyze'
   });
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -152,42 +201,42 @@ function App() {
   // Анализ
   // Читаем из localStorage при инициализации
   const [channelName, setChannelName] = useState<string>(() => 
-      localStorage.getItem(LOCAL_STORAGE_KEYS.CHANNEL) || ''
+      safeGetItem(LOCAL_STORAGE_KEYS.CHANNEL) || ''
   );
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(() => {
-     const savedAnalysis = localStorage.getItem(LOCAL_STORAGE_KEYS.ANALYSIS);
+     const savedAnalysis = safeGetItem(LOCAL_STORAGE_KEYS.ANALYSIS);
      try {
        return savedAnalysis ? JSON.parse(savedAnalysis) : null;
      } catch (e) {
-       console.error("Ошибка парсинга analysisResult из localStorage", e);
-       localStorage.removeItem(LOCAL_STORAGE_KEYS.ANALYSIS); // Удаляем некорректные данные
+       console.error("Ошибка парсинга analysisResult из хранилища", e);
+       safeRemoveItem(LOCAL_STORAGE_KEYS.ANALYSIS); // Удаляем некорректные данные
        return null;
      }
   });
 
-  // Генерация Идей (ДОБАВЛЯЕМ localStorage)
+  // Генерация Идей (используем безопасные функции хранилища)
   const [savedIdeas, setSavedIdeas] = useState<SuggestedIdeaResponse[]>(() => {
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.IDEAS);
+    const saved = safeGetItem(LOCAL_STORAGE_KEYS.IDEAS);
     try {
       return saved ? JSON.parse(saved) : [];
     } catch (e) {
-      console.error("Ошибка парсинга savedIdeas из localStorage", e);
-      localStorage.removeItem(LOCAL_STORAGE_KEYS.IDEAS);
+      console.error("Ошибка парсинга savedIdeas из хранилища", e);
+      safeRemoveItem(LOCAL_STORAGE_KEYS.IDEAS);
       return [];
     }
   });
   const [isLoadingIdeas, setIsLoadingIdeas] = useState<boolean>(false);
 
-  // План (ДОБАВЛЯЕМ localStorage)
+  // План (используем безопасные функции хранилища)
   const [savedPosts, setSavedPosts] = useState<SavedPost[]>(() => {
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.POSTS);
+    const saved = safeGetItem(LOCAL_STORAGE_KEYS.POSTS);
     try {
       // Доп. проверка: убедимся, что это массив (на случай некорректных данных)
       const parsed = saved ? JSON.parse(saved) : [];
       return Array.isArray(parsed) ? parsed : [];
     } catch (e) {
-      console.error("Ошибка парсинга savedPosts из localStorage", e);
-      localStorage.removeItem(LOCAL_STORAGE_KEYS.POSTS);
+      console.error("Ошибка парсинга savedPosts из хранилища", e);
+      safeRemoveItem(LOCAL_STORAGE_KEYS.POSTS);
       return [];
     }
   });
@@ -270,31 +319,31 @@ function App() {
 
   // Сохранение currentView в localStorage при изменении
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEYS.VIEW, currentView);
+    safeSetItem(LOCAL_STORAGE_KEYS.VIEW, currentView);
   }, [currentView]);
 
   // Сохранение channelName в localStorage при изменении
   useEffect(() => {
-     localStorage.setItem(LOCAL_STORAGE_KEYS.CHANNEL, channelName);
+     safeSetItem(LOCAL_STORAGE_KEYS.CHANNEL, channelName);
   }, [channelName]);
 
   // Сохранение analysisResult в localStorage при изменении
   useEffect(() => {
      if (analysisResult) {
-         localStorage.setItem(LOCAL_STORAGE_KEYS.ANALYSIS, JSON.stringify(analysisResult));
+         safeSetItem(LOCAL_STORAGE_KEYS.ANALYSIS, JSON.stringify(analysisResult));
       } else {
-         localStorage.removeItem(LOCAL_STORAGE_KEYS.ANALYSIS);
+         safeRemoveItem(LOCAL_STORAGE_KEYS.ANALYSIS);
      }
   }, [analysisResult]);
 
-  // ДОБАВЛЯЕМ: Сохранение savedIdeas в localStorage при изменении
+  // Сохранение savedIdeas в localStorage при изменении
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEYS.IDEAS, JSON.stringify(savedIdeas));
+    safeSetItem(LOCAL_STORAGE_KEYS.IDEAS, JSON.stringify(savedIdeas));
   }, [savedIdeas]);
 
-  // ДОБАВЛЯЕМ: Сохранение savedPosts в localStorage при изменении
+  // Сохранение savedPosts в localStorage при изменении
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEYS.POSTS, JSON.stringify(savedPosts));
+    safeSetItem(LOCAL_STORAGE_KEYS.POSTS, JSON.stringify(savedPosts));
   }, [savedPosts]);
 
   // Загрузка сохраненных постов при переключении на 'plan' ИЛИ изменении channelName
