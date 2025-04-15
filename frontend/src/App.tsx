@@ -594,26 +594,26 @@ function App() {
   // Функция для генерации идей
   const generateIdeas = async () => {
     try {
+      setIsGeneratingIdeas(true);
+      setError("");
+      setSuggestedIdeas([]);
+
+      // Если анализ не завершен
       if (!analysisResult) {
-        console.error("Нет результатов анализа для генерации идей");
-        setError("Пожалуйста, сначала выполните анализ канала");
+        setError("Пожалуйста, сначала проведите анализ канала");
+        setIsGeneratingIdeas(false);
         return;
       }
 
-      setIsGeneratingIdeas(true);
-      setError("");
-
-      // Извлекаем темы и форматы из результатов анализа
-      const themes = analysisResult.themes || [];
-      const formats = analysisResult.styles || [];
-
-      // Отправляем запрос на генерацию идей
+      // Запрос на генерацию идей
       const response = await axios.post(
         `${API_BASE_URL}/generate-plan`,
         {
-          themes,
-          formats,
-          num_days: 30
+          channel_name: channelName,
+          top_posts: analysisResult.analyzed_posts_sample,
+          audience_portrait: analysisResult.themes.join(', '),
+          content_themes: analysisResult.styles.join(', '),
+          posting_frequency: analysisResult.best_posting_time
         },
         {
           headers: {
@@ -622,59 +622,30 @@ function App() {
         }
       );
 
-      // Обрабатываем полученные идеи
-      if (response.data && response.data.days) {
-        const newIdeas = response.data.days.map((day: any) => {
-          // Очищаем тему и формат от маркеров
-          let topic = day.topic || "";
-          let format = day.format || "";
-          
-          // Удаляем маркеры типа "*Идея:*", "*Формат:*" и т.д.
-          topic = topic.replace(/\*Идея:\*\s*/gi, "").replace(/\*[^*]+:\*\s*/g, "").trim();
-          format = format.replace(/\*Формат:\*\s*/gi, "").replace(/\*[^*]+:\*\s*/g, "").trim();
-          
-          // Удаляем кавычки, если они есть
-          topic = topic.replace(/"/g, "").trim();
-          format = format.replace(/"/g, "").trim();
+      if (response.data && response.data.ideas) {
+        console.log('Полученные идеи:', response.data.ideas);
+        
+        // Преобразуем полученные идеи в нужный формат
+        const formattedIdeas = response.data.ideas.map((idea: any, index: number) => ({
+          id: `idea-${Date.now()}-${index}`,
+          topic_idea: idea.topic_idea || idea.title,
+          format_style: idea.format_style || idea.format,
+          channel_name: channelName,
+          isNew: true,
+        }));
 
-          return {
-            id: `idea_${uuidv4()}`, // Используем uuidv4 вместо timestamp
-            day: day.day,
-            topic_idea: topic,
-            format_style: format,
-            created_at: new Date().toISOString(),
-            published: false
-          };
-        });
-
-        setSuggestedIdeas(newIdeas);
-
-        // Сохраняем сгенерированные идеи в базу данных
-        try {
-          await axios.post(
-            `${API_BASE_URL}/save-ideas`,
-            {
-              ideas: newIdeas,
-              channel_name: channelName
-            },
-            {
-              headers: {
-                'x-telegram-user-id': userId || 'unknown'
-              }
-            }
-          );
-          console.log("Идеи успешно сохранены в базе данных");
-        } catch (saveError) {
-          console.error("Ошибка при сохранении идей:", saveError);
-        }
-      } else {
-        setError("Не удалось сгенерировать идеи. Попробуйте еще раз.");
+        setSuggestedIdeas(formattedIdeas);
+        setSuccess('Идеи успешно сгенерированы');
+        
+        // Сохраняем сгенерированные идеи
+        saveIdeasToDatabase();
       }
-    } catch (e) {
-      console.error("Ошибка при генерации идей:", e);
-      setError("Произошла ошибка при генерации идей. Попробуйте еще раз.");
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message || 'Ошибка при генерации идей');
+      console.error('Ошибка при генерации идей:', err);
     } finally {
       setIsGeneratingIdeas(false);
+      setCurrentView('suggestions');
     }
   };
 
@@ -699,32 +670,30 @@ function App() {
     }
   };
 
-  // Функция для детализации идеи
+  // Функция для получения подробностей идеи
   const handleDetailIdea = async (idea: SuggestedIdea) => {
-    setSelectedIdea(idea);
-    setCurrentView('details');
-    
-    // Проверяем, есть ли уже в кеше детали для этой идеи
-    if (detailsCache[idea.id]) {
-      setDetailedPost(detailsCache[idea.id]);
-      return;
-    }
-    
-    // Если в кеше нет, запрашиваем с сервера
-    setIsDetailGenerating(true);
-    setDetailedPost(null);
-    setError(null);
-    setSuccess(null);
-
     try {
-      // Запрос на детализацию идеи через API
-      const response = await axios.post(`${API_BASE_URL}/generate-post-details`, {
-        topic_idea: idea.topic_idea,
-        format_style: idea.format_style,
-        channel_name: idea.channel_name
-      });
+      setSelectedIdea(idea);
+      setIsDetailGenerating(true);
+      setDetailedPost(null);
+      setError("");
 
-      // Обработка полученных данных
+      // Запрос на генерацию деталей поста
+      const response = await axios.post(
+        `${API_BASE_URL}/generate-post-details`,
+        {
+          topic_idea: idea.topic_idea,
+          format_style: idea.format_style,
+          channel_name: idea.channel_name
+        },
+        {
+          headers: {
+            'x-telegram-user-id': userId || 'unknown'
+          }
+        }
+      );
+
+      // Если успешно получили данные
       if (response.data) {
         const newDetails = {
           post_text: response.data.generated_text || 'Не удалось сгенерировать текст поста.',
@@ -749,6 +718,7 @@ function App() {
       setError(err.response?.data?.detail || err.message || 'Ошибка при детализации идеи');
       console.error('Ошибка при детализации:', err);
     } finally {
+      setCurrentView('details');
       setIsDetailGenerating(false);
     }
   };
