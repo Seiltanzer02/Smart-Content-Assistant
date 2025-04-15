@@ -5,7 +5,7 @@ import { TelegramAuth } from './components/TelegramAuth';
 import { v4 as uuidv4 } from 'uuid';
 
 // Определяем базовый URL API
-const API_BASE_URL = '/api';
+const API_BASE_URL = '';
 
 // Simple error boundary component
 class SimpleErrorBoundary extends React.Component<
@@ -221,6 +221,7 @@ function App() {
   const [editingPost, setEditingPost] = useState<SavedPost | null>(null);
   const [editedText, setEditedText] = useState<string>('');
   const [editedImageUrl, setEditedImageUrl] = useState<string>('');
+  const [editedDate, setEditedDate] = useState<string>('');
   const [isSavingPost, setIsSavingPost] = useState(false);
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
   const [allChannels, setAllChannels] = useState<string[]>([]);
@@ -464,7 +465,8 @@ function App() {
       const postData = {
         ...editingPost,
         final_text: editedText,
-        image_url: editedImageUrl
+        image_url: editedImageUrl,
+        target_date: editedDate
       };
       
       const response = await axios.put(`/posts/${editingPost.id}`, postData);
@@ -507,6 +509,7 @@ function App() {
     setEditingPost(post);
     setEditedText(post.final_text);
     setEditedImageUrl(post.image_url || '');
+    setEditedDate(post.target_date);
     setCurrentView('edit');
   };
   
@@ -1297,7 +1300,15 @@ function App() {
               <div className="post-source-info">
                 <p><strong>Тема:</strong> {editingPost.topic_idea}</p>
                 <p><strong>Формат:</strong> {editingPost.format_style}</p>
-                <p><strong>Дата публикации:</strong> {new Date(editingPost.target_date).toLocaleDateString()}</p>
+                <div className="date-picker-container">
+                  <label><strong>Дата публикации:</strong></label>
+                  <input 
+                    type="date" 
+                    value={editedDate}
+                    onChange={(e) => setEditedDate(e.target.value)}
+                    className="date-input"
+                  />
+                </div>
                 {editingPost.channel_name && (
                   <p><strong>Канал:</strong> @{editingPost.channel_name}</p>
                 )}
