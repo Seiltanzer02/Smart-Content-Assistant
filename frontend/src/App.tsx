@@ -7,6 +7,31 @@ import WebApp from '@twa-dev/sdk';
 import { TelegramAuth } from './components/TelegramAuth';
 import { ErrorBoundary } from 'react-error-boundary';
 
+// Добавляем типы для Telegram
+declare global {
+  interface Window {
+    Telegram?: {
+      WebApp?: any;
+    };
+  }
+}
+
+// Заменяю все helpers для localStorage на функции-заглушки
+const memoryStorage: Record<string, any> = {};
+
+// Сохранение состояния без использования local/sessionStorage
+const safeGetItem = (key: string): string | null => {
+  return memoryStorage[key] || null;
+};
+
+const safeSetItem = (key: string, value: string): void => {
+  memoryStorage[key] = value;
+};
+
+const safeRemoveItem = (key: string): void => {
+  delete memoryStorage[key];
+};
+
 // --- ТИПЫ --- 
 
 // Переносим SuggestedIdeaResponse в начало
@@ -110,43 +135,6 @@ const isLocalStorageAvailable = () => {
   }
 };
 
-// Резервное хранилище в памяти (используется, когда localStorage недоступен)
-const memoryStorage: Record<string, any> = {};
-
-// Безопасные функции для работы с хранилищем
-const safeGetItem = (key: string): string | null => {
-  try {
-    if (isLocalStorageAvailable()) {
-      return localStorage.getItem(key);
-    }
-  } catch (e) {
-    console.warn(`Не удалось получить ${key} из localStorage:`, e);
-  }
-  return memoryStorage[key] || null;
-};
-
-const safeSetItem = (key: string, value: string): void => {
-  try {
-    if (isLocalStorageAvailable()) {
-      localStorage.setItem(key, value);
-    }
-  } catch (e) {
-    console.warn(`Не удалось сохранить ${key} в localStorage:`, e);
-  }
-  memoryStorage[key] = value;
-};
-
-const safeRemoveItem = (key: string): void => {
-  try {
-    if (isLocalStorageAvailable()) {
-      localStorage.removeItem(key);
-    }
-  } catch (e) {
-    console.warn(`Не удалось удалить ${key} из localStorage:`, e);
-  }
-  delete memoryStorage[key];
-};
-
 // Базовый URL API
 const API_BASE_URL = ''; // Пустая строка - запросы будут относительными (к тому же домену)
 
@@ -201,11 +189,8 @@ function App() {
   // --- СОСТОЯНИЯ --- 
 
   // Глобальные
-  // Читаем из localStorage при инициализации с защитой от ошибок
-  const [currentView, setCurrentView] = useState<View>(() => {
-     const savedView = safeGetItem(LOCAL_STORAGE_KEYS.VIEW);
-     return (savedView as View) || 'analyze'; // По умолчанию 'analyze'
-  });
+  // Используем только память, без localStorage
+  const [currentView, setCurrentView] = useState<View>('analyze'); // По умолчанию 'analyze'
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null); 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -213,47 +198,16 @@ function App() {
   const [telegramUserId, setTelegramUserId] = useState<string | null>(null);
 
   // Анализ
-  // Читаем из localStorage при инициализации
-  const [channelName, setChannelName] = useState<string>(() => 
-      safeGetItem(LOCAL_STORAGE_KEYS.CHANNEL) || ''
-  );
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(() => {
-     const savedAnalysis = safeGetItem(LOCAL_STORAGE_KEYS.ANALYSIS);
-     try {
-       return savedAnalysis ? JSON.parse(savedAnalysis) : null;
-     } catch (e) {
-       console.error("Ошибка парсинга analysisResult из хранилища", e);
-       safeRemoveItem(LOCAL_STORAGE_KEYS.ANALYSIS); // Удаляем некорректные данные
-       return null;
-     }
-  });
+  // Используем пустые значения по умолчанию
+  const [channelName, setChannelName] = useState<string>('');
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
 
-  // Генерация Идей (используем безопасные функции хранилища)
-  const [savedIdeas, setSavedIdeas] = useState<SuggestedIdeaResponse[]>(() => {
-    const saved = safeGetItem(LOCAL_STORAGE_KEYS.IDEAS);
-    try {
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      console.error("Ошибка парсинга savedIdeas из хранилища", e);
-      safeRemoveItem(LOCAL_STORAGE_KEYS.IDEAS);
-      return [];
-    }
-  });
+  // Используем пустые массивы по умолчанию
+  const [savedIdeas, setSavedIdeas] = useState<SuggestedIdeaResponse[]>([]);
   const [isLoadingIdeas, setIsLoadingIdeas] = useState<boolean>(false);
 
-  // План (используем безопасные функции хранилища)
-  const [savedPosts, setSavedPosts] = useState<SavedPost[]>(() => {
-    const saved = safeGetItem(LOCAL_STORAGE_KEYS.POSTS);
-    try {
-      // Доп. проверка: убедимся, что это массив (на случай некорректных данных)
-      const parsed = saved ? JSON.parse(saved) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (e) {
-      console.error("Ошибка парсинга savedPosts из хранилища", e);
-      safeRemoveItem(LOCAL_STORAGE_KEYS.POSTS);
-      return [];
-    }
-  });
+  // План (используем пустые массивы по умолчанию)
+  const [savedPosts, setSavedPosts] = useState<SavedPost[]>([]);
   const [isLoadingPosts, setIsLoadingPosts] = useState<boolean>(false);
   const [calendarValue, setCalendarValue] = useState<CalendarValue>(new Date());
   // НОВОЕ СОСТОЯНИЕ для поста, выбранного в календаре
@@ -277,29 +231,14 @@ function App() {
 
   // --- ЭФФЕКТЫ --- 
 
+  // Оставляем только один критически важный эффект для инициализации
   useEffect(() => {
-    const initApp = async () => {
-      try {
-        console.log('Инициализация приложения...');
-        
-        // Проверяем, есть ли ID пользователя в URL (для тестирования)
-        const urlParams = new URLSearchParams(window.location.search);
-        const userId = urlParams.get('user_id');
-        
-        if (userId) {
-          console.log('ID пользователя найден в URL параметрах:', userId);
-          handleAuthSuccess(userId);
-        } else {
-          console.log('ID пользователя не найден в URL параметрах, ожидаем инициализацию через TelegramAuth');
-        }
-      } catch (error) {
-        console.error('Ошибка при инициализации приложения:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    initApp();
+    console.log('Инициализация приложения...');
+    
+    // Упрощенная инициализация
+    setTimeout(() => {
+      setLoading(false);
+    }, 1000);
   }, []);
 
   const handleAuthSuccess = (userId: string) => {
@@ -315,11 +254,6 @@ function App() {
       console.error('Ошибка при установке заголовка:', e);
     }
   };
-
-  // Добавляем эффект для отслеживания изменений состояния авторизации
-  useEffect(() => {
-    console.log('Состояние авторизации изменилось:', { isAuthenticated, telegramUserId });
-  }, [isAuthenticated, telegramUserId]);
 
   if (loading) {
     return (
@@ -344,15 +278,19 @@ function App() {
 
   console.log('Пользователь авторизован, отображаем основной интерфейс');
 
-  // Сохранение currentView в localStorage при изменении
-  useEffect(() => {
-    safeSetItem(LOCAL_STORAGE_KEYS.VIEW, currentView);
-  }, [currentView]);
-
-  // Сохранение channelName в localStorage при изменении
-  useEffect(() => {
-     safeSetItem(LOCAL_STORAGE_KEYS.CHANNEL, channelName);
-  }, [channelName]);
+  // --- ОСНОВНАЯ ЛОГИКА --- 
+  // Сохраняем данные при изменении (но не используем localStorage)
+  const handleViewChange = (view: View) => {
+    setCurrentView(view);
+    if (view === 'plan' && channelName) {
+      fetchSavedPosts(channelName);
+    } else if (view === 'suggestions' && channelName) {
+      fetchSavedIdeas(channelName);
+    }
+    if (currentView === 'editor' && view !== 'editor') {
+      setCurrentDataForEditor(null);
+    }
+  };
 
   // Сохранение analysisResult в localStorage при изменении
   useEffect(() => {
@@ -693,31 +631,6 @@ function App() {
 
   // --- ОБРАБОТЧИКИ ИНТЕРФЕЙСА --- 
 
-  // Навигация
-  const navigateTo = (view: View) => {
-    // Сбрасываем ошибки/сообщения при переходе
-    // setError(null);
-    // setSuccessMessage(null);
-    
-    // Сбрасываем редактор при уходе с него
-    if (currentView === 'editor' && view !== 'editor') {
-        setCurrentDataForEditor(null);
-    }
-      setCurrentView(view);
-  };
-
-  // Клик "Детализировать" в списке идей (тип параметра изменен)
-  const handleDetailSuggestion = (idea: SuggestedIdeaResponse) => {
-    setCurrentDataForEditor(idea);
-    navigateTo('editor');
-  };
-
-  // Клик "Редактировать" в списке сохраненных постов
-  const handleEditSavedPost = (post: SavedPost) => {
-    setCurrentDataForEditor(post);
-    navigateTo('editor');
-  };
-
   // Изменение данных в форме редактора
   const handleEditorFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -781,11 +694,11 @@ function App() {
   // Навигация
   const renderNavigation = () => (
     <div className="navigation-buttons">
-      <button onClick={() => navigateTo('analyze')} className={`action-button ${currentView === 'analyze' ? 'active' : ''}`}>Анализ</button>
+      <button onClick={() => handleViewChange('analyze')} className={`action-button ${currentView === 'analyze' ? 'active' : ''}`}>Анализ</button>
       {/* Кнопка Идей доступна, если есть имя канала */}
-      <button onClick={() => navigateTo('suggestions')} className={`action-button ${currentView === 'suggestions' ? 'active' : ''}`} disabled={!channelName}>Идеи</button>
+      <button onClick={() => handleViewChange('suggestions')} className={`action-button ${currentView === 'suggestions' ? 'active' : ''}`} disabled={!channelName}>Идеи</button>
       {/* Кнопка План доступна, если есть имя канала */} 
-      <button onClick={() => navigateTo('plan')} className={`action-button ${currentView === 'plan' ? 'active' : ''}`} disabled={!channelName}>План</button>
+      <button onClick={() => handleViewChange('plan')} className={`action-button ${currentView === 'plan' ? 'active' : ''}`} disabled={!channelName}>План</button>
     </div>
   );
 
@@ -980,7 +893,7 @@ function App() {
           onClick={() => {
             setCurrentDataForEditor(null); // Сброс редактора
             // Возвращаемся на предыдущий осмысленный вид
-            navigateTo(isEditingMode ? 'plan' : 'suggestions'); 
+            handleViewChange(isEditingMode ? 'plan' : 'suggestions'); 
           }}
           className="back-button"
           disabled={isLoading || isSaving || isGeneratingDetails}
@@ -1154,13 +1067,13 @@ function App() {
   // Обработчик клика по кнопке "Редактировать" сохраненный пост
   const handleEditPost = (post: SavedPost) => {
     setCurrentDataForEditor(post);
-    setCurrentView('editor');
+    handleViewChange('editor');
   };
 
   // Обработчик клика по кнопке "Создать пост" для идеи
   const handleCreatePostFromIdea = (idea: SuggestedIdeaResponse) => {
     setCurrentDataForEditor(idea);
-    setCurrentView('editor');
+    handleViewChange('editor');
   };
   
   // НОВЫЙ ОБРАБОТЧИК для кнопки удаления поста из списка/деталей календаря
@@ -1212,6 +1125,18 @@ function App() {
   };
 
   // --- ОБРАБОТЧИКИ ИНТЕРФЕЙСА --- 
+
+  // Клик "Детализировать" в списке идей
+  const handleDetailSuggestion = (idea: SuggestedIdeaResponse) => {
+    setCurrentDataForEditor(idea);
+    handleViewChange('editor');
+  };
+
+  // Клик "Редактировать" в списке сохраненных постов
+  const handleEditSavedPost = (post: SavedPost) => {
+    setCurrentDataForEditor(post);
+    handleViewChange('editor');
+  };
 
   // НОВЫЙ ОБРАБОТЧИК клика по дню в календаре
   const handleCalendarDayClick = (value: Date) => {
