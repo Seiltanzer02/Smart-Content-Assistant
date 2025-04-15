@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
 import { TelegramAuth } from './components/TelegramAuth';
+import { v4 as uuidv4 } from 'uuid';
+
+// Определяем базовый URL API
+const API_BASE_URL = '/api';
 
 // Simple error boundary component
 class SimpleErrorBoundary extends React.Component<
@@ -115,6 +119,79 @@ interface CalendarDay {
   isToday: boolean;
 }
 
+// Добавим новый тип для кешированных деталей постов
+interface CachedPostDetails {
+  [key: string]: DetailedPost;
+}
+
+// Компонент загрузки изображений
+const ImageUploader = ({ onImageUploaded }: { onImageUploaded: (imageUrl: string) => void }) => {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    
+    const file = files[0];
+    // Проверка размера (менее 5 МБ)
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError("Размер файла должен быть не более 5 МБ");
+      return;
+    }
+    
+    // Проверка типа (только изображения)
+    if (!file.type.startsWith('image/')) {
+      setUploadError("Разрешены только изображения");
+      return;
+    }
+    
+    // Загружаем файл на сервер
+    setUploading(true);
+    setUploadError(null);
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const response = await axios.post(`${API_BASE_URL}/upload-image`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      
+      if (response.data && response.data.url) {
+        onImageUploaded(response.data.url);
+      } else {
+        setUploadError("Ошибка при загрузке. Попробуйте еще раз.");
+      }
+    } catch (error: any) {
+      console.error("Ошибка загрузки изображения:", error);
+      setUploadError(error.response?.data?.detail || "Ошибка при загрузке");
+    } finally {
+      setUploading(false);
+    }
+  };
+  
+  return (
+    <div className="image-uploader">
+      <label className="upload-button-label">
+        <input 
+          type="file" 
+          accept="image/*" 
+          onChange={handleFileChange} 
+          disabled={uploading}
+          style={{ display: 'none' }}
+        />
+        <span className="action-button">
+          {uploading ? "Загрузка..." : "Загрузить изображение"}
+        </span>
+      </label>
+      {uploadError && <p className="error-message">{uploadError}</p>}
+    </div>
+  );
+};
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -130,7 +207,7 @@ function App() {
   const [selectedIdea, setSelectedIdea] = useState<SuggestedIdea | null>(null);
   const [detailedPost, setDetailedPost] = useState<DetailedPost | null>(null);
   const [isDetailGenerating, setIsDetailGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); 
   const [success, setSuccess] = useState<string | null>(null);
   
   // Новые состояния для календаря и сохраненных постов
@@ -148,6 +225,9 @@ function App() {
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
   const [allChannels, setAllChannels] = useState<string[]>([]);
 
+  // Добавляем кеш для детализированных постов
+  const [detailsCache, setDetailsCache] = useState<CachedPostDetails>({});
+
   // Быстрая инициализация без localStorage
   useEffect(() => {
     // Восстанавливаем состояние из localStorage
@@ -160,7 +240,7 @@ function App() {
     if (storedSelectedChannels) {
       try {
         setSelectedChannels(JSON.parse(storedSelectedChannels));
-      } catch (e) {
+    } catch (e) {
         console.error('Ошибка при восстановлении выбранных каналов:', e);
       }
     }
@@ -175,19 +255,8 @@ function App() {
     if (channelName) {
       localStorage.setItem('channelName', channelName);
       
-      // Добавляем канал в список всех каналов, если его там нет
-      if (!allChannels.includes(channelName)) {
-        const updatedChannels = [...allChannels, channelName];
-        setAllChannels(updatedChannels);
-        localStorage.setItem('allChannels', JSON.stringify(updatedChannels));
-      }
-      
-      // Добавляем канал в список выбранных, если его там нет
-      if (!selectedChannels.includes(channelName)) {
-        const updatedSelected = [...selectedChannels, channelName];
-        setSelectedChannels(updatedSelected);
-        localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
-      }
+      // НЕ добавляем канал в список каналов здесь - 
+      // это будет происходить только после успешного анализа
     }
   }, [channelName]);
   
@@ -287,26 +356,37 @@ function App() {
     setError(null);
     
     try {
-      const channelParam = selectedChannels.length > 0 ? selectedChannels[0] : '';
-      const response = await axios.get('/posts', {
-        params: { channel_name: channelParam }
-      });
-      
-      if (response.data && Array.isArray(response.data)) {
-        setSavedPosts(response.data);
+      // Если выбранных каналов нет, загружаем все посты
+      if (selectedChannels.length === 0) {
+        const response = await axios.get('/posts');
         
-        // Собираем уникальные каналы из постов
-        const channels = [...new Set(response.data
-          .map(post => post.channel_name)
-          .filter(channel => channel) // Удаляем undefined и пустые строки
-        )];
-        
-        // Обновляем список всех каналов
-        if (channels.length > 0) {
-          const updatedChannels = [...new Set([...allChannels, ...channels])];
-          setAllChannels(updatedChannels);
-          localStorage.setItem('allChannels', JSON.stringify(updatedChannels));
+        if (response.data && Array.isArray(response.data)) {
+          setSavedPosts(response.data);
+          
+          // Собираем уникальные каналы из постов
+          updateChannelsFromPosts(response.data);
         }
+      } else {
+        // Если есть выбранные каналы - используем фильтр
+        const allPosts: SavedPost[] = [];
+        
+        // Загружаем посты для каждого выбранного канала
+        for (const channel of selectedChannels) {
+          try {
+            const response = await axios.get('/posts', {
+              params: { channel_name: channel }
+            });
+            
+            if (response.data && Array.isArray(response.data)) {
+              allPosts.push(...response.data);
+            }
+          } catch (err) {
+            console.error(`Ошибка при загрузке постов для канала ${channel}:`, err);
+            // Продолжаем с другими каналами
+          }
+        }
+        
+        setSavedPosts(allPosts);
       }
     } catch (err: any) {
       console.error('Ошибка при загрузке сохраненных постов:', err);
@@ -316,12 +396,28 @@ function App() {
     }
   };
   
+  // Вспомогательная функция для обновления списка каналов из постов
+  const updateChannelsFromPosts = (posts: SavedPost[]) => {
+    // Собираем уникальные каналы из постов
+    const channels = [...new Set(posts
+      .map(post => post.channel_name)
+      .filter((channel): channel is string => !!channel) // Отфильтровываем undefined и приводим к типу string
+    )];
+    
+    // Обновляем список всех каналов
+    if (channels.length > 0) {
+      const updatedChannels = [...new Set([...allChannels, ...channels])];
+      setAllChannels(updatedChannels);
+      localStorage.setItem('allChannels', JSON.stringify(updatedChannels));
+    }
+  };
+  
   // Функция для сохранения поста
   const savePost = async (postDate: Date) => {
     if (!detailedPost || !selectedIdea) return;
     
     setIsSavingPost(true);
-    setError(null);
+        setError(null);
     
     try {
       // Выбираем первое изображение из списка, если есть
@@ -424,7 +520,7 @@ function App() {
     try {
       const response = await axios.post('/save-ideas', {
         ideas: suggestedIdeas,
-        channel_name: channelName
+          channel_name: channelName 
       });
       
       if (response.data && response.data.message) {
@@ -440,32 +536,13 @@ function App() {
   
   // Функция для фильтрации постов по каналам
   const filterPostsByChannels = async () => {
-    if (selectedChannels.length === 0) return;
-    
-    setLoadingSavedPosts(true);
-    setError(null);
-    
-    try {
-      // Получаем посты для каждого выбранного канала и объединяем результаты
-      const allPosts: SavedPost[] = [];
-      
-      for (const channel of selectedChannels) {
-        const response = await axios.get('/posts', {
-          params: { channel_name: channel }
-        });
-        
-        if (response.data && Array.isArray(response.data)) {
-          allPosts.push(...response.data);
-        }
-      }
-      
-      setSavedPosts(allPosts);
-    } catch (err: any) {
-      console.error('Ошибка при фильтрации постов:', err);
-      setError(err.response?.data?.detail || err.message || 'Ошибка при фильтрации постов');
-    } finally {
-      setLoadingSavedPosts(false);
+    if (selectedChannels.length === 0) {
+      setError("Выберите хотя бы один канал для фильтрации");
+      return;
     }
+    
+    // Просто используем основную функцию загрузки постов
+    await fetchSavedPosts();
   };
 
   // Обработчик успешной авторизации
@@ -492,6 +569,20 @@ function App() {
       const response = await axios.post('/analyze', { username: channelName });
       setAnalysisResult(response.data);
       setSuccess('Анализ успешно завершен');
+      
+      // Только после успешного анализа добавляем канал в список всех каналов
+      if (!allChannels.includes(channelName)) {
+        const updatedChannels = [...allChannels, channelName];
+        setAllChannels(updatedChannels);
+        localStorage.setItem('allChannels', JSON.stringify(updatedChannels));
+      
+        // Добавляем канал в список выбранных, если его там нет
+        if (!selectedChannels.includes(channelName)) {
+          const updatedSelected = [...selectedChannels, channelName];
+          setSelectedChannels(updatedSelected);
+          localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
+        }
+      }
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Ошибка при анализе канала');
       console.error('Ошибка при анализе:', err);
@@ -500,66 +591,88 @@ function App() {
     }
   };
 
-  // Функция для генерации идей на основе анализа
+  // Функция для генерации идей
   const generateIdeas = async () => {
-    if (!analysisResult) {
-      setError("Сначала выполните анализ канала");
-      return;
-    }
-
-    setIsGeneratingIdeas(true);
-    setError(null);
-    setSuccess(null);
-
     try {
-      const response = await axios.post('/generate-plan', {
-        themes: analysisResult.themes,
-        styles: analysisResult.styles,
-        period_days: 7,
-        channel_name: channelName
-      });
-      
-      // Обработка и очистка полученных данных от маркдаун форматирования
-      const processedPlan = response.data.plan.map((item: any, index: number) => {
-        // Извлекаем тему и формат из строки, удаляя markdown-форматирование и лишние символы
-        let topic = item.topic_idea || '';
-        let format = item.format_style || '';
-        
-        // Очищаем от маркдаун-разметки и других элементов форматирования
-        topic = topic.replace(/\*\*/g, '').replace(/"/g, '').trim();
-        format = format.replace(/\*\*/g, '').replace(/"/g, '').replace(/\(/g, '').replace(/\)/g, '').trim();
-        
-        return {
-          id: `idea-${Date.now()}-${index}`,
-          created_at: new Date().toISOString(),
-          channel_name: channelName,
-          topic_idea: topic,
-          format_style: format,
-          day: item.day || index + 1
-        };
-      });
-      
-      setSuggestedIdeas(processedPlan);
-      setSuccess('Идеи успешно сгенерированы');
-      setCurrentView('suggestions');
-      
-      // Сохраняем идеи в базу данных
-      try {
-        const saveResponse = await axios.post('/save-ideas', {
-          ideas: processedPlan,
-          channel_name: channelName
-        });
-        
-        if (saveResponse.data && saveResponse.data.message) {
-          setSuccess(`Идеи успешно сгенерированы и сохранены: ${saveResponse.data.message}`);
-        }
-      } catch (saveErr: any) {
-        console.error('Ошибка при сохранении идей:', saveErr);
-        // Не показываем ошибку пользователю, так как идеи уже сгенерированы
+      if (!analysisResult) {
+        console.error("Нет результатов анализа для генерации идей");
+        setError("Пожалуйста, сначала выполните анализ канала");
+        return;
       }
-    } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Ошибка при генерации идей');
-      console.error('Ошибка при генерации идей:', err);
+
+      setIsGeneratingIdeas(true);
+      setError("");
+
+      // Извлекаем темы и форматы из результатов анализа
+      const themes = analysisResult.themes || [];
+      const formats = analysisResult.styles || [];
+
+      // Отправляем запрос на генерацию идей
+      const response = await axios.post(
+        `${API_BASE_URL}/generate-plan`,
+        {
+          themes,
+          formats,
+          num_days: 30
+        },
+        {
+          headers: {
+            'x-telegram-user-id': userId || 'unknown'
+          }
+        }
+      );
+
+      // Обрабатываем полученные идеи
+      if (response.data && response.data.days) {
+        const newIdeas = response.data.days.map((day: any) => {
+          // Очищаем тему и формат от маркеров
+          let topic = day.topic || "";
+          let format = day.format || "";
+          
+          // Удаляем маркеры типа "*Идея:*", "*Формат:*" и т.д.
+          topic = topic.replace(/\*Идея:\*\s*/gi, "").replace(/\*[^*]+:\*\s*/g, "").trim();
+          format = format.replace(/\*Формат:\*\s*/gi, "").replace(/\*[^*]+:\*\s*/g, "").trim();
+          
+          // Удаляем кавычки, если они есть
+          topic = topic.replace(/"/g, "").trim();
+          format = format.replace(/"/g, "").trim();
+
+          return {
+            id: `idea_${uuidv4()}`, // Используем uuidv4 вместо timestamp
+            day: day.day,
+            topic_idea: topic,
+            format_style: format,
+            created_at: new Date().toISOString(),
+            published: false
+          };
+        });
+
+        setSuggestedIdeas(newIdeas);
+
+        // Сохраняем сгенерированные идеи в базу данных
+        try {
+          await axios.post(
+            `${API_BASE_URL}/save-ideas`,
+            {
+              ideas: newIdeas,
+              channel_name: channelName
+            },
+            {
+              headers: {
+                'x-telegram-user-id': userId || 'unknown'
+              }
+            }
+          );
+          console.log("Идеи успешно сохранены в базе данных");
+        } catch (saveError) {
+          console.error("Ошибка при сохранении идей:", saveError);
+        }
+      } else {
+        setError("Не удалось сгенерировать идеи. Попробуйте еще раз.");
+      }
+    } catch (e) {
+      console.error("Ошибка при генерации идей:", e);
+      setError("Произошла ошибка при генерации идей. Попробуйте еще раз.");
     } finally {
       setIsGeneratingIdeas(false);
     }
@@ -589,15 +702,23 @@ function App() {
   // Функция для детализации идеи
   const handleDetailIdea = async (idea: SuggestedIdea) => {
     setSelectedIdea(idea);
+    setCurrentView('details');
+    
+    // Проверяем, есть ли уже в кеше детали для этой идеи
+    if (detailsCache[idea.id]) {
+      setDetailedPost(detailsCache[idea.id]);
+      return;
+    }
+    
+    // Если в кеше нет, запрашиваем с сервера
     setIsDetailGenerating(true);
     setDetailedPost(null);
     setError(null);
     setSuccess(null);
-    setCurrentView('details');
 
     try {
       // Запрос на детализацию идеи через API
-      const response = await axios.post('/generate-post-details', {
+      const response = await axios.post(`${API_BASE_URL}/generate-post-details`, {
         topic_idea: idea.topic_idea,
         format_style: idea.format_style,
         channel_name: idea.channel_name
@@ -605,7 +726,7 @@ function App() {
 
       // Обработка полученных данных
       if (response.data) {
-        setDetailedPost({
+        const newDetails = {
           post_text: response.data.generated_text || 'Не удалось сгенерировать текст поста.',
           images: response.data.found_images.map((img: any) => ({
             url: img.regular_url || img.preview_url,
@@ -613,12 +734,63 @@ function App() {
             author: img.author_name,
             author_url: img.author_url
           })) || []
-        });
+        };
+        
+        // Сохраняем в кеш и в текущее состояние
+        setDetailedPost(newDetails);
+        setDetailsCache(prev => ({
+          ...prev,
+          [idea.id]: newDetails
+        }));
+        
         setSuccess('Детализация успешно создана');
       }
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Ошибка при детализации идеи');
       console.error('Ошибка при детализации:', err);
+    } finally {
+      setIsDetailGenerating(false);
+    }
+  };
+
+  // Добавляем функцию для принудительной регенерации деталей поста
+  const regeneratePostDetails = async () => {
+    if (!selectedIdea) return;
+    
+    setIsDetailGenerating(true);
+    setDetailedPost(null);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await axios.post(`${API_BASE_URL}/generate-post-details`, {
+        topic_idea: selectedIdea.topic_idea,
+        format_style: selectedIdea.format_style,
+        channel_name: selectedIdea.channel_name
+      });
+
+      if (response.data) {
+        const newDetails = {
+          post_text: response.data.generated_text || 'Не удалось сгенерировать текст поста.',
+          images: response.data.found_images.map((img: any) => ({
+            url: img.regular_url || img.preview_url,
+            alt: img.description,
+            author: img.author_name,
+            author_url: img.author_url
+          })) || []
+        };
+        
+        setDetailedPost(newDetails);
+        setDetailsCache(prev => ({
+          ...prev,
+          [selectedIdea.id]: newDetails
+        }));
+        
+        setSuccess('Детализация успешно обновлена');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message || 'Ошибка при регенерации деталей');
+      console.error('Ошибка при регенерации деталей:', err);
     } finally {
       setIsDetailGenerating(false);
     }
@@ -659,7 +831,7 @@ function App() {
         {success && <div className="success-message">{success}</div>}
 
         {/* Навигация */}
-        <div className="navigation-buttons">
+    <div className="navigation-buttons">
           <button 
             onClick={() => setCurrentView('analyze')} 
             className={`action-button ${currentView === 'analyze' ? 'active' : ''}`}
@@ -679,9 +851,11 @@ function App() {
             Идеи
           </button>
           <button 
-            onClick={() => setCurrentView('plan')} 
+            onClick={() => {
+              setCurrentView('plan');
+              fetchSavedPosts();
+            }} 
             className={`action-button ${currentView === 'plan' ? 'active' : ''}`}
-            disabled={!channelName}
           >
             План
           </button>
@@ -694,7 +868,7 @@ function App() {
           >
             Календарь
           </button>
-        </div>
+    </div>
 
         {/* Выбор канала */}
         <div className="channel-selector">
@@ -716,14 +890,14 @@ function App() {
           {/* Вид анализа */}
           {currentView === 'analyze' && (
             <div className="view analyze-view">
-              <h2>Анализ Telegram-канала</h2>
-              <div className="input-container">
-                <input
-                  type="text"
-                  className="channel-input"
-                  value={channelName}
-                  onChange={(e) => setChannelName(e.target.value.replace(/^@/, ''))}
-                  placeholder="Введите username канала (без @)"
+      <h2>Анализ Telegram-канала</h2>
+      <div className="input-container">
+        <input
+          type="text"
+          className="channel-input"
+          value={channelName}
+          onChange={(e) => setChannelName(e.target.value.replace(/^@/, ''))}
+          placeholder="Введите username канала (без @)"
                   disabled={isAnalyzing}
                 />
                 <button 
@@ -732,8 +906,8 @@ function App() {
                   disabled={isAnalyzing || !channelName}
                 >
                   {isAnalyzing ? 'Анализ...' : 'Анализировать'}
-                </button>
-              </div>
+        </button>
+      </div>
 
               {isAnalyzing && (
                 <div className="loading-indicator">
@@ -742,28 +916,28 @@ function App() {
                 </div>
               )}
 
-              {analysisResult && (
-                <div className="results-container">
-                  <h3>Результаты анализа:</h3>
-                  <p><strong>Темы:</strong> {analysisResult.themes.join(', ')}</p>
-                  <p><strong>Стили:</strong> {analysisResult.styles.join(', ')}</p>
+      {analysisResult && (
+          <div className="results-container">
+              <h3>Результаты анализа:</h3>
+              <p><strong>Темы:</strong> {analysisResult.themes.join(', ')}</p>
+              <p><strong>Стили:</strong> {analysisResult.styles.join(', ')}</p>
                   <p><strong>Лучшее время для постинга:</strong> {analysisResult.best_posting_time}</p>
                   <p><strong>Проанализировано постов:</strong> {analysisResult.analyzed_posts_count}</p>
                   
-                  <button 
+              <button 
                     onClick={generateIdeas} 
                     className="action-button generate-button"
                     disabled={isGeneratingIdeas}
                   >
                     {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать идеи'}
-                  </button>
-                </div>
-              )}
+              </button>
+          </div>
+      )}
 
               {!analysisResult && !isAnalyzing && (
                 <p>Введите имя канала для начала анализа. Например: durov</p>
               )}
-            </div>
+    </div>
           )}
 
           {/* Вид идей */}
@@ -775,7 +949,7 @@ function App() {
                 <div className="loading-indicator">
                   <div className="loading-spinner"></div>
                   <p>Загрузка идей...</p>
-                </div>
+              </div>
               )}
 
               {suggestedIdeas.length > 0 ? (
@@ -786,18 +960,18 @@ function App() {
                         <div className="idea-header">
                           <span className="idea-title">{idea.topic_idea}</span>
                           <span className="idea-style">({idea.format_style})</span>
-                        </div>
+            </div>
                         {idea.day && <div className="idea-day">День {idea.day}</div>}
-                      </div>
-                      <button 
+                                </div>
+                            <button 
                         className="action-button small"
                         onClick={() => handleDetailIdea(idea)}
                       >
                         Детализировать
-                      </button>
-                    </div>
+                            </button>
+                        </div>
                   ))}
-                </div>
+                    </div>
               ) : !isGeneratingIdeas ? (
                 <p>
                   {analysisResult 
@@ -806,28 +980,49 @@ function App() {
                   }
                 </p>
               ) : null}
-            </div>
-          )}
+                </div>
+            )}
 
           {/* Вид плана */}
           {currentView === 'plan' && (
             <div className="view plan-view">
               <h2>План публикаций</h2>
-              {suggestedIdeas.length > 0 ? (
+              
+              {loadingSavedPosts ? (
+                <div className="loading-indicator">
+                  <div className="loading-spinner"></div>
+                  <p>Загрузка сохраненных постов...</p>
+                </div>
+              ) : savedPosts.length > 0 ? (
                 <div className="plan-display">
-                  <h3>План публикаций для канала @{channelName}</h3>
+                  <h3>План публикаций для канала {channelName ? `@${channelName}` : ""}</h3>
                   <ul className="plan-list">
-                    {suggestedIdeas
-                      .sort((a, b) => (a.day || 0) - (b.day || 0))
-                      .map((idea) => (
-                        <li key={idea.id} className="plan-list-item-clickable" onClick={() => handleDetailIdea(idea)}>
-                          <strong>День {idea.day}:</strong> {idea.topic_idea} <em>({idea.format_style})</em>
+                    {savedPosts
+                      .sort((a, b) => new Date(a.target_date).getTime() - new Date(b.target_date).getTime())
+                      .map((post) => (
+                        <li key={post.id} className="plan-list-item-clickable" onClick={() => startEditingPost(post)}>
+                          <strong>{new Date(post.target_date).toLocaleDateString()}:</strong> {post.topic_idea} 
+                          <em>({post.format_style})</em>
+                          {post.channel_name && <span className="post-channel">@{post.channel_name}</span>}
                         </li>
                       ))}
                   </ul>
                 </div>
               ) : (
-                <p>Сначала сгенерируйте идеи на вкладке "Идеи"</p>
+                <div className="empty-plan">
+                  <p>У вас пока нет сохранённых постов. Создайте посты на вкладке "Идеи", затем детализируйте и сохраните их.</p>
+                  <button 
+                    className="action-button" 
+                    onClick={() => {
+                      setCurrentView('suggestions');
+                      if (suggestedIdeas.length === 0) {
+                        fetchSavedIdeas();
+                      }
+                    }}
+                  >
+                    Перейти к идеям
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -838,7 +1033,7 @@ function App() {
               <button onClick={backToIdeas} className="back-button">
                 ← Назад к идеям
               </button>
-              
+
               <h2>Детализация идеи</h2>
               
               <div className="post-source-info">
@@ -847,7 +1042,7 @@ function App() {
                 <p><strong>День:</strong> {selectedIdea.day}</p>
                 <p><strong>Канал:</strong> @{selectedIdea.channel_name}</p>
               </div>
-              
+
               {isDetailGenerating && (
                 <div className="loading-indicator">
                   <div className="loading-spinner"></div>
@@ -859,9 +1054,9 @@ function App() {
                 <div className="generated-content">
                   <div className="post-text-section">
                     <h3>Текст поста:</h3>
-                    <textarea 
+                    <textarea
                       className="post-textarea" 
-                      value={detailedPost.post_text} 
+                      value={detailedPost.post_text}
                       readOnly 
                     />
                   </div>
@@ -877,11 +1072,42 @@ function App() {
                               alt={img.alt || "Изображение для поста"} 
                               className="thumbnail"
                             />
-                            {img.author && (
-                              <span className="image-author">{img.author}</span>
-                            )}
                           </div>
                         ))}
+                      </div>
+                      <div className="image-actions">
+                        <button 
+                          onClick={regeneratePostDetails}
+                          className="action-button"
+                          disabled={isDetailGenerating}
+                        >
+                          Обновить изображения
+                        </button>
+                        <div className="custom-image-upload">
+                          <h4>Загрузить свое изображение:</h4>
+                          <ImageUploader 
+                            onImageUploaded={(url) => {
+                              // Добавляем загруженное изображение к детализации
+                              const newImage = {
+                                url: url,
+                                alt: "Пользовательское изображение"
+                              };
+                              const updatedPost = {
+                                ...detailedPost,
+                                images: [newImage, ...detailedPost.images]
+                              };
+                              setDetailedPost(updatedPost);
+                              
+                              // Обновляем кеш
+                              if (selectedIdea) {
+                                setDetailsCache(prev => ({
+                                  ...prev,
+                                  [selectedIdea.id]: updatedPost
+                                }));
+                              }
+                            }} 
+                          />
+                        </div>
                       </div>
                     </div>
                   )}
@@ -908,7 +1134,7 @@ function App() {
                   </div>
                 </div>
               )}
-              
+
               {!detailedPost && !isDetailGenerating && (
                 <button
                   onClick={() => handleDetailIdea(selectedIdea)}
@@ -919,7 +1145,7 @@ function App() {
               )}
             </div>
           )}
-          
+
           {/* Вид календаря */}
           {currentView === 'calendar' && (
             <div className="view calendar-view">
@@ -928,6 +1154,38 @@ function App() {
               {/* Фильтр по каналам */}
               <div className="channels-filter">
                 <h3>Фильтр по каналам:</h3>
+                
+                {/* Компактная кнопка добавления/удаления канала в фильтр */}
+                <div className="channels-actions">
+                  <button 
+                    className="action-button"
+                    onClick={() => {
+                      // Добавить текущий канал в фильтр, если его еще нет
+                      if (channelName && !selectedChannels.includes(channelName)) {
+                        const updatedSelected = [...selectedChannels, channelName];
+                        setSelectedChannels(updatedSelected);
+                        localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
+                      }
+                    }}
+                    disabled={!channelName || selectedChannels.includes(channelName)}
+                  >
+                    Добавить текущий канал
+                  </button>
+                  
+                  <button
+                    className="action-button"
+                    onClick={() => {
+                      // Сбросить фильтр (показать все каналы)
+                      setSelectedChannels([]);
+                      localStorage.setItem('selectedChannels', JSON.stringify([]));
+                      fetchSavedPosts();
+                    }}
+                    disabled={selectedChannels.length === 0}
+                  >
+                    Сбросить фильтр
+                  </button>
+                </div>
+                
                 <div className="channels-checkboxes">
                   {allChannels.map(channel => (
                     <label key={channel} className="channel-checkbox">
@@ -943,30 +1201,53 @@ function App() {
                         }}
                       />
                       {channel}
+                      {/* Добавляем кнопку удаления канала из списка */}
+                      <button 
+                        className="remove-channel-button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          
+                          // Удаляем канал из списка всех каналов
+                          const updatedChannels = allChannels.filter(ch => ch !== channel);
+                          setAllChannels(updatedChannels);
+                          localStorage.setItem('allChannels', JSON.stringify(updatedChannels));
+                          
+                          // Также удаляем из выбранных, если он там был
+                          if (selectedChannels.includes(channel)) {
+                            const updatedSelected = selectedChannels.filter(ch => ch !== channel);
+                            setSelectedChannels(updatedSelected);
+                            localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
+                          }
+                        }}
+                      >
+                        ✕
+                      </button>
                     </label>
                   ))}
                 </div>
+                
                 <button 
                   onClick={filterPostsByChannels}
-                  className="action-button"
+                  className="action-button apply-filter-button"
                   disabled={loadingSavedPosts}
                 >
                   Применить фильтр
                 </button>
-              </div>
-              
+               </div>
+            
               {loadingSavedPosts ? (
                 <div className="loading-indicator">
                   <div className="loading-spinner"></div>
                   <p>Загрузка постов...</p>
-                </div>
+          </div>
               ) : (
                 <>
                   {/* Навигация по месяцам */}
                   <div className="calendar-navigation">
                     <button onClick={goToPrevMonth} className="calendar-nav-button">
                       &lt; Предыдущий
-                    </button>
+                </button>
                     <h3>
                       {currentMonth.toLocaleString('ru-RU', { month: 'long', year: 'numeric' })}
                     </h3>
@@ -1005,27 +1286,27 @@ function App() {
                                     )}
                                   </div>
                                   <div className="post-actions">
-                                    <button 
+                <button 
                                       onClick={() => startEditingPost(post)}
                                       className="action-button small"
                                     >
                                       Изменить
-                                    </button>
+                </button>
                                     <button 
                                       onClick={() => deletePost(post.id)}
                                       className="action-button small delete"
                                     >
                                       Удалить
-                                    </button>
+                </button>
                                   </div>
                                 </div>
                               ))}
                             </div>
-                          )}
-                        </div>
+            )}
+          </div>
                       ))}
-                    </div>
-                  </div>
+      </div>
+      </div>
                 </>
               )}
             </div>
@@ -1064,13 +1345,21 @@ function App() {
                 
                 <div className="edit-image-section">
                   <h3>Изображение:</h3>
-                  <input 
-                    type="text"
-                    className="image-url-input"
-                    value={editedImageUrl}
-                    onChange={(e) => setEditedImageUrl(e.target.value)}
-                    placeholder="URL изображения"
-                  />
+                  <div className="image-options">
+                    <div className="image-url-input-container">
+                      <input 
+                        type="text"
+                        className="image-url-input"
+                        value={editedImageUrl}
+                        onChange={(e) => setEditedImageUrl(e.target.value)}
+                        placeholder="URL изображения"
+                      />
+                    </div>
+                    <div className="image-upload-container">
+                      <p>или</p>
+                      <ImageUploader onImageUploaded={(url) => setEditedImageUrl(url)} />
+                    </div>
+                  </div>
                   
                   {editedImageUrl && (
                     <div className="image-preview">
@@ -1082,6 +1371,12 @@ function App() {
                           (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x200?text=Ошибка+загрузки';
                         }}
                       />
+                      <button 
+                        className="action-button small delete" 
+                        onClick={() => setEditedImageUrl('')}
+                      >
+                        Удалить изображение
+                      </button>
                     </div>
                   )}
                 </div>
