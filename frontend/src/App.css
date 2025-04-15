@@ -1248,3 +1248,333 @@ h1 {
 }
 
 /* --- КОНЕЦ УЛУЧШЕНИЙ СПИСКА ИДЕЙ --- */
+
+/* Стили для селектора каналов */
+.channel-selector {
+  margin-bottom: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.channel-select {
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+  font-size: 0.9rem;
+  flex: 1;
+}
+
+/* Стили для календаря */
+.calendar-view {
+  display: flex;
+  flex-direction: column;
+}
+
+.channels-filter {
+  background-color: #f9f9f9;
+  border-radius: 6px;
+  padding: 15px;
+  margin-bottom: 20px;
+  border: 1px solid #e0e0e0;
+}
+
+.channels-filter h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  font-size: 1rem;
+}
+
+.channels-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.channel-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  background-color: white;
+  border-radius: 15px;
+  border: 1px solid #ddd;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.channel-checkbox input {
+  margin: 0;
+}
+
+.calendar-navigation {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.calendar-nav-button {
+  background-color: #f0f0f0;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 15px;
+  cursor: pointer;
+  color: #555;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+}
+
+.calendar-nav-button:hover {
+  background-color: #e0e0e0;
+}
+
+.calendar-grid {
+  width: 100%;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  background-color: #f0f0f0;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.calendar-weekday {
+  padding: 10px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.calendar-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: repeat(6, minmax(100px, auto));
+}
+
+.calendar-day {
+  border: 1px solid #e0e0e0;
+  padding: 5px;
+  min-height: 100px;
+  position: relative;
+}
+
+.calendar-day.other-month {
+  background-color: #f9f9f9;
+  color: #999;
+}
+
+.calendar-day.today {
+  background-color: rgba(26, 115, 232, 0.05);
+}
+
+.day-number {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: 50%;
+}
+
+.calendar-day.today .day-number {
+  background-color: #1a73e8;
+  color: white;
+}
+
+.day-posts {
+  margin-top: 25px;
+  max-height: calc(100% - 30px);
+  overflow-y: auto;
+}
+
+.calendar-post {
+  background-color: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 5px;
+  font-size: 0.8rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.post-summary {
+  margin-bottom: 5px;
+}
+
+.post-format {
+  display: block;
+  font-size: 0.75rem;
+  color: #666;
+  margin: 3px 0;
+}
+
+.post-channel {
+  display: block;
+  font-size: 0.7rem;
+  color: #1a73e8;
+}
+
+.post-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+}
+
+.post-actions .action-button {
+  padding: 3px 8px;
+  font-size: 0.7rem;
+}
+
+.post-actions .action-button.delete {
+  background-color: #f44336;
+  color: white;
+}
+
+.post-actions .action-button.delete:hover {
+  background-color: #d32f2f;
+}
+
+/* Стили для редактирования поста */
+.edit-view {
+  display: flex;
+  flex-direction: column;
+}
+
+.edit-form {
+  margin-top: 15px;
+}
+
+.edit-text-section, .edit-image-section {
+  margin-bottom: 20px;
+}
+
+.edit-textarea {
+  width: 100%;
+  min-height: 200px;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.image-url-input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  margin-bottom: 10px;
+}
+
+.image-preview {
+  margin-top: 10px;
+  text-align: center;
+}
+
+.preview-image {
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+}
+
+.edit-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 20px;
+}
+
+.save-button {
+  background-color: #4caf50;
+  color: white;
+}
+
+.save-button:hover:not(:disabled) {
+  background-color: #3d8b40;
+}
+
+.cancel-button {
+  background-color: #f44336;
+  color: white;
+}
+
+.cancel-button:hover:not(:disabled) {
+  background-color: #d32f2f;
+}
+
+/* Стили для секции сохранения поста */
+.actions-section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.date-picker-container {
+  margin-bottom: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.date-input {
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+  font-size: 0.9rem;
+}
+
+/* Адаптивные стили для мобильных устройств */
+@media (max-width: 768px) {
+  .channel-selector {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .calendar-grid {
+    font-size: 0.8rem;
+  }
+  
+  .calendar-day {
+    min-height: 80px;
+  }
+  
+  .day-posts {
+    margin-top: 20px;
+  }
+  
+  .calendar-post {
+    padding: 5px;
+  }
+  
+  .post-actions {
+    flex-direction: column;
+    gap: 5px;
+  }
+  
+  .edit-actions {
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .date-picker-container {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .date-input {
+    width: 100%;
+  }
+}
