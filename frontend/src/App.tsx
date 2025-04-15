@@ -7,6 +7,28 @@ import { v4 as uuidv4 } from 'uuid';
 // Определяем базовый URL API
 const API_BASE_URL = '';
 
+// Компоненты для отображения загрузки и сообщений
+const Loading = ({ message }: { message: string }) => (
+  <div className="loading-indicator">
+    <div className="loading-spinner"></div>
+    <p>{message}</p>
+  </div>
+);
+
+const ErrorMessage = ({ message, onClose }: { message: string | null, onClose: () => void }) => (
+  <div className="error-message">
+    <p>{message}</p>
+    <button className="action-button small" onClick={onClose}>Закрыть</button>
+  </div>
+);
+
+const SuccessMessage = ({ message, onClose }: { message: string | null, onClose: () => void }) => (
+  <div className="success-message">
+    <p>{message}</p>
+    <button className="action-button small" onClick={onClose}>Закрыть</button>
+  </div>
+);
+
 // Simple error boundary component
 class SimpleErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -1168,7 +1190,7 @@ function App() {
           {/* Вид детализации */}
           {currentView === 'details' && (
             <div className="details-view">
-              {selectedIdea && (
+              {selectedIdea ? (
                 <>
                   <h2>Детализация контент-идеи</h2>
                   <div className="idea-details">
@@ -1200,7 +1222,6 @@ function App() {
                         />
                       </div>
                       
-                      {/* Section for displaying images */}
                       {detailedPost.images && detailedPost.images.length > 0 && (
                         <div className="image-section">
                           <h3>Изображения:</h3>
@@ -1315,7 +1336,7 @@ function App() {
                             onChange={(e) => setSelectedDate(new Date(e.target.value))}
                             className="date-input"
                           />
-                      </div>
+                        </div>
                         <button 
                           onClick={handleSavePost}
                           className="action-button save-button"
@@ -1323,9 +1344,14 @@ function App() {
                         >
                           {isSavingPost ? 'Сохранение...' : 'Сохранить пост'}
                         </button>
+                      </div>
                     </div>
-                  )}
+                  ) : null}
                 </>
+              ) : (
+                <div className="empty-details">
+                  <p>Выберите идею для детализации</p>
+                </div>
               )}
             </div>
           )}
