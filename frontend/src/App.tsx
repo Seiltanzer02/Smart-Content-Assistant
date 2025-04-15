@@ -5,6 +5,7 @@ import 'react-calendar/dist/Calendar.css';
 import './App.css';
 import WebApp from '@twa-dev/sdk';
 import { TelegramAuth } from './components/TelegramAuth';
+import { ErrorBoundary } from 'react-error-boundary';
 
 // --- ТИПЫ --- 
 
@@ -183,6 +184,19 @@ interface UploadResponse {
     image_url: string;
 }
 
+// Инициализируем Telegram WebApp, как можно раньше
+try {
+  if (window.Telegram?.WebApp) {
+    console.log('Инициализируем window.Telegram.WebApp для нативного WebApp');
+    window.Telegram.WebApp.ready();
+  } else if (typeof WebApp?.ready === 'function') {
+    console.log('Инициализируем WebApp из SDK');
+    WebApp.ready();
+  }
+} catch (e) {
+  console.error('Ошибка при инициализации Telegram WebApp:', e);
+}
+
 function App() {
   // --- СОСТОЯНИЯ --- 
 
@@ -292,8 +306,14 @@ function App() {
     console.log('Авторизация успешна, ID пользователя:', userId);
     setTelegramUserId(userId);
     setIsAuthenticated(true);
-    axios.defaults.headers.common['X-Telegram-User-Id'] = userId;
-    console.log('Заголовок X-Telegram-User-Id установлен:', axios.defaults.headers.common['X-Telegram-User-Id']);
+    
+    try {
+      // Устанавливаем заголовок для всех последующих запросов
+      axios.defaults.headers.common['X-Telegram-User-Id'] = userId;
+      console.log('Заголовок X-Telegram-User-Id установлен:', axios.defaults.headers.common['X-Telegram-User-Id']);
+    } catch (e) {
+      console.error('Ошибка при установке заголовка:', e);
+    }
   };
 
   // Добавляем эффект для отслеживания изменений состояния авторизации
@@ -312,7 +332,14 @@ function App() {
 
   if (!isAuthenticated) {
     console.log('Пользователь не авторизован, отображаем компонент TelegramAuth');
-    return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
+    return (
+      <ErrorBoundary 
+        fallback={<div className="error-boundary">Произошла ошибка при авторизации. Перезагрузите страницу.</div>}
+        onError={(error) => console.error("ErrorBoundary caught:", error)}
+      >
+        <TelegramAuth onAuthSuccess={handleAuthSuccess} />
+      </ErrorBoundary>
+    );
   }
 
   console.log('Пользователь авторизован, отображаем основной интерфейс');
@@ -416,7 +443,6 @@ function App() {
     }
     return () => clearTimeout(timer);
   }, [successMessage, error]);
-
 
   // --- ВЫНОСИМ ХУКИ из renderPlanView --- 
 
