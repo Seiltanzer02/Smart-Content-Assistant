@@ -5,7 +5,7 @@ import { TelegramAuth } from './components/TelegramAuth';
 import { v4 as uuidv4 } from 'uuid';
 
 // Определяем базовый URL API
-const API_BASE_URL = '';
+const API_BASE_URL = '/api';
 
 // Simple error boundary component
 class SimpleErrorBoundary extends React.Component<
@@ -597,6 +597,14 @@ function App() {
   // Функция для генерации идей
   const generateIdeas = async () => {
     try {
+      // Если уже есть идеи, спрашиваем подтверждение
+      if (suggestedIdeas.length > 0) {
+        const confirmed = confirm("У вас уже есть сгенерированные идеи. Сгенерировать новые? Старые идеи будут удалены.");
+        if (!confirmed) {
+          return;
+        }
+      }
+      
       setIsGeneratingIdeas(true);
       setError("");
       setSuggestedIdeas([]);
@@ -624,14 +632,15 @@ function App() {
         }
       );
 
-      if (response.data && response.data.ideas) {
-        console.log('Полученные идеи:', response.data.ideas);
+      if (response.data && response.data.plan) {
+        console.log('Полученные идеи:', response.data.plan);
         
         // Преобразуем полученные идеи в нужный формат
-        const formattedIdeas = response.data.ideas.map((idea: any, index: number) => ({
+        const formattedIdeas = response.data.plan.map((idea: any, index: number) => ({
           id: `idea-${Date.now()}-${index}`,
           topic_idea: idea.topic_idea || idea.title,
           format_style: idea.format_style || idea.format,
+          day: idea.day,
           channel_name: channelName,
           isNew: true,
         }));
@@ -699,12 +708,12 @@ function App() {
       if (response.data) {
         const newDetails = {
           post_text: response.data.generated_text || 'Не удалось сгенерировать текст поста.',
-          images: response.data.found_images.map((img: any) => ({
+          images: response.data.found_images ? response.data.found_images.map((img: any) => ({
             url: img.regular_url || img.preview_url,
             alt: img.description,
             author: img.author_name,
             author_url: img.author_url
-          })) || []
+          })) : []
         };
         
         // Сохраняем в кеш и в текущее состояние
