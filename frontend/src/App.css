@@ -19,86 +19,303 @@ body {
 
 /* Стили для App.jsx */
 .app-container {
-  max-width: 900px; /* Ограничиваем ширину для больших экранов */
-  margin: 20px auto; /* Центрируем и добавляем отступы сверху/снизу */
-  padding: 20px;
-  background-color: #fff; /* Белый фон для основного контейнера */
-  border-radius: 8px; /* Скругляем углы */
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); /* Легкая тень */
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 0;
+  color: #2c3e50;
   display: flex;
-  flex-direction: column; /* Все элементы в столбик */
-  align-items: center; /* Центрируем по горизонтали */
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: #f0f2f5;
 }
 
+.app-header {
+  background-color: #1a73e8;
+  color: white;
+  padding: 15px;
+  text-align: center;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 500;
+}
+
+.app-main {
+  flex: 1;
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-footer {
+  background-color: #f4f4f4;
+  padding: 10px 15px;
+  color: #666;
+  font-size: 0.8rem;
+  text-align: center;
+  border-top: 1px solid #ddd;
+}
+
+/* Стили загрузки */
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  height: 100vh;
+  width: 100%;
+  background-color: #f0f2f5;
+}
+
+.loading-spinner {
+  border: 4px solid rgba(0, 0, 0, 0.1);
+  border-radius: 50%;
+  border-top: 4px solid #1a73e8;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+  margin-bottom: 15px;
+}
+
+.loading-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 20px 0;
+}
+
+.loading-indicator .loading-spinner {
+  width: 30px;
+  height: 30px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Стили навигации */
+.navigation-buttons {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 15px;
+  border-radius: 25px;
+  background-color: #e9e9e9;
+  padding: 3px;
+  overflow: hidden;
+}
+
+.action-button {
+  border: none;
+  padding: 10px 20px;
+  cursor: pointer;
+  background-color: transparent;
+  border-radius: 25px;
+  font-weight: 500;
+  color: #555;
+  transition: all 0.3s ease;
+  font-size: 0.9rem;
+}
+
+.action-button:hover:not(:disabled) {
+  background-color: rgba(26, 115, 232, 0.1);
+  color: #1a73e8;
+}
+
+.action-button.active {
+  background-color: #1a73e8;
+  color: white;
+}
+
+.action-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.action-button.small {
+  padding: 5px 10px;
+  font-size: 0.8rem;
+}
+
+.action-button.generate-button {
+  background-color: #4caf50;
+  color: white;
+  margin-top: 15px;
+}
+
+.action-button.generate-button:hover:not(:disabled) {
+  background-color: #3d8b40;
+}
+
+/* Стили для вкладок */
+.view-container {
+  background-color: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  flex: 1;
+}
+
+.view {
+  opacity: 1;
+  transition: opacity 0.3s;
+}
+
+.view h2 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  color: #333;
+  font-size: 1.2rem;
+}
+
+/* Стили формы анализа */
+.input-container {
+  display: flex;
+  margin-bottom: 15px;
+}
+
+.channel-input {
+  flex: 1;
+  padding: 10px 15px;
+  border: 1px solid #ddd;
+  border-radius: 4px 0 0 4px;
+  font-size: 0.9rem;
+}
+
+.input-container .action-button {
+  border-radius: 0 4px 4px 0;
+  background-color: #1a73e8;
+  color: white;
+}
+
+.results-container {
+  background-color: #f9f9f9;
+  border-radius: 6px;
+  padding: 15px;
+  margin-top: 20px;
+  border: 1px solid #e0e0e0;
+}
+
+.results-container h3 {
+  margin-top: 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.results-container p {
+  margin: 10px 0;
+  line-height: 1.5;
+}
+
+/* Стили для списка идей */
+.ideas-list {
+  margin-top: 10px;
+}
+
+.idea-item {
+  background-color: #f9f9f9;
+  border-radius: 6px;
+  padding: 15px;
+  margin-bottom: 10px;
+  border: 1px solid #e0e0e0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.idea-content {
+  flex: 1;
+}
+
+.idea-header {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 5px;
+}
+
+.idea-title {
+  font-weight: 600;
+}
+
+.idea-style {
+  color: #666;
+  font-size: 0.85rem;
+  margin-top: 3px;
+}
+
+.idea-day {
+  font-size: 0.8rem;
+  color: #1a73e8;
+  background-color: rgba(26, 115, 232, 0.1);
+  padding: 2px 8px;
+  border-radius: 12px;
+  display: inline-block;
+  margin-top: 5px;
+}
+
+/* Стили для сообщений */
+.error-message, .success-message {
+  padding: 10px 15px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  font-size: 0.9rem;
+}
+
+.error-message {
+  background-color: #ffebee;
+  color: #c62828;
+  border: 1px solid #ffcdd2;
+}
+
+.success-message {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #c8e6c9;
+}
+
+/* Адаптивность для мобильных устройств */
+@media (max-width: 768px) {
+  .app-header h1 {
+    font-size: 1.2rem;
+  }
+  
+  .view-container {
+    padding: 15px;
+  }
+  
+  .input-container {
+    flex-direction: column;
+  }
+  
+  .channel-input {
+    border-radius: 4px;
+    margin-bottom: 10px;
+  }
+  
+  .input-container .action-button {
+    border-radius: 4px;
+  }
+  
+  .idea-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .idea-item .action-button {
+    margin-top: 10px;
+    align-self: flex-end;
+  }
+}
+
+/* Стили для остальных элементов */
 h1 {
   color: #2c3e50; /* Темно-синий цвет заголовка */
   margin-bottom: 25px;
   text-align: center;
-}
-
-/* Контейнер для кнопок навигации */
-.navigation-buttons {
-  display: flex; /* Кнопки в ряд */
-  justify-content: center; /* Центрируем кнопки */
-  gap: 8px; /* Пространство между кнопками */
-  margin-bottom: 25px;
-  flex-wrap: wrap; /* Перенос кнопок если не влезают */
-}
-
-/* Обновленные стили для кнопок навигации */
-.navigation-buttons .action-button {
-  padding: 10px 20px; /* Немного больше padding */
-  border-radius: 20px; /* Сильно скругленные */
-  background-color: #e9e9e9; /* Светло-серый фон */
-  color: #333; /* Темный текст */
-  font-weight: 500;
-  transition: background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-}
-
-.navigation-buttons .action-button:hover:not(:disabled) {
-  background-color: #dcdcdc;
-  box-shadow: 0 4px 8px rgba(0,0,0,0.08);
-}
-
-.navigation-buttons .action-button.active {
-  background-color: #3498db; /* Активная - синяя */
-  color: white;
-  font-weight: bold;
-  box-shadow: 0 2px 5px rgba(52, 152, 219, 0.4);
-}
-
-.navigation-buttons .action-button:disabled {
-    background-color: #f5f5f5; /* Очень светлый для неактивных */
-    color: #aaa;
-    cursor: not-allowed;
-    box-shadow: none;
-}
-
-/* Общие стили кнопок (для остальных кнопок) */
-.action-button {
-  padding: 10px 18px;
-  border: none;
-  border-radius: 5px;
-  background-color: #3498db; /* Синий цвет по умолчанию */
-  color: white;
-  font-size: 15px;
-  cursor: pointer;
-  transition: background-color 0.3s ease, transform 0.1s ease;
-  text-align: center;
-}
-
-.action-button:hover:not(:disabled) {
-  background-color: #2980b9; /* Темнее при наведении */
-}
-
-.action-button:active:not(:disabled) {
-  transform: scale(0.98); /* Небольшое нажатие */
-}
-
-.action-button:disabled {
-  background-color: #bdc3c7; /* Серый для неактивных */
-  cursor: not-allowed;
 }
 
 /* Контейнер для содержимого вида */
@@ -134,24 +351,8 @@ h1 {
   align-items: center; /* Выравниваем по вертикали */
 }
 
-.channel-input {
-  flex-grow: 1; /* Поле ввода занимает доступное пространство */
-  padding: 10px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 15px;
-}
-
 .analyze-button-in-view {
   white-space: nowrap; /* Чтобы текст не переносился */
-}
-
-/* Сообщения об ошибках и загрузке */
-.error-message {
-  color: #e74c3c; /* Красный */
-  font-weight: bold;
-  margin: 15px 0;
-  text-align: center;
 }
 
 /* Результаты анализа */
@@ -985,26 +1186,6 @@ h1 {
 
 .view-container-animated {
   animation: fadeIn 0.4s ease-out;
-}
-
-/* Спиннер загрузки */
-.loading-spinner {
-  border: 4px solid rgba(0, 0, 0, 0.1);
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border-left-color: #3498db; /* Цвет основного акцента */
-  animation: spin 1s ease infinite;
-  margin: 20px auto; /* Центрирование и отступы */
-}
-
-@keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
 }
 
 /* Стили для контейнера спиннера, если он используется вместо просто <p> */
