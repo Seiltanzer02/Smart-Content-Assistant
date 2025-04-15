@@ -12,6 +12,16 @@ declare global {
   }
 }
 
+// Безопасная работа с хранилищем
+const safeStorageOperation = (operation: () => any): any => {
+  try {
+    return operation();
+  } catch (e) {
+    console.warn('Ошибка при работе с хранилищем:', e);
+    return null;
+  }
+};
+
 interface TelegramAuthProps {
   onAuthSuccess: (userId: string) => void;
 }
@@ -27,6 +37,14 @@ export const TelegramAuth: React.FC<TelegramAuthProps> = ({ onAuthSuccess }) => 
     const initAuth = async () => {
       try {
         console.log('Инициализация Telegram WebApp...');
+        
+        // Попытка восстановить sessionStorage данные, если есть
+        const cachedUserId = safeStorageOperation(() => sessionStorage.getItem('telegram_user_id'));
+        if (cachedUserId) {
+          console.log('ID пользователя восстановлен из sessionStorage:', cachedUserId);
+          onAuthSuccess(cachedUserId);
+          return;
+        }
         
         // Проверка наличия WebApp в window
         if (window.Telegram && window.Telegram.WebApp) {
@@ -49,6 +67,8 @@ export const TelegramAuth: React.FC<TelegramAuthProps> = ({ onAuthSuccess }) => 
           
           if (user?.id) {
             console.log('ID пользователя получен из нативного WebApp:', user.id);
+            // Сохраняем ID в sessionStorage (безопасно)
+            safeStorageOperation(() => sessionStorage.setItem('telegram_user_id', user.id.toString()));
             onAuthSuccess(user.id.toString());
             return;
           }
@@ -91,6 +111,8 @@ export const TelegramAuth: React.FC<TelegramAuthProps> = ({ onAuthSuccess }) => 
         
         if (user?.id) {
           console.log('ID пользователя получен из SDK:', user.id);
+          // Сохраняем ID в sessionStorage (безопасно)
+          safeStorageOperation(() => sessionStorage.setItem('telegram_user_id', user.id.toString()));
           onAuthSuccess(user.id.toString());
         } else {
           console.warn('ID пользователя не найден в WebApp.initDataUnsafe.user');
@@ -101,12 +123,15 @@ export const TelegramAuth: React.FC<TelegramAuthProps> = ({ onAuthSuccess }) => 
           
           if (userId) {
             console.log('ID пользователя найден в URL параметрах:', userId);
+            // Сохраняем ID в sessionStorage (безопасно)
+            safeStorageOperation(() => sessionStorage.setItem('telegram_user_id', userId));
             onAuthSuccess(userId);
           } else {
             console.error('ID пользователя не найден ни в WebApp, ни в URL параметрах');
             // Предоставляем временный ID для тестирования (только для разработки!)
             if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
               console.warn('Используем тестовый ID пользователя для локальной разработки: 123456789');
+              safeStorageOperation(() => sessionStorage.setItem('telegram_user_id', '123456789'));
               onAuthSuccess('123456789');
               return;
             }
@@ -121,6 +146,7 @@ export const TelegramAuth: React.FC<TelegramAuthProps> = ({ onAuthSuccess }) => 
         // Для тестирования в режиме разработки
         if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
           console.warn('Используем тестовый ID пользователя для локальной разработки после ошибки: 123456789');
+          safeStorageOperation(() => sessionStorage.setItem('telegram_user_id', '123456789'));
           onAuthSuccess('123456789');
         }
       } finally {
