@@ -346,22 +346,25 @@ const CalendarDay = ({
           {posts.map((post) => (
             <div key={post.id} className="post-item">
               <div className="post-title" title={post.topic_idea}>
-                {post.topic_idea}
+                {post.topic_idea.length > 25 
+                  ? post.topic_idea.substring(0, 22) + '...' 
+                  : post.topic_idea
+                }
               </div>
               <div className="post-actions">
                 <button 
-                  className="edit-button" 
+                  className="action-button edit-button" 
                   onClick={() => onEditPost(post)}
                   title="Редактировать"
                 >
-                  ✎
+                  <span>📝</span>
                 </button>
                 <button 
-                  className="delete-button" 
+                  className="action-button delete-button" 
                   onClick={() => onDeletePost(post.id)}
                   title="Удалить"
                 >
-                  ✕
+                  <span>🗑️</span>
                 </button>
               </div>
             </div>

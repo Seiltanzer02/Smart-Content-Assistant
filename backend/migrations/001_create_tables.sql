@@ -1,12 +1,16 @@
 -- Создание таблицы для сохранения изображений
 CREATE TABLE IF NOT EXISTS saved_images (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     url TEXT NOT NULL,
+    preview_url TEXT,
+    alt TEXT,
+    author TEXT,
+    author_url TEXT,
+    source TEXT DEFAULT 'unsplash',
+    local_path TEXT,
     description TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    post_id UUID REFERENCES posts(id) ON DELETE CASCADE,
-    local_path TEXT
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Обновление таблицы posts для поддержки нескольких изображений
@@ -58,20 +62,6 @@ CREATE TABLE IF NOT EXISTS saved_posts (
     target_date DATE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-);
-
--- Таблица для хранения изображений
-CREATE TABLE IF NOT EXISTS saved_images (
-    id TEXT PRIMARY KEY,
-    url TEXT NOT NULL,
-    preview_url TEXT,
-    alt TEXT,
-    author TEXT,
-    author_url TEXT,
-    source TEXT DEFAULT 'unsplash',
-    user_id TEXT NOT NULL,
-    local_path TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
 -- Таблица для хранения связей между постами и изображениями
