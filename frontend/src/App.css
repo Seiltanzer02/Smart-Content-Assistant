@@ -1460,11 +1460,13 @@ h1 {
 }
 
 .calendar-day {
-  border: 1px solid #e0e0e0;
-  padding: 5px;
-  min-height: 100px;
-  position: relative;
+  border: 1px solid #ddd;
+  padding: 6px;
+  min-height: 80px;
   overflow: hidden;
+  background-color: #fff;
+  position: relative;
+  transition: background-color 0.2s;
 }
 
 .calendar-day.other-month {
@@ -1476,40 +1478,72 @@ h1 {
   background-color: rgba(26, 115, 232, 0.05);
 }
 
-.day-number {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 24px;
+.calendar-day .day-number {
+  font-weight: bold;
+  margin-bottom: 5px;
+  text-align: right;
+  color: #666;
+}
+
+.calendar-day .post-item {
+  background-color: #e0f2ff;
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin-bottom: 4px;
+  font-size: 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: background-color 0.2s;
+}
+
+.calendar-day .post-item:hover {
+  background-color: #c0e5ff;
+}
+
+.calendar-day .post-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  margin-right: 4px;
+}
+
+.calendar-day .post-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.calendar-day .post-item:hover .post-actions {
+  opacity: 1;
+}
+
+.calendar-day .post-actions .action-button {
+  padding: 2px;
+  min-width: 24px;
   height: 24px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.8rem;
-  font-weight: 600;
-  border-radius: 50%;
+  font-size: 1rem;
 }
 
-.calendar-day.today .day-number {
-  background-color: #1a73e8;
+.calendar-day .post-actions .edit-button {
+  background-color: #4caf50;
   color: white;
 }
 
-.day-posts {
-  margin-top: 20px;
-  max-height: calc(100% - 25px);
-  overflow-y: auto;
+.calendar-day .post-actions .delete-button {
+  background-color: #f44336;
+  color: white;
 }
 
-.calendar-post {
-  background-color: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
-  padding: 4px 6px;
-  margin-bottom: 3px;
-  font-size: 0.7rem;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-  line-height: 1.2;
+.calendar-day .post-actions .action-button:hover {
+  transform: scale(1.1);
 }
 
 .post-summary {

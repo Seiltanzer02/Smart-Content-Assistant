@@ -16,6 +16,11 @@ import asyncio
 import re
 from datetime import datetime, timedelta
 from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
+from telethon.tl.types import InputPeerChannel, PeerChannel
+from telethon.errors import (
+    ChannelPrivateError, ChannelInvalidError, 
+    AuthKeyError, FloodWaitError, ApiIdInvalidError
+)
 
 # --- ПЕРЕМЕЩАЕМ Логгирование В НАЧАЛО --- 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -42,121 +47,148 @@ except ImportError:
 # Создание временного клиента Telegram
 client = None
 
-async def init_telegram_client() -> Optional[TelegramClient]:
-    """Инициализация клиента Telegram"""
-    global client
-    
-    if client and client.is_connected():
-        return client
-    
+def init_telegram_client() -> Optional[TelegramClient]:
+    """Инициализация клиента Telegram."""
+    # Проверка наличия API_ID и API_HASH
     if not TELEGRAM_API_ID or not TELEGRAM_API_HASH:
-        logger.error("TELEGRAM_API_ID или TELEGRAM_API_HASH не найдены в переменных окружения")
+        logger.error("TELEGRAM_API_ID или TELEGRAM_API_HASH не найдены в окружении")
         return None
     
     try:
-        client = TelegramClient(SESSION_NAME, TELEGRAM_API_ID, TELEGRAM_API_HASH)
-        await client.start(bot_token=TELEGRAM_BOT_TOKEN)
+        # Создание клиента
+        client = TelegramClient(SESSION_NAME, int(TELEGRAM_API_ID), TELEGRAM_API_HASH)
         logger.info("Клиент Telegram успешно инициализирован")
         return client
+    except ValueError as e:
+        logger.error(f"Ошибка при преобразовании TELEGRAM_API_ID в число: {e}")
+        return None
     except Exception as e:
         logger.error(f"Ошибка при инициализации клиента Telegram: {e}")
         return None
 
-async def get_telegram_posts_via_telethon(channel_username: str, limit: int = 20) -> List[Dict[str, Any]]:
+async def get_telegram_posts_via_telethon(channel_username: str, limit: int = 20) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """
-    Получает последние посты из Telegram канала с использованием Telethon
+    Получение последних постов из Telegram канала через Telethon API.
     
     Args:
-        channel_username: Имя пользователя или канала в Telegram
+        channel_username: Имя канала без символа '@'
         limit: Максимальное количество постов для получения
-        
-    Returns:
-        Список словарей с данными постов
-    """
-    client = await init_telegram_client()
     
+    Returns:
+        Tuple[List[Dict[str, Any]], Optional[str]]: Список постов и сообщение об ошибке (если есть)
+    """
+    # Инициализация пустого списка постов и сообщения об ошибке
+    posts = []
+    error = None
+    
+    # Проверка имени канала
+    if not channel_username:
+        return [], "Имя канала не указано"
+    
+    # Удаление символа '@' из имени канала, если он есть
+    if channel_username.startswith('@'):
+        channel_username = channel_username[1:]
+    
+    # Инициализация клиента Telegram
+    client = init_telegram_client()
     if not client:
-        logger.error("Невозможно получить посты без клиента Telegram")
-        return []
+        return [], "Не удалось инициализировать клиент Telegram. Проверьте API ключи."
     
     try:
-        # Получаем канал
-        channel = await client.get_entity(channel_username)
+        # Подключение к Telegram
+        await client.connect()
         
-        # Запрашиваем историю сообщений
-        posts = []
-        async for message in client.iter_messages(channel, limit=limit):
-            if not message.text and not getattr(message, 'media', None):
-                continue
+        if not await client.is_user_authorized():
+            # Попытка авторизации через бота (если есть токен)
+            if TELEGRAM_BOT_TOKEN:
+                await client.sign_in(bot_token=TELEGRAM_BOT_TOKEN)
+                logger.info("Авторизация через бота успешна")
+            else:
+                error = "Требуется авторизация. Токен бота не найден."
+                logger.warning(error)
+                return [], error
+        
+        # Получение сущности канала
+        try:
+            entity = await client.get_entity(channel_username)
+            logger.info(f"Сущность канала получена: {entity.id}")
+        except (ChannelPrivateError, ChannelInvalidError) as e:
+            error = f"Ошибка доступа к каналу {channel_username}: {str(e)}"
+            logger.error(error)
+            return [], error
+        
+        # Получение сообщений из канала
+        messages = await client.get_messages(entity, limit=limit)
+        logger.info(f"Получено {len(messages)} сообщений из канала {channel_username}")
+        
+        # Обработка сообщений
+        for message in messages:
+            if message.message:  # Если есть текст сообщения
+                post = {"text": message.message, "date": message.date.isoformat()}
                 
-            post_data = {
-                'id': str(message.id),
-                'date': message.date.isoformat(),
-                'text': message.text,
-                'views': getattr(message, 'views', 0),
-                'has_media': bool(getattr(message, 'media', None)),
-                'images': []
-            }
-            
-            # Обработка медиа (фото или документов)
-            if message.media:
-                if isinstance(message.media, MessageMediaPhoto):
-                    # Сохраняем путь к фото
-                    photo_path = f"downloaded_media/photo_{message.id}.jpg"
-                    await client.download_media(message.media, photo_path)
-                    post_data['images'].append(photo_path)
-                    
-                elif isinstance(message.media, MessageMediaDocument) and message.media.document.mime_type.startswith('image'):
-                    # Сохраняем путь к документу (изображению)
-                    doc_path = f"downloaded_media/doc_{message.id}_{message.media.document.attributes[0].file_name}"
-                    await client.download_media(message.media, doc_path)
-                    post_data['images'].append(doc_path)
-            
-            posts.append(post_data)
-            
-        logger.info(f"Получено {len(posts)} постов из канала {channel_username}")
-        return posts
+                # Обработка медиа (фото, документы и т.д.)
+                if message.photo:
+                    # Получение URL фото
+                    post["photo"] = True
+                    # Здесь можно добавить логику для получения URL фото
+                
+                if message.document:
+                    # Обработка документов
+                    post["document"] = True
+                    # Здесь можно добавить логику для получения информации о документе
+                
+                posts.append(post)
         
+        return posts, None
+    
+    except FloodWaitError as e:
+        error = f"Слишком много запросов. Нужно подождать {e.seconds} секунд."
+        logger.error(error)
+    except ApiIdInvalidError:
+        error = "Недействительный API ID или API Hash."
+        logger.error(error)
+    except AuthKeyError:
+        error = "Ошибка авторизации. Возможно, сессия устарела."
+        logger.error(error)
     except Exception as e:
-        logger.error(f"Ошибка при получении постов из канала {channel_username}: {e}")
-        return []
+        error = f"Непредвиденная ошибка при получении постов: {str(e)}"
+        logger.error(error)
+    
     finally:
-        # Закрываем соединение
+        # Отключение от Telegram
         if client:
             await client.disconnect()
-            
-# Функция-обертка для синхронного вызова
-def get_telegram_posts(channel_username: str, limit: int = 20) -> List[Dict[str, Any]]:
-    """
-    Синхронная обертка для получения постов из Telegram канала
     
-    Args:
-        channel_username: Имя пользователя или канала в Telegram
-        limit: Максимальное количество постов для получения
-        
-    Returns:
-        Список словарей с данными постов
-    """
-    import asyncio
-    
-    try:
-        # Используем асинхронную функцию в синхронном контексте
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(get_telegram_posts_via_telethon(channel_username, limit))
-        loop.close()
-        return result
-    except Exception as e:
-        logger.error(f"Ошибка при получении постов через синхронную обертку: {e}")
-        return []
+    return posts, error
 
-# Для совместимости с импортом в main.py
+def get_telegram_posts(channel_username: str, limit: int = 20) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """
+    Синхронная обертка для асинхронной функции get_telegram_posts_via_telethon.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(get_telegram_posts_via_telethon(channel_username, limit))
+        return result
+    finally:
+        loop.close()
+
 def get_mock_telegram_posts(username: str) -> List[Dict[str, Any]]:
     """
-    Возвращает заглушку с постами для случаев, когда API не доступно.
+    Возвращает примеры постов, когда API недоступно.
     """
+    # Примеры постов для тестирования
     return [
-        {"text": "Пример поста 1 из канала " + username, "date": "2023-05-01T12:00:00", "id": "1"},
-        {"text": "Пример поста 2 из канала " + username, "date": "2023-05-02T12:00:00", "id": "2"},
-        {"text": "Пример поста 3 из канала " + username, "date": "2023-05-03T12:00:00", "id": "3"}
+        {
+            "text": "Пример поста 1 для канала " + username + ". Это демонстрационные данные, используемые когда API недоступно.",
+            "date": "2023-01-01T12:00:00"
+        },
+        {
+            "text": "Пример поста 2 для канала " + username + ". Содержит какую-то полезную информацию и #хэштеги.",
+            "date": "2023-01-02T15:30:00"
+        },
+        {
+            "text": "Пример поста 3 с более длинным текстом. Здесь может быть полезная информация, ссылки и т.д. Это демонстрационные данные.",
+            "date": "2023-01-03T18:45:00"
+        }
     ] 

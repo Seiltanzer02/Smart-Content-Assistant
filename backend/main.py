@@ -33,7 +33,7 @@ import requests
 from bs4 import BeautifulSoup
 import telethon
 import aiohttp
-from telegram_utils import get_telegram_posts_via_telethon
+from telegram_utils import get_telegram_posts, get_mock_telegram_posts
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -487,7 +487,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
     if not posts:
         try:
             logger.info(f"Пытаемся получить посты канала @{username} через Telethon")
-            telethon_posts, telethon_error = await get_telegram_posts_via_telethon(username)
+            telethon_posts, telethon_error = get_telegram_posts(username)
             
             if telethon_error:
                 logger.warning(f"Ошибка Telethon для канала @{username}: {telethon_error}")
@@ -1890,13 +1890,13 @@ async def get_user_images(request: Request, limit: int = 20):
 
 # --- Эндпоинт для проксирования изображений через наш сервер ---
 @app.get("/image-proxy/{image_id}")
-async def proxy_image(request: Request, image_id: str, size: str = None):
+async def proxy_image(request: Request, image_id: str, size: Optional[str] = None):
     """
     Проксирует изображение через наш сервер, скрывая исходный URL.
     
     Args:
         image_id: ID изображения в базе данных
-        size: размер изображения (small, medium, original)
+        size: размер изображения (small, medium, large)
     """
     try:
         # Получение telegram_user_id из заголовков
@@ -1909,20 +1909,46 @@ async def proxy_image(request: Request, image_id: str, size: str = None):
             logger.error("Клиент Supabase не инициализирован")
             raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
         
-        # Получаем данные изображения из базы
-        result = supabase.table("saved_images").select("url,preview_url").eq("id", image_id).execute()
+        # Получаем данные об изображении из базы
+        image_data = supabase.table("saved_images").select("*").eq("id", image_id).execute()
         
-        if not hasattr(result, 'data') or len(result.data) == 0:
+        if not hasattr(image_data, 'data') or len(image_data.data) == 0:
             logger.warning(f"Изображение с ID {image_id} не найдено")
             raise HTTPException(status_code=404, detail="Изображение не найдено")
         
-        # Определяем URL в зависимости от запрошенного размера
-        image_url = result.data[0]["url"]
-        if size == "small" and result.data[0].get("preview_url"):
-            image_url = result.data[0]["preview_url"]
+        image = image_data.data[0]
         
-        # Перенаправляем запрос на оригинальный URL изображения
-        return RedirectResponse(url=image_url)
+        # Получаем URL изображения
+        image_url = image.get("url")
+        if not image_url:
+            logger.error(f"Для изображения {image_id} не указан URL")
+            raise HTTPException(status_code=500, detail="Данные изображения повреждены")
+        
+        # Выполняем запрос к внешнему сервису для получения изображения
+        async with aiohttp.ClientSession() as session:
+            async with session.get(image_url) as response:
+                if response.status != 200:
+                    logger.error(f"Ошибка при получении изображения {image_id} по URL {image_url}: {response.status}")
+                    raise HTTPException(status_code=response.status, detail="Не удалось получить изображение")
+                
+                # Определяем тип контента
+                content_type = response.headers.get("Content-Type", "image/jpeg")
+                
+                # Получаем содержимое изображения
+                image_content = await response.read()
+                
+                # Возвращаем изображение как ответ
+                return Response(content=image_content, media_type=content_type)
+    
     except Exception as e:
         logger.error(f"Ошибка при проксировании изображения: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- Эндпоинт для получения всех изображений пользователя ---
+@app.get("/images", response_model=List[Dict[str, Any]])
+async def get_user_images_legacy(request: Request, limit: int = 20):
+    """
+    Получение всех изображений пользователя (устаревший эндпоинт).
+    Переадресует на новый эндпоинт /user-images.
+    """
+    return await get_user_images(request, limit)
