@@ -730,11 +730,14 @@ def clean_text_formatting(text):
     if not text:
         return ""
     
-    # Удаляем заголовки типа "### **День 1**" или "### **1 день**"
-    text = re.sub(r'###\s*\*?\*?(?:День|день|ДЕНЬ)?\s*\d+\s*(?:День|день|ДЕНЬ)?\*?\*?', '', text)
+    # Удаляем заголовки типа "### **День 1**", "### **1 день**", "### **ДЕНЬ 1**" и другие вариации
+    text = re.sub(r'#{1,6}\s*\*?\*?(?:[Дд]ень|ДЕНЬ)?\s*\d+\s*(?:[Дд]ень|ДЕНЬ)?\*?\*?', '', text)
+    
+    # Удаляем числа и слово "день" в начале строки (без символов #)
+    text = re.sub(r'^(?:\*?\*?(?:[Дд]ень|ДЕНЬ)?\s*\d+\s*(?:[Дд]ень|ДЕНЬ)?\*?\*?)', '', text)
     
     # Удаляем символы маркдауна
-    text = re.sub(r'\*\*|\*|__|_|###|##|#', '', text)
+    text = re.sub(r'\*\*|\*|__|_|#{1,6}', '', text)
     
     # Очищаем начальные и конечные пробелы
     text = text.strip()
@@ -1080,7 +1083,7 @@ async def create_post(request: Request, post_data: PostData):
         if not hasattr(result, 'data') or len(result.data) == 0:
             logger.error(f"Ошибка при сохранении поста: {result}")
             raise HTTPException(status_code=500, detail="Ошибка при сохранении поста")
-        
+            
         post_id = result.data[0]["id"]
         
         # Если есть изображения, сохраняем связи в таблице post_images
@@ -1101,7 +1104,7 @@ async def create_post(request: Request, post_data: PostData):
             except Exception as rel_err:
                 logger.warning(f"Ошибка при создании связей с изображениями: {rel_err}")
                 # Не прерываем обработку, т.к. сам пост уже сохранен
-        
+            
         logger.info(f"Пользователь {telegram_user_id} создал пост: {post_data.topic_idea}")
         return result.data[0]
         
@@ -1849,11 +1852,11 @@ async def proxy_image(request: Request, image_id: str, size: Optional[str] = Non
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- Эндпоинт для получения всех изображений пользователя ---
-@app.get("/images", response_model=List[Dict[str, Any]])
+@app.get("/user-images", response_model=List[Dict[str, Any]])
 async def get_user_images_legacy(request: Request, limit: int = 20):
     """
     Получение всех изображений пользователя (устаревший эндпоинт).
-    Переадресует на новый эндпоинт /user-images.
+    Переадресует на новый эндпоинт /images.
     """
     return await get_user_images(request, limit)
 

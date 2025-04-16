@@ -244,9 +244,9 @@ const PostImageGallery = ({
     } catch (err: any) {
       console.error('Ошибка при загрузке изображений поста:', err);
       setError('Не удалось загрузить изображения');
-    } finally {
-      setLoading(false);
-    }
+      } finally {
+        setLoading(false);
+      }
   }, [postId]);
   
   // Загружаем изображения при монтировании
@@ -408,7 +408,7 @@ const ImageGallery = ({ onImageSelect }) => {
     // Если изображение уже выбрано, удаляем его из выбранных
     if (selectedImages.some(img => img.id === image.id)) {
       setSelectedImages(selectedImages.filter(img => img.id !== image.id));
-    } else {
+      } else {
       // Иначе добавляем в выбранные
       setSelectedImages([...selectedImages, image]);
     }
@@ -833,7 +833,7 @@ function App() {
   const handleSavePost = async () => {
     if (!selectedIdea || !detailedPost) {
       setError("Пожалуйста, выберите идею и создайте пост перед сохранением");
-      return;
+        return; 
     }
 
     setIsSavingPost(true);
