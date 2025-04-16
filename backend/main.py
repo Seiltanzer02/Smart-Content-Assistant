@@ -724,32 +724,25 @@ class PlanGenerationResponse(BaseModel):
     plan: List[PlanItem] = []
     message: Optional[str] = None
 
-# --- Функция для очистки названий идей от markdown-форматирования ---
-def cleanup_idea_title(text: str) -> str:
-    """Удаляет markdown-форматирование из текста идеи."""
+# Функция для очистки текста от маркеров форматирования
+def clean_text_formatting(text):
+    """Очищает текст от форматирования маркдауна и прочего."""
     if not text:
         return ""
     
-    # Удаляем markdown-форматирование
-    text = re.sub(r'#+\s*', '', text)  # Удаляем заголовки (#, ##, ###)
-    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # Удаляем жирный текст
-    text = re.sub(r'\*(.*?)\*', r'\1', text)  # Удаляем курсив
-    text = re.sub(r'`(.*?)`', r'\1', text)  # Удаляем код
-    text = re.sub(r'_(.*)_', r'\1', text)  # Удаляем подчеркивание
+    # Удаляем заголовки типа "### **День 1**" или "### **1 день**"
+    text = re.sub(r'###\s*\*?\*?(?:День|день|ДЕНЬ)?\s*\d+\s*(?:День|день|ДЕНЬ)?\*?\*?', '', text)
     
-    # Удаляем упоминания дня
-    text = re.sub(r'^(день|день)\s*\d+[:.]\s*', '', text.lower())
+    # Удаляем символы маркдауна
+    text = re.sub(r'\*\*|\*|__|_|###|##|#', '', text)
     
-    # Удаляем кавычки
-    text = re.sub(r'[""]', '', text)
+    # Очищаем начальные и конечные пробелы
+    text = text.strip()
     
-    # Убираем лишние пробелы
-    text = re.sub(r'\s+', ' ', text.strip())
+    # Делаем первую букву заглавной, если строка не пустая
+    if text and len(text) > 0:
+        text = text[0].upper() + text[1:] if len(text) > 1 else text.upper()
     
-    # Делаем первую букву заглавной
-    if text:
-        text = text[0].upper() + text[1:]
-        
     return text
 
 # --- Маршрут для генерации плана публикаций ---
@@ -880,8 +873,8 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
                 if current_day is not None and current_topic:
                     plan_items.append(PlanItem(
                         day=current_day,
-                        topic_idea=cleanup_idea_title(current_topic.strip()),
-                        format_style=cleanup_idea_title(current_style.strip()) if current_style else "Без указания стиля"
+                        topic_idea=clean_text_formatting(current_topic.strip()),
+                        format_style=clean_text_formatting(current_style.strip()) if current_style else "Без указания стиля"
                     ))
                 
                 # Начинаем новую идею
@@ -909,8 +902,8 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
         if current_day is not None and current_topic:
             plan_items.append(PlanItem(
                 day=current_day,
-                topic_idea=cleanup_idea_title(current_topic.strip()),
-                format_style=cleanup_idea_title(current_style.strip()) if current_style else "Без указания стиля"
+                topic_idea=clean_text_formatting(current_topic.strip()),
+                format_style=clean_text_formatting(current_style.strip()) if current_style else "Без указания стиля"
             ))
             
         # Если не удалось извлечь идеи через регулярные выражения, используем более простой подход
@@ -1574,49 +1567,6 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
             message=f"Ошибка: {str(e)}"
         )
 
-# Функция для очистки текста от маркеров форматирования
-def clean_text_formatting(text: str) -> str:
-    """Очистка маркдаун-форматирования из текста."""
-    if not text:
-        return ""
-    
-    # Улучшенные регулярные выражения для исправления заголовков с днями
-    # Обрабатываем различные варианты форматирования дней (включая "### **1 день**")
-    cleaned = re.sub(r'#{1,3}\s*\*{0,2}(\d+)\s*день\*{0,2}', r'День \1', text, flags=re.IGNORECASE)
-    cleaned = re.sub(r'#{1,3}\s*\*{0,2}день\s*(\d+)\*{0,2}', r'День \1', cleaned, flags=re.IGNORECASE)
-    
-    # Обработка специальных случаев с числом и словом "день"
-    cleaned = re.sub(r'\*{0,2}(\d+)\s*день\*{0,2}', r'День \1', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'\*{0,2}день\s*(\d+)\*{0,2}', r'День \1', cleaned, flags=re.IGNORECASE)
-    
-    # Удаляем различные комбинации форматирования с решетками и звездочками
-    cleaned = re.sub(r'#{1,3}\s*\*{1,2}([^*]+)\*{1,2}', r'\1', cleaned)
-    cleaned = re.sub(r'#{1,3}\s*([^#\n]+)', r'\1', cleaned)
-    
-    # Удаляем маркеры жирного текста (**text**)
-    cleaned = re.sub(r'\*\*([^*]*?)\*\*', r'\1', cleaned)
-    
-    # Удаляем маркеры курсива (*text*)
-    cleaned = re.sub(r'\*([^*]*?)\*', r'\1', cleaned)
-    
-    # Удаляем маркеры заголовков в начале строк
-    cleaned = re.sub(r'^#{1,6}\s*', '', cleaned, flags=re.MULTILINE)
-    
-    # Удаляем другие возможные маркеры форматирования
-    cleaned = re.sub(r'__([^_]*?)__', r'\1', cleaned)  # Двойное подчеркивание
-    cleaned = re.sub(r'_([^_]*?)_', r'\1', cleaned)    # Одинарное подчеркивание
-    cleaned = re.sub(r'~~([^~]*?)~~', r'\1', cleaned)  # Зачеркивание
-    cleaned = re.sub(r'\+\+([^+]*?)\+\+', r'\1', cleaned)  # Другое форматирование
-    
-    # Убираем лишние пробелы
-    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-    
-    # Делаем первую букву заглавной
-    if cleaned:
-        cleaned = cleaned[0].upper() + cleaned[1:] if len(cleaned) > 1 else cleaned.upper()
-    
-    return cleaned
-
 # --- Функция для исправления форматирования в существующих идеях ---
 async def fix_existing_ideas_formatting():
     """Исправляет форматирование в существующих идеях."""
@@ -1766,30 +1716,30 @@ async def save_image(request: Request, image_data: Dict[str, Any]):
 # --- Эндпоинт для получения всех изображений пользователя ---
 @app.get("/images", response_model=List[Dict[str, Any]])
 async def get_user_images(request: Request, limit: int = 20):
-    """Получение всех изображений пользователя."""
+    """Получение всех сохраненных изображений пользователя."""
     try:
         # Получение telegram_user_id из заголовков
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
         if not telegram_user_id:
-            logger.warning("Запрос получения изображений без идентификации пользователя Telegram")
+            logger.warning("Запрос получения изображений пользователя без идентификации")
             raise HTTPException(status_code=401, detail="Для получения изображений необходимо авторизоваться через Telegram")
         
         if not supabase:
             logger.error("Клиент Supabase не инициализирован")
             raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
         
-        # Получаем изображения пользователя
-        result = supabase.table("saved_images").select("*").eq("user_id", telegram_user_id).order("created_at", desc=True).limit(limit).execute()
+        # Получаем все изображения пользователя
+        result = supabase.table("saved_images").select("*").eq("user_id", telegram_user_id).limit(limit).execute()
         
-        # Проверка результата
-        if not hasattr(result, 'data'):
-            logger.error(f"Ошибка при получении изображений: {result}")
-            raise HTTPException(status_code=500, detail="Ошибка при получении изображений")
+        # Если в результате есть данные, возвращаем их
+        if hasattr(result, 'data'):
+            logger.info(f"Получено {len(result.data)} изображений для пользователя {telegram_user_id}")
+            return result.data
         
-        return result.data
+        return []
         
     except Exception as e:
-        logger.error(f"Ошибка при получении изображений: {e}")
+        logger.error(f"Ошибка при получении изображений пользователя: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- Эндпоинт для получения изображений поста ---
@@ -1840,52 +1790,6 @@ async def get_post_images(request: Request, post_id: str):
         
     except Exception as e:
         logger.error(f"Ошибка при получении изображений поста: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# --- Эндпоинт для получения всех изображений пользователя ---
-@app.get("/user-images", response_model=List[Dict[str, Any]])
-async def get_user_images(request: Request, limit: int = 20):
-    """Получение всех изображений пользователя."""
-    try:
-        # Получение telegram_user_id из заголовков
-        telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            logger.warning("Запрос получения изображений без идентификации пользователя Telegram")
-            raise HTTPException(status_code=401, detail="Для получения изображений необходимо авторизоваться через Telegram")
-        
-        if not supabase:
-            logger.error("Клиент Supabase не инициализирован")
-            raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
-        
-        # Получаем изображения пользователя
-        result = supabase.table("saved_images").select("*").eq("user_id", telegram_user_id).order("created_at", desc=True).limit(limit).execute()
-        
-        # Проверка результата
-        if not hasattr(result, 'data'):
-            logger.error(f"Ошибка при получении изображений: {result}")
-            return []
-        
-        # Скрываем фактические URL-адреса изображений для пользователя
-        images = []
-        for img in result.data:
-            # Создаем прокси URL через наш сервер
-            proxy_url = f"/api/image-proxy/{img['id']}"
-            
-            # Копируем объект и заменяем URL
-            img_copy = img.copy()
-            img_copy["original_url"] = img_copy["url"]  # Сохраняем оригинальный URL для внутреннего использования
-            img_copy["url"] = proxy_url
-            
-            if "preview_url" in img_copy and img_copy["preview_url"]:
-                img_copy["original_preview_url"] = img_copy["preview_url"]
-                img_copy["preview_url"] = proxy_url + "?size=small"
-            
-            images.append(img_copy)
-        
-        return images
-        
-    except Exception as e:
-        logger.error(f"Ошибка при получении изображений: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- Эндпоинт для проксирования изображений через наш сервер ---
@@ -1952,3 +1856,37 @@ async def get_user_images_legacy(request: Request, limit: int = 20):
     Переадресует на новый эндпоинт /user-images.
     """
     return await get_user_images(request, limit)
+
+@app.post("/save-suggested-idea", response_model=Dict[str, Any])
+async def save_suggested_idea(idea_data: Dict[str, Any], request: Request):
+    telegram_user_id = request.headers.get("x-telegram-user-id")
+    if not telegram_user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    if not supabase:
+        logging.error("Supabase client not initialized")
+        raise HTTPException(status_code=500, detail="Database not initialized")
+    
+    try:
+        # Очищаем форматирование текста перед сохранением
+        if "topic_idea" in idea_data:
+            idea_data["topic_idea"] = clean_text_formatting(idea_data["topic_idea"])
+        
+        # Генерируем уникальный ID для идеи
+        idea_id = f"idea_{int(time.time())}_{random.randint(1000, 9999)}"
+        idea_data["id"] = idea_id
+        idea_data["user_id"] = telegram_user_id
+        idea_data["created_at"] = datetime.now().isoformat()
+        
+        # Сохраняем идею в базе данных
+        result = supabase.table("suggested_ideas").insert(idea_data).execute()
+        
+        if hasattr(result, 'data') and result.data:
+            logging.info(f"Saved idea with ID {idea_id}")
+            return {"id": idea_id, "message": "Idea saved successfully"}
+        else:
+            logging.error(f"Failed to save idea: {result}")
+            raise HTTPException(status_code=500, detail="Failed to save idea")
+    except Exception as e:
+        logging.error(f"Error saving idea: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
