@@ -28,7 +28,7 @@ if (window.Telegram && window.Telegram.WebApp) {
   }
 } else if (WebApp) {
   console.log('main.tsx: Используем WebApp из @twa-dev/sdk');
-  console.log('main.tsx: WebApp объект:', WebApp);
+console.log('main.tsx: WebApp объект:', WebApp);
   console.log('main.tsx: Вызываем WebApp.ready()');
   WebApp.ready(); // Сообщаем Telegram, что приложение готово
   console.log('main.tsx: WebApp.ready() вызван');

@@ -244,9 +244,9 @@ const PostImageGallery = ({
     } catch (err: any) {
       console.error('Ошибка при загрузке изображений поста:', err);
       setError('Не удалось загрузить изображения');
-    } finally {
-      setLoading(false);
-    }
+      } finally {
+        setLoading(false);
+      }
   }, [postId]);
   
   // Загружаем изображения при монтировании
@@ -270,7 +270,7 @@ const PostImageGallery = ({
       </div>
     );
   }
-  
+
   // Отображаем ошибку
   if (error) {
     return (
@@ -801,7 +801,7 @@ function App() {
         setCurrentView('calendar');
         setEditingPost(null);
       }
-    } catch (err: any) {
+    } catch (err: any) { 
       console.error('Ошибка при обновлении поста:', err);
       setError(err.response?.data?.detail || err.message || 'Ошибка при обновлении поста');
     } finally {
@@ -881,7 +881,7 @@ function App() {
   const analyzeChannel = async () => {
     if (!channelName) {
       setError("Введите имя канала");
-        return; 
+      return;
     }
 
     setIsAnalyzing(true);
@@ -1091,8 +1091,8 @@ function App() {
       <div className="loading-container">
         <div className="loading-spinner"></div>
         <p>Загрузка приложения...</p>
-      </div>
-    );
+    </div>
+  );
   }
 
   // Компонент авторизации
@@ -1331,7 +1331,7 @@ function App() {
                     <div className="post-details">
                       <div className="text-section">
                         <h3>Текст поста:</h3>
-                        <textarea
+              <textarea
                           value={detailedPost.post_text}
                           onChange={(e) => 
                             setDetailedPost({
@@ -1339,15 +1339,15 @@ function App() {
                               post_text: e.target.value
                             })
                           }
-                          rows={10}
+                rows={10}
                           className="post-text-editor"
-                        />
-                      </div>
+              />
+            </div>
                       
                       {detailedPost.images && detailedPost.images.length > 0 && (
                         <div className="image-section">
                           <h3>Изображения:</h3>
-                          <div className="image-thumbnails">
+                <div className="image-thumbnails">
                             {detailedPost.images.map((img, index) => (
                               <div key={index} className={`image-item ${selectedImage === index ? 'selected' : ''}`}>
                                 <img 
@@ -1370,17 +1370,17 @@ function App() {
                                     {selectedImage === index ? '✓ Выбрано' : 'Выбрать'}
                                   </button>
                                 </div>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="selected-image-preview">
+                    </div>
+                  ))}
+                </div>
+                    <div className="selected-image-preview">
                             {selectedImage !== null && detailedPost.images[selectedImage] && (
                               <div className="preview-container">
                                 <h4>Выбранное изображение:</h4>
-                                <img 
+                      <img 
                                   src={detailedPost.images[selectedImage].url} 
                                   alt={detailedPost.images[selectedImage].alt || "Выбранное изображение"} 
-                                  className="preview-image"
+                        className="preview-image" 
                                   onError={(e) => {
                                     // Обработка ошибки загрузки изображения в превью
                                     const target = e.target as HTMLImageElement;
@@ -1395,17 +1395,17 @@ function App() {
                                     </a>
                                   </p>
                                 )}
-                              </div>
-                            )}
-                          </div>
-                          <div className="image-actions">
+              </div>
+            )}
+                  </div>
+                  <div className="image-actions">
                             <button 
                               onClick={regeneratePostDetails}
                               className="action-button"
                               disabled={isDetailGenerating}
                             >
                               Обновить изображения
-                            </button>
+                    </button>
                             <div className="custom-image-upload">
                               <h4>Загрузить свое изображение:</h4>
                               <ImageUploader 
@@ -1442,30 +1442,30 @@ function App() {
                                   }
                                 }} 
                               />
-                            </div>
-                          </div>
-                        </div>
-                      )}
+                  </div>
+                </div>
+              </div>
+            )}
 
                       {/* Добавляем кнопку сохранения поста */}
                       <div className="actions-section">
                         <h3>Сохранить пост:</h3>
                         <div className="date-picker-container">
                           <label>Выберите дату публикации: </label>
-                          <input 
+                    <input 
                             type="date" 
                             value={selectedDate.toISOString().split('T')[0]}
                             onChange={(e) => setSelectedDate(new Date(e.target.value))}
                             className="date-input"
                           />
                         </div>
-                        <button 
+                    <button 
                           onClick={handleSavePost}
                           className="action-button save-button"
                           disabled={isSavingPost}
                         >
                           {isSavingPost ? 'Сохранение...' : 'Сохранить пост'}
-                        </button>
+                    </button>
                       </div>
                     </div>
                   ) : null}
@@ -1473,9 +1473,9 @@ function App() {
               ) : (
                 <div className="empty-details">
                   <p>Выберите идею для детализации</p>
-                </div>
-              )}
-            </div>
+               </div>
+            )}
+          </div>
           )}
           
           {/* Вид календаря */}
@@ -1489,7 +1489,7 @@ function App() {
                 
                 {/* Компактная кнопка добавления/удаления канала в фильтр */}
                 <div className="channels-actions">
-                  <button 
+                <button 
                     className="action-button"
                     onClick={() => {
                       // Добавить текущий канал в фильтр, если его еще нет
@@ -1501,15 +1501,15 @@ function App() {
                     }}
                   >
                     + Добавить текущий канал
-                  </button>
+                </button>
                   
                   <button
                     className="action-button"
                     onClick={filterPostsByChannels}
                   >
                     Применить фильтр
-                  </button>
-                </div>
+                </button>
+          </div>
                 
                 {/* Отображение выбранных каналов */}
                 <div className="selected-channels">
@@ -1526,9 +1526,9 @@ function App() {
                       >
                         ✕
                       </button>
-                    </div>
+      </div>
                   ))}
-                </div>
+      </div>
               </div>
               
               {/* Календарь */}
