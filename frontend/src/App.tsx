@@ -376,11 +376,15 @@ const CalendarDay = ({
 };
 
 // Компонент для выбора изображений из галереи
-const ImageGallery = ({ onImageSelect }) => {
-  const [images, setImages] = useState([]);
+interface ImageGalleryProps {
+  onImageSelect: (images: PostImage[]) => void;
+  userId: string | number | null;
+}
+const ImageGallery: React.FC<ImageGalleryProps> = ({ onImageSelect, userId }) => {
+  const [images, setImages] = useState<PostImage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [selectedImages, setSelectedImages] = useState([]);
+  const [selectedImages, setSelectedImages] = useState<PostImage[]>([]);
 
   useEffect(() => {
     fetchUserImages();
@@ -392,10 +396,10 @@ const ImageGallery = ({ onImageSelect }) => {
     
     try {
       const response = await axios.get(`${API_BASE_URL}/images`, {
-        headers: { "x-telegram-user-id": userId || 'unknown' }
+        headers: { "x-telegram-user-id": userId ? Number(userId) : 'unknown' }
       });
       
-      setImages(response.data);
+      setImages(response.data as PostImage[]);
     } catch (err) {
       console.error('Ошибка при загрузке изображений:', err);
       setError('Не удалось загрузить изображения');
@@ -404,11 +408,11 @@ const ImageGallery = ({ onImageSelect }) => {
     }
   };
 
-  const handleImageClick = (image) => {
+  const handleImageClick = (image: PostImage) => {
     // Если изображение уже выбрано, удаляем его из выбранных
-    if (selectedImages.some(img => img.id === image.id)) {
-      setSelectedImages(selectedImages.filter(img => img.id !== image.id));
-      } else {
+    if (selectedImages.some(img => img.url === image.url)) {
+      setSelectedImages(selectedImages.filter(img => img.url !== image.url));
+    } else {
       // Иначе добавляем в выбранные
       setSelectedImages([...selectedImages, image]);
     }
@@ -438,9 +442,9 @@ const ImageGallery = ({ onImageSelect }) => {
       }}>
         {images.map(image => (
           <div 
-            key={image.id} 
+            key={image.url} 
             style={{ 
-              border: selectedImages.some(img => img.id === image.id) 
+              border: selectedImages.some(img => img.url === image.url) 
                 ? '3px solid blue' 
                 : '1px solid #ddd',
               borderRadius: '4px',
@@ -451,7 +455,7 @@ const ImageGallery = ({ onImageSelect }) => {
           >
             <img 
               src={image.url} 
-              alt={image.alt_description || 'Изображение'} 
+              alt={image.alt || 'Изображение'} 
               style={{ 
                 width: '100%', 
                 height: '120px', 
@@ -497,7 +501,7 @@ const SelectedImagesPreview = ({ images, onRemove }) => {
       }}>
         {images.map(image => (
           <div 
-            key={image.id} 
+            key={image.url} 
             style={{ 
               position: 'relative',
               border: '1px solid #ddd',
@@ -508,7 +512,7 @@ const SelectedImagesPreview = ({ images, onRemove }) => {
           >
             <img 
               src={image.url} 
-              alt={image.alt_description || 'Изображение'} 
+              alt={image.alt || 'Изображение'} 
               style={{ 
                 width: '100%', 
                 height: '100px', 
@@ -784,7 +788,7 @@ function App() {
         regenerate_images_only: true
       }, {
         headers: {
-          'x-telegram-user-id': userId || 'unknown'
+          'x-telegram-user-id': userId ? Number(userId) : 'unknown'
         }
       });
 
@@ -859,7 +863,7 @@ function App() {
               alt_description: img.alt || "",
               source: "unsplash"
             }, {
-              headers: { "x-telegram-user-id": userId || 'unknown' }
+              headers: { "x-telegram-user-id": userId ? Number(userId) : 'unknown' }
             });
             
             savedImageIds.push(imageId);
@@ -888,7 +892,7 @@ function App() {
       console.log("Сохраняемые данные поста:", postData);
       
       const response = await axios.post(`${API_BASE_URL}/posts`, postData, {
-        headers: { "x-telegram-user-id": userId || 'unknown' }
+        headers: { "x-telegram-user-id": userId ? Number(userId) : 'unknown' }
       });
 
       console.log("Пост успешно сохранен:", response.data);
@@ -1081,7 +1085,7 @@ function App() {
         },
         {
           headers: {
-            'x-telegram-user-id': userId || 'unknown'
+            'x-telegram-user-id': userId ? Number(userId) : 'unknown'
           }
         }
       );
@@ -1155,7 +1159,7 @@ function App() {
         },
         {
           headers: {
-            'x-telegram-user-id': userId || 'unknown'
+            'x-telegram-user-id': userId ? Number(userId) : 'unknown'
           }
         }
       );
