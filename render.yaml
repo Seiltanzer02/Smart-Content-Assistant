@@ -5,6 +5,7 @@ services:
     plan: free
     buildCommand: chmod +x ./build.sh && ./build.sh
     startCommand: chmod +x ./start.sh && ./start.sh
+    healthCheckPath: /
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.11
@@ -23,4 +24,8 @@ services:
       - key: UNSPLASH_ACCESS_KEY
         sync: false
       - key: PEXELS_API_KEY
-        sync: false 
+        sync: false
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      - key: ENVIRONMENT
+        value: production 
