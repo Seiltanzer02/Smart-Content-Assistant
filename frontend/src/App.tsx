@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import './App.css';
 import { TelegramAuth } from './components/TelegramAuth';
@@ -244,9 +244,9 @@ const PostImageGallery = ({
     } catch (err: any) {
       console.error('Ошибка при загрузке изображений поста:', err);
       setError('Не удалось загрузить изображения');
-      } finally {
-        setLoading(false);
-      }
+    } finally {
+      setLoading(false);
+    }
   }, [postId]);
   
   // Загружаем изображения при монтировании
@@ -371,6 +371,173 @@ const CalendarDay = ({
           ))}
         </div>
       )}
+    </div>
+  );
+};
+
+// Компонент для выбора изображений из галереи
+const ImageGallery = ({ onImageSelect }) => {
+  const [images, setImages] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [selectedImages, setSelectedImages] = useState([]);
+
+  useEffect(() => {
+    fetchUserImages();
+  }, []);
+
+  const fetchUserImages = async () => {
+    setLoading(true);
+    setError('');
+    
+    try {
+      const response = await axios.get(`${API_BASE_URL}/images`, {
+        headers: { "x-telegram-user-id": userId || 'unknown' }
+      });
+      
+      setImages(response.data);
+    } catch (err) {
+      console.error('Ошибка при загрузке изображений:', err);
+      setError('Не удалось загрузить изображения');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleImageClick = (image) => {
+    // Если изображение уже выбрано, удаляем его из выбранных
+    if (selectedImages.some(img => img.id === image.id)) {
+      setSelectedImages(selectedImages.filter(img => img.id !== image.id));
+    } else {
+      // Иначе добавляем в выбранные
+      setSelectedImages([...selectedImages, image]);
+    }
+  };
+
+  const confirmSelection = () => {
+    // Передаем выбранные изображения через callback
+    onImageSelect(selectedImages);
+  };
+
+  return (
+    <div style={{ marginTop: '20px' }}>
+      <h3>Выберите изображения</h3>
+      
+      {loading && <div>Загрузка изображений...</div>}
+      {error && <div style={{ color: 'red' }}>{error}</div>}
+      
+      {images.length === 0 && !loading && !error && (
+        <div>У вас пока нет сохраненных изображений</div>
+      )}
+      
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', 
+        gap: '10px', 
+        marginTop: '10px' 
+      }}>
+        {images.map(image => (
+          <div 
+            key={image.id} 
+            style={{ 
+              border: selectedImages.some(img => img.id === image.id) 
+                ? '3px solid blue' 
+                : '1px solid #ddd',
+              borderRadius: '4px',
+              padding: '5px',
+              cursor: 'pointer'
+            }}
+            onClick={() => handleImageClick(image)}
+          >
+            <img 
+              src={image.url} 
+              alt={image.alt_description || 'Изображение'} 
+              style={{ 
+                width: '100%', 
+                height: '120px', 
+                objectFit: 'cover',
+                borderRadius: '2px'
+              }} 
+            />
+          </div>
+        ))}
+      </div>
+      
+      {images.length > 0 && (
+        <button 
+          onClick={confirmSelection}
+          style={{
+            marginTop: '15px',
+            padding: '8px 16px',
+            backgroundColor: '#0088cc',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer'
+          }}
+        >
+          Подтвердить выбор ({selectedImages.length})
+        </button>
+      )}
+    </div>
+  );
+};
+
+// Компонент для отображения выбранных изображений
+const SelectedImagesPreview = ({ images, onRemove }) => {
+  if (!images || images.length === 0) return null;
+  
+  return (
+    <div style={{ marginTop: '15px' }}>
+      <h4>Выбранные изображения</h4>
+      <div style={{ 
+        display: 'flex', 
+        flexWrap: 'wrap', 
+        gap: '10px' 
+      }}>
+        {images.map(image => (
+          <div 
+            key={image.id} 
+            style={{ 
+              position: 'relative',
+              border: '1px solid #ddd',
+              borderRadius: '4px',
+              padding: '5px',
+              width: '120px'
+            }}
+          >
+            <img 
+              src={image.url} 
+              alt={image.alt_description || 'Изображение'} 
+              style={{ 
+                width: '100%', 
+                height: '100px', 
+                objectFit: 'cover',
+                borderRadius: '2px'
+              }} 
+            />
+            <button
+              onClick={() => onRemove(image)}
+              style={{
+                position: 'absolute',
+                top: '5px',
+                right: '5px',
+                background: 'rgba(255, 255, 255, 0.7)',
+                border: 'none',
+                borderRadius: '50%',
+                width: '24px',
+                height: '24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer'
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
@@ -664,115 +831,78 @@ function App() {
 
   // Сохранение поста с правильной обработкой
   const handleSavePost = async () => {
-    if (!detailedPost || !selectedIdea) return;
-    
+    if (!selectedIdea || !detailedPost) {
+      setError("Пожалуйста, выберите идею и создайте пост перед сохранением");
+      return;
+    }
+
     setIsSavingPost(true);
-    setError(null);
-    setSuccess(null);
+    setError("");
+    setSuccess("");
+
+    // Сохраняем выбранные изображения перед сохранением поста
+    const savedImageIds: string[] = [];
     
-    try {
-      // Получаем URL выбранного изображения, если есть
-      const selectedImageUrl = selectedImage !== null && detailedPost.images && detailedPost.images.length > 0
-        ? detailedPost.images[selectedImage].url
-        : null;
-      
-      // Массив ID выбранных изображений
-      let imagesIds: string[] = [];
-      
-      // Если выбрано изображение, сохраняем информацию о нем в базе данных
-      if (selectedImage !== null && detailedPost.images && detailedPost.images.length > 0) {
-        try {
-          const selectedImg = detailedPost.images[selectedImage];
-          
-          // Проверяем, есть ли у изображения id, если нет - сохраняем его
-          if (selectedImg) {
-            const imageData = {
-              id: `img_${Date.now()}`,
-              url: selectedImg.url,
-              preview_url: selectedImg.url,
-              alt: selectedImg.alt || 'Изображение поста',
-              author: selectedImg.author || '',
-              author_url: selectedImg.author_url || '',
-              source: 'post'
-            };
+    // Проверяем, есть ли изображения в детализированном посте
+    if (detailedPost.images && detailedPost.images.length > 0) {
+      for (const img of detailedPost.images) {
+        // Проверяем, что изображение имеет url перед сохранением
+        if (img && img.url) {
+          try {
+            // Генерируем уникальный ID для изображения, если его нет
+            const imageId = `img_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
             
-            // Сохраняем информацию об изображении
-            const saveImageResponse = await axios.post(`${API_BASE_URL}/save-image`, imageData, {
-              headers: {
-                'x-telegram-user-id': userId || 'unknown'
-              }
+            // Сохраняем изображение в базе данных
+            const response = await axios.post(`${API_BASE_URL}/save-image`, {
+              id: imageId,
+              url: img.url,
+              alt_description: img.alt || "",
+              source: "unsplash"
+            }, {
+              headers: { "x-telegram-user-id": userId || 'unknown' }
             });
             
-            if (saveImageResponse.data && saveImageResponse.data.id) {
-              // Добавляем ID изображения в массив
-              imagesIds.push(saveImageResponse.data.id);
-            }
+            savedImageIds.push(imageId);
+            console.log("Изображение успешно сохранено:", response.data);
+          } catch (error) {
+            // Логируем ошибку, но продолжаем процесс - не прерываем сохранение поста из-за ошибки с изображением
+            console.error("Ошибка при сохранении изображения:", error);
+            setError(`Ошибка при сохранении изображения: ${error instanceof Error ? error.message : String(error)}`);
           }
-        } catch (imgErr) {
-          console.warn('Не удалось сохранить информацию об изображении:', imgErr);
-          // Если ошибка сохранения изображения, пытаемся просто использовать URL
+        } else {
+          console.warn("Пропущено изображение без URL:", img);
         }
       }
-      
-      // Создаем объект поста
+    }
+
+    try {
       const postData = {
-        id: `post-${Date.now()}`, // Генерируем ID для нового поста
-        topic_idea: selectedIdea.topic_idea,
-        format_style: selectedIdea.format_style,
-        final_text: detailedPost.post_text,
-        image_url: selectedImageUrl, // Для обратной совместимости
-        images_ids: imagesIds, // Добавляем массив ID изображений
-        target_date: selectedDate.toISOString().split('T')[0],
-        channel_name: selectedIdea.channel_name
+        topic_idea: selectedIdea?.topic_idea || "",
+        format_style: selectedIdea?.format_style || "",
+        post_text: detailedPost.post_text,
+        channel_name: selectedIdea?.channel_name || "",
+        target_date: selectedDate,
+        images: savedImageIds
       };
+
+      console.log("Сохраняемые данные поста:", postData);
       
-      // Отправляем запрос на сохранение поста
       const response = await axios.post(`${API_BASE_URL}/posts`, postData, {
-        headers: {
-          'x-telegram-user-id': userId || 'unknown'
-        }
+        headers: { "x-telegram-user-id": userId || 'unknown' }
       });
+
+      console.log("Пост успешно сохранен:", response.data);
+      setSuccess("Пост успешно сохранен!");
       
       // Обновляем список сохраненных постов
-      if (response.data && response.data.id) {
-        // Добавляем новый пост в список
-        setSavedPosts(prev => [...prev, response.data]);
-        
-        // Обновляем статус идеи, если это возможно
-        // Не пытаемся преобразовать ID идеи в UUID
-        const ideaUpdateResponse = await axios.patch(
-          `${API_BASE_URL}/ideas/${selectedIdea.id}/status`,
-          { status: 'done' },
-          {
-            headers: {
-              'x-telegram-user-id': userId || 'unknown'
-            }
-          }
-        ).catch(err => {
-          // Если ошибка связана с UUID, просто логируем и продолжаем
-          console.warn('Не удалось обновить статус идеи:', err.message);
-          return null;
-        });
-        
-        if (ideaUpdateResponse) {
-          // Обновляем список идей с новым статусом
-          setSuggestedIdeas(prev => 
-            prev.map(idea => 
-              idea.id === selectedIdea.id 
-                ? { ...idea, status: 'done' } 
-                : idea
-            )
-          );
-        }
-        
-        setSuccess('Пост успешно сохранен');
-        
-        // Переходим на вкладку календаря
-        setCurrentView('calendar');
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении поста');
-      console.error('Ошибка при сохранении поста:', err);
+      fetchSavedPosts();
+      
+      // Очищаем выбранные данные
+      setSelectedIdea(null);
+      setDetailedPost(null);
+    } catch (error) {
+      console.error("Ошибка при сохранении поста:", error);
+      setError(`Ошибка при сохранении поста: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setIsSavingPost(false);
     }
