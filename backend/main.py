@@ -95,16 +95,30 @@ if missing_keys:
 else:
     logger.info("Все необходимые переменные окружения найдены.")
 
-# --- Инициализация Supabase клиента, только если есть ключи --- 
-supabase = None
-if SUPABASE_URL and SUPABASE_ANON_KEY:
-    try:
-        supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-        logger.info("Клиент Supabase успешно инициализирован.")
-    except Exception as e:
-        logger.error(f"Ошибка инициализации клиента Supabase: {e}")
+# --- Инициализация Supabase client ---
+logger.info("Инициализация Supabase...")
+supabase_url = os.getenv("SUPABASE_URL")
+supabase_key = os.getenv("SUPABASE_ANON_KEY")
+
+if not supabase_url or not supabase_key:
+    logger.warning("SUPABASE_URL или SUPABASE_ANON_KEY не найдены в окружении.")
+    supabase = None
 else:
-    logger.warning("Клиент Supabase не инициализирован из-за отсутствия ключей.")
+    try:
+        # Создаем клиент Supabase
+        supabase = create_client(supabase_url, supabase_key)
+        logger.info("Supabase успешно инициализирован.")
+        
+        # Проверяем доступность таблиц
+        try:
+            # Попытка получить запись из таблицы suggested_ideas для проверки
+            supabase.table("suggested_ideas").select("id").limit(1).execute()
+            logger.info("Таблица suggested_ideas существует и доступна.")
+        except Exception as table_err:
+            logger.warning(f"Таблица suggested_ideas недоступна: {table_err}. Возможно, миграции не были выполнены.")
+    except Exception as e:
+        logger.error(f"Ошибка при инициализации Supabase: {e}")
+        supabase = None
 # ---------------------------------------
 
 # --- Инициализация FastAPI --- 

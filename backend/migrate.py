@@ -55,15 +55,35 @@ def run_migrations():
             with open(file_path, 'r', encoding='utf-8') as f:
                 sql_content = f.read()
             
-            # Выполняем SQL запрос через REST API
-            response = supabase.table("_migrations").insert({
-                "name": file_name,
-                "executed_at": int(time.time())
-            }).execute()
-            
-            # Выполнение SQL запросов напрямую через строку
-            result = supabase.postgrest.schema('public').rpc('exec_sql', {'query': sql_content}).execute()
-            logger.info(f"Миграция {file_name} успешно применена")
+            # Убираем запись в таблицу _migrations, так как она не существует
+            # и просто выполняем SQL-запросы
+            try:
+                # Выполнение SQL запросов напрямую через RPC
+                result = supabase.postgrest.schema('public').rpc('exec_sql', {'query': sql_content}).execute()
+                logger.info(f"Миграция {file_name} успешно применена")
+            except Exception as sql_err:
+                # Если функция exec_sql не существует, попробуем разделить запросы и выполнить их по отдельности
+                logger.warning(f"Не удалось выполнить через RPC, пробуем другой метод: {sql_err}")
+                
+                # Создаем функцию exec_sql, если её нет
+                try:
+                    create_function_sql = """
+                    CREATE OR REPLACE FUNCTION exec_sql(query text) RETURNS void AS $$
+                    BEGIN
+                        EXECUTE query;
+                    END;
+                    $$ LANGUAGE plpgsql SECURITY DEFINER;
+                    """
+                    supabase.pg.execute(create_function_sql)
+                    
+                    # Теперь пробуем снова выполнить нашу миграцию
+                    result = supabase.postgrest.schema('public').rpc('exec_sql', {'query': sql_content}).execute()
+                    logger.info(f"Миграция {file_name} успешно применена после создания функции")
+                except Exception as func_err:
+                    logger.error(f"Не удалось создать или использовать функцию exec_sql: {func_err}")
+                    # Если всё ещё не работает, придется отказаться от этой миграции
+                    logger.error(f"Пропускаем миграцию {file_name}")
+                    continue
                 
         except Exception as e:
             logger.error(f"Ошибка при применении миграции {file_name}: {e}")
