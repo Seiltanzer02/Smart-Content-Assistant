@@ -216,6 +216,8 @@ class PostData(BaseModel):
     final_text: str
     # Сделаем image_url опциональным
     image_url: Optional[str] = Field(None, description="URL изображения (опционально)")
+    # Добавляем поле для массива изображений
+    images_ids: Optional[List[str]] = Field(None, description="Список ID изображений")
     # Добавляем поле канала
     channel_name: Optional[str] = Field(None, description="Имя канала, к которому относится пост")
 
@@ -226,6 +228,7 @@ class SavedPostResponse(PostData): # Наследуем от PostData
     updated_at: str
     # Переопределяем для ясности, хотя наследование сработало бы
     image_url: Optional[str] = Field(None, description="URL изображения (опционально)")
+    images_ids: Optional[List[str]] = Field(None, description="Список ID изображений")
     # Добавляем поле канала
     channel_name: Optional[str] = Field(None, description="Имя канала, к которому относится пост")
 
@@ -522,19 +525,34 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
             themes = []
             styles = []
         
-        # Сохранение результата анализа в базу данных (если есть telegram_user_id)
-        if telegram_user_id:
+        # Сохранение результата анализа в базе данных (если есть telegram_user_id)
+        if telegram_user_id and supabase:
             try:
-                # Создаем словарь с данными для предложения
-                idea_data = {
+                # Проверяем, существует ли уже запись для этого пользователя и канала
+                analysis_check = supabase.table("channel_analysis").select("id").eq("user_id", telegram_user_id).eq("channel_name", username).execute()
+                
+                # Создаем словарь с данными анализа
+                analysis_data = {
+                    "user_id": telegram_user_id,
                     "channel_name": username,
                     "themes": themes,
                     "styles": styles,
-                    "user_id": telegram_user_id
+                    "analyzed_posts_count": len(posts),
+                    "sample_posts": sample_posts[:5] if len(sample_posts) > 5 else sample_posts,
+                    "best_posting_time": "18:00 - 20:00 МСК",  # Временная заглушка
+                    "is_sample_data": sample_data_used,
+                    "updated_at": time.strftime("%Y-%m-%d %H:%M:%S")
                 }
-                # Вызываем функцию сохранения, передавая словарь напрямую или создавая объект, если требуется
-                await save_suggested_idea(idea_data)
-                logger.info(f"Результаты анализа сохранены для пользователя {telegram_user_id}, канал @{username}")
+                
+                # Если запись существует, обновляем ее, иначе создаем новую
+                if hasattr(analysis_check, 'data') and len(analysis_check.data) > 0:
+                    # Обновляем существующую запись
+                    result = supabase.table("channel_analysis").update(analysis_data).eq("user_id", telegram_user_id).eq("channel_name", username).execute()
+                    logger.info(f"Обновлен результат анализа для канала @{username} пользователя {telegram_user_id}")
+                else:
+                    # Создаем новую запись
+                    result = supabase.table("channel_analysis").insert(analysis_data).execute()
+                    logger.info(f"Сохранен новый результат анализа для канала @{username} пользователя {telegram_user_id}")
             except Exception as db_error:
                 logger.error(f"Ошибка при сохранении результатов анализа в БД: {db_error}")
                 errors_list.append(f"Ошибка БД: {str(db_error)}")
@@ -548,7 +566,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         # Если произошла ошибка при анализе, возвращаем ошибку 500
         raise HTTPException(status_code=500, detail=f"Ошибка при анализе контента: {str(e)}")
     
-    # Временный заглушка для лучшего времени постинга
+    # Временная заглушка для лучшего времени постинга
     best_posting_time = "18:00 - 20:00 МСК"
     
     return AnalyzeResponse(
@@ -559,6 +577,60 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         analyzed_posts_count=len(posts),
         message=error_message
     )
+
+# --- Маршрут для получения сохраненного анализа канала ---
+@app.get("/channel-analysis", response_model=Dict[str, Any])
+async def get_channel_analysis(request: Request, channel_name: str):
+    """Получение сохраненного анализа канала."""
+    try:
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            return {"error": "Для получения анализа необходимо авторизоваться через Telegram"}
+        
+        if not supabase:
+            return {"error": "База данных недоступна"}
+        
+        # Запрос данных из базы
+        result = supabase.table("channel_analysis").select("*").eq("user_id", telegram_user_id).eq("channel_name", channel_name).execute()
+        
+        # Проверка результата
+        if not hasattr(result, 'data') or len(result.data) == 0:
+            return {"error": f"Анализ для канала @{channel_name} не найден"}
+        
+        # Возвращаем данные
+        return result.data[0]
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении анализа канала: {e}")
+        return {"error": str(e)}
+
+# --- Маршрут для получения списка всех проанализированных каналов ---
+@app.get("/analyzed-channels", response_model=List[Dict[str, Any]])
+async def get_analyzed_channels(request: Request):
+    """Получение списка всех проанализированных каналов пользователя."""
+    try:
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            return []
+        
+        if not supabase:
+            return []
+        
+        # Запрос данных из базы
+        result = supabase.table("channel_analysis").select("channel_name,updated_at").eq("user_id", telegram_user_id).order("updated_at", desc=True).execute()
+        
+        # Проверка результата
+        if not hasattr(result, 'data'):
+            return []
+        
+        # Возвращаем данные
+        return result.data
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка проанализированных каналов: {e}")
+        return []
 
 # --- Модель для ответа от /ideas ---
 class SuggestedIdeasResponse(BaseModel):
@@ -638,6 +710,34 @@ class PlanGenerationResponse(BaseModel):
     plan: List[PlanItem] = []
     message: Optional[str] = None
 
+# --- Функция для очистки названий идей от markdown-форматирования ---
+def cleanup_idea_title(text: str) -> str:
+    """Удаляет markdown-форматирование из текста идеи."""
+    if not text:
+        return ""
+    
+    # Удаляем markdown-форматирование
+    text = re.sub(r'#+\s*', '', text)  # Удаляем заголовки (#, ##, ###)
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # Удаляем жирный текст
+    text = re.sub(r'\*(.*?)\*', r'\1', text)  # Удаляем курсив
+    text = re.sub(r'`(.*?)`', r'\1', text)  # Удаляем код
+    text = re.sub(r'_(.*)_', r'\1', text)  # Удаляем подчеркивание
+    
+    # Удаляем упоминания дня
+    text = re.sub(r'^(день|день)\s*\d+[:.]\s*', '', text.lower())
+    
+    # Удаляем кавычки
+    text = re.sub(r'[""]', '', text)
+    
+    # Убираем лишние пробелы
+    text = re.sub(r'\s+', ' ', text.strip())
+    
+    # Делаем первую букву заглавной
+    if text:
+        text = text[0].upper() + text[1:]
+        
+    return text
+
 # --- Маршрут для генерации плана публикаций ---
 @app.post("/generate-plan", response_model=PlanGenerationResponse)
 async def generate_content_plan(request: Request, req: PlanGenerationRequest):
@@ -695,6 +795,12 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
 2. Конкретную идею поста по выбранной теме (в формате понятного заголовка/концепции, не абстрактно)
 3. Формат/стиль поста (из списка указанных стилей)
 
+ОЧЕНЬ ВАЖНО:
+- НЕ ИСПОЛЬЗУЙ markdown-форматирование (**, ##, *, _) в идеях и названиях форматов
+- НЕ НАЧИНАЙ названия идей с "День X:" или подобных конструкций
+- Идеи должны быть короткими заголовками, а не длинными текстами
+- Используй простые понятные формулировки без специальных символов
+
 Ответ должен быть в формате: план публикаций из нескольких идей постов."""
 
         # Формируем запрос к пользователю
@@ -707,7 +813,9 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
 {", ".join(styles)}
 
 Создай план из {period_days} публикаций (по одной на каждый день), используя указанные темы и стили. 
-Для каждого поста укажи день, конкретную идею (не общую тему, а конкретный заголовок или концепцию поста) и стиль/формат."""
+Для каждого поста укажи день, конкретную идею (не общую тему, а конкретный заголовок или концепцию поста) и стиль/формат.
+
+ВАЖНО: Не используй никакого markdown-форматирования в тексте идей и форматов. Названия идей должны быть чистыми текстовыми строками без *, **, #, ##, ### и т.д."""
 
         # Настройка клиента OpenAI для использования OpenRouter
         client = AsyncOpenAI(
@@ -758,8 +866,8 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
                 if current_day is not None and current_topic:
                     plan_items.append(PlanItem(
                         day=current_day,
-                        topic_idea=current_topic.strip(),
-                        format_style=current_style.strip() if current_style else "Без указания стиля"
+                        topic_idea=cleanup_idea_title(current_topic.strip()),
+                        format_style=cleanup_idea_title(current_style.strip()) if current_style else "Без указания стиля"
                     ))
                 
                 # Начинаем новую идею
@@ -787,8 +895,8 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
         if current_day is not None and current_topic:
             plan_items.append(PlanItem(
                 day=current_day,
-                topic_idea=current_topic.strip(),
-                format_style=current_style.strip() if current_style else "Без указания стиля"
+                topic_idea=cleanup_idea_title(current_topic.strip()),
+                format_style=cleanup_idea_title(current_style.strip()) if current_style else "Без указания стиля"
             ))
             
         # Если не удалось извлечь идеи через регулярные выражения, используем более простой подход
@@ -806,12 +914,12 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
                 # Пытаемся найти стиль в строке
                 style_match = re.search(r'(?:стиль|формат)[:\s]+(.*?)$', line, re.IGNORECASE)
                 if style_match:
-                    format_style = style_match.group(1).strip()
-                    topic_idea = line[:style_match.start()].strip()
+                    format_style = cleanup_idea_title(style_match.group(1).strip())
+                    topic_idea = cleanup_idea_title(line[:style_match.start()].strip())
                 else:
                     # Если явно не указан стиль, берем случайный из списка
                     format_style = random.choice(styles)
-                    topic_idea = line
+                    topic_idea = cleanup_idea_title(line)
                 
                 plan_items.append(PlanItem(
                     day=day_counter,
@@ -930,6 +1038,34 @@ async def create_post(request: Request, post_data: PostData):
         post_to_save = post_data.dict()
         post_to_save["user_id"] = telegram_user_id
         
+        # Создаем новую запись или обновляем существующую
+        if "id" not in post_to_save or not post_to_save["id"]:
+            post_to_save["id"] = str(uuid.uuid4())
+        
+        # Обработка изображений: проверяем, переданы ли ID изображений
+        images_ids = post_to_save.get("images_ids", [])
+        
+        # Если передано только одно изображение через image_url, а images_ids пустой, 
+        # добавляем его в базу и сохраняем ID
+        if post_to_save.get("image_url") and not images_ids:
+            try:
+                image_data = {
+                    "id": f"post_img_{str(uuid.uuid4())}",
+                    "url": post_to_save["image_url"],
+                    "preview_url": post_to_save["image_url"],
+                    "alt": "Изображение поста",
+                    "source": "post",
+                    "user_id": telegram_user_id,
+                    "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+                image_result = supabase.table("saved_images").insert(image_data).execute()
+                if hasattr(image_result, 'data') and len(image_result.data) > 0:
+                    images_ids = [image_data["id"]]
+                    post_to_save["images_ids"] = images_ids
+            except Exception as img_err:
+                logger.error(f"Ошибка при сохранении изображения из URL: {img_err}")
+        
         # Сохранение в Supabase
         result = supabase.table("saved_posts").insert(post_to_save).execute()
         
@@ -937,7 +1073,28 @@ async def create_post(request: Request, post_data: PostData):
         if not hasattr(result, 'data') or len(result.data) == 0:
             logger.error(f"Ошибка при сохранении поста: {result}")
             raise HTTPException(status_code=500, detail="Ошибка при сохранении поста")
-            
+        
+        post_id = result.data[0]["id"]
+        
+        # Если есть изображения, сохраняем связи в таблице post_images
+        if images_ids and len(images_ids) > 0:
+            try:
+                for img_id in images_ids:
+                    # Проверяем существование изображения
+                    image_check = supabase.table("saved_images").select("id").eq("id", img_id).execute()
+                    if hasattr(image_check, 'data') and len(image_check.data) > 0:
+                        # Связываем пост с изображением
+                        post_image_data = {
+                            "post_id": post_id,
+                            "image_id": img_id,
+                            "user_id": telegram_user_id
+                        }
+                        
+                        supabase.table("post_images").insert(post_image_data).execute()
+            except Exception as rel_err:
+                logger.warning(f"Ошибка при создании связей с изображениями: {rel_err}")
+                # Не прерываем обработку, т.к. сам пост уже сохранен
+        
         logger.info(f"Пользователь {telegram_user_id} создал пост: {post_data.topic_idea}")
         return result.data[0]
         
@@ -1194,6 +1351,31 @@ async def search_unsplash_images(query: str, count: int = 5, topic: str = "", fo
                     
                 # Добавляем найденные фото в общий список
                 all_photos.extend(results['results'])
+                
+                # Сохраняем изображения в базе данных, если она доступна
+                if supabase:
+                    for photo in results['results']:
+                        try:
+                            # Проверяем, существует ли уже это изображение в базе
+                            image_check = supabase.table("saved_images").select("id").eq("url", photo['urls']['regular']).execute()
+                            
+                            if not hasattr(image_check, 'data') or len(image_check.data) == 0:
+                                # Если изображения нет, сохраняем его
+                                image_data = {
+                                    "id": photo['id'],
+                                    "url": photo['urls']['regular'],
+                                    "preview_url": photo['urls']['small'],
+                                    "alt": photo.get('description') or photo.get('alt_description') or keyword,
+                                    "author": photo['user']['name'],
+                                    "author_url": photo['user']['links']['html'],
+                                    "source": "unsplash",
+                                    "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                                }
+                                
+                                supabase.table("saved_images").insert(image_data).execute()
+                                logger.debug(f"Сохранено изображение {photo['id']} в базе данных")
+                        except Exception as db_error:
+                            logger.error(f"Ошибка при сохранении изображения в БД: {db_error}")
                 
             except Exception as e:
                 logger.error(f"Ошибка при выполнении запроса к Unsplash по ключевому слову '{keyword}': {e}")
@@ -1499,11 +1681,22 @@ async def get_ideas(request: Request):
         logging.error(f"Ошибка при получении идей: {e}")
         return JSONResponse(status_code=500, content={"detail": f"Ошибка при получении идей: {str(e)}"})
 
+# --- ДОБАВЛЯЕМ ФУНКЦИЮ ДЛЯ ИЗВЛЕЧЕНИЯ USER_ID ИЗ ЗАПРОСА ---
+async def get_user_id(request: Request):
+    """Извлекает telegram_user_id из заголовков запроса."""
+    telegram_user_id = request.headers.get("X-Telegram-User-Id")
+    if not telegram_user_id:
+        raise HTTPException(status_code=401, detail="Для доступа необходимо авторизоваться через Telegram")
+    return telegram_user_id
+
 # --- Endpoint для обновления статуса детализации идеи ---
 @app.put("/ideas/{idea_id}")
-async def update_idea(idea_id: str, idea_update: dict = Body(...), user_id: str = Depends(get_user_id)):
+async def update_idea(idea_id: str, request: Request, idea_update: dict = Body(...)):
     """Обновить идею."""
     try:
+        # Получаем telegram_user_id из заголовков
+        user_id = await get_user_id(request)
+        
         # Проверяем, является ли ID UUID
         is_uuid = True
         try:
@@ -1569,11 +1762,32 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
         file_path = os.path.join(upload_dir, unique_filename)
         
         # Записываем файл
+        file_content = await file.read()
         with open(file_path, "wb") as buffer:
-            buffer.write(await file.read())
+            buffer.write(file_content)
         
         # Формируем URL для доступа к файлу
         file_url = f"/static/uploads/{unique_filename}"
+        
+        # Сохраняем информацию об изображении в базе данных, если она доступна
+        if supabase:
+            try:
+                image_id = f"custom_{telegram_user_id}_{timestamp}"
+                image_data = {
+                    "id": image_id,
+                    "url": file_url,
+                    "preview_url": file_url,
+                    "alt": file.filename,
+                    "author": "Пользователь",
+                    "source": "custom",
+                    "user_id": telegram_user_id,
+                    "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+                result = supabase.table("saved_images").insert(image_data).execute()
+                logger.info(f"Сохранена информация о загруженном изображении {image_id}")
+            except Exception as db_error:
+                logger.error(f"Ошибка при сохранении информации об изображении в БД: {db_error}")
         
         return {
             "url": file_url,
@@ -1583,3 +1797,251 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Ошибка при загрузке изображения: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка при загрузке изображения: {str(e)}")
+
+# --- ОБЩИЙ ТИП для найденного изображения --- 
+class FoundImage(BaseModel):
+    id: str
+    source: str # Источник (unsplash, pexels, openverse)
+    preview_url: str # URL миниатюры
+    regular_url: str # URL основного изображения
+    description: Optional[str] = None
+    author_name: Optional[str] = None
+    author_url: Optional[str] = None
+
+# --- Модель для сохранения информации об изображениях ---
+class SavedImage(BaseModel):
+    id: str
+    url: str
+    preview_url: Optional[str] = None
+    alt: Optional[str] = None
+    author: Optional[str] = None
+    author_url: Optional[str] = None
+    source: str = "custom"
+    user_id: Optional[str] = None
+    created_at: Optional[str] = None
+
+# --- Endpoint для сохранения информации об изображении ---
+@app.post("/save-image", response_model=SavedImage)
+async def save_image_info(request: Request, image_data: dict = Body(...)):
+    """Сохраняет информацию об изображении в базе данных."""
+    try:
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            raise HTTPException(status_code=401, detail="Для сохранения изображения необходимо авторизоваться через Telegram")
+        
+        if not supabase:
+            raise HTTPException(status_code=500, detail="База данных недоступна")
+        
+        # Добавляем user_id и дату создания
+        image_data["user_id"] = telegram_user_id
+        image_data["created_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Проверяем наличие обязательных полей
+        if "url" not in image_data:
+            raise HTTPException(status_code=400, detail="Отсутствует обязательное поле 'url'")
+        
+        if "id" not in image_data:
+            # Генерируем ID, если он не указан
+            image_data["id"] = f"img_{str(uuid.uuid4())}"
+        
+        # Сохраняем в базе
+        result = supabase.table("saved_images").insert(image_data).execute()
+        
+        if not hasattr(result, 'data') or len(result.data) == 0:
+            raise HTTPException(status_code=500, detail="Ошибка при сохранении изображения")
+        
+        return result.data[0]
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении изображения: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- Endpoint для получения сохраненных изображений ---
+@app.get("/saved-images", response_model=List[Dict[str, Any]])
+async def get_saved_images(request: Request, source: Optional[str] = None, limit: int = 50):
+    """Получение сохраненных изображений."""
+    try:
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            return []
+        
+        if not supabase:
+            return []
+        
+        # Строим запрос к базе данных
+        query = supabase.table("saved_images").select("*")
+        
+        # Если указан источник, фильтруем по нему
+        if source:
+            query = query.eq("source", source)
+        
+        # Если указан пользовательский источник, фильтруем по user_id
+        if source == "custom":
+            query = query.eq("user_id", telegram_user_id)
+        
+        # Выполняем запрос
+        result = query.order("created_at", desc=True).limit(limit).execute()
+        
+        # Проверяем результат
+        if not hasattr(result, 'data'):
+            return []
+        
+        return result.data
+    except Exception as e:
+        logger.error(f"Ошибка при получении сохраненных изображений: {e}")
+        return []
+
+# --- Модель для связи поста с изображениями ---
+class PostImagesResponse(BaseModel):
+    post_id: str
+    images: List[SavedImage]
+
+@app.get("/posts/{post_id}/images", response_model=PostImagesResponse)
+async def get_post_images(post_id: str, request: Request):
+    """Получение изображений, связанных с постом."""
+    try:
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            logger.warning("Запрос изображений поста без идентификации пользователя Telegram")
+            raise HTTPException(status_code=401, detail="Необходимо авторизоваться через Telegram")
+        
+        if not supabase:
+            logger.error("Клиент Supabase не инициализирован")
+            raise HTTPException(status_code=500, detail="База данных недоступна")
+        
+        # Проверяем, что пост принадлежит пользователю
+        post_check = supabase.table("saved_posts").select("id").eq("id", post_id).eq("user_id", telegram_user_id).execute()
+        if not hasattr(post_check, 'data') or len(post_check.data) == 0:
+            raise HTTPException(status_code=404, detail="Пост не найден или нет прав на просмотр")
+            
+        # Получаем связи поста с изображениями
+        if hasattr(post_check.data[0], "images_ids") and post_check.data[0]["images_ids"]:
+            # Если у поста есть прямые ссылки на изображения
+            images_ids = post_check.data[0]["images_ids"]
+            images_result = supabase.table("saved_images").select("*").in_("id", images_ids).execute()
+            
+            if hasattr(images_result, 'data'):
+                return PostImagesResponse(
+                    post_id=post_id,
+                    images=images_result.data
+                )
+        
+        # Если нет прямых ссылок, проверяем связи через таблицу post_images
+        links_result = supabase.table("post_images").select("image_id").eq("post_id", post_id).execute()
+        
+        if not hasattr(links_result, 'data') or len(links_result.data) == 0:
+            # Если нет связей, проверяем наличие image_url в посте
+            post_result = supabase.table("saved_posts").select("image_url").eq("id", post_id).execute()
+            
+            if hasattr(post_result, 'data') and len(post_result.data) > 0 and post_result.data[0].get("image_url"):
+                # Создаем временное изображение из URL
+                image_data = {
+                    "id": f"temp_{post_id}",
+                    "url": post_result.data[0]["image_url"],
+                    "preview_url": post_result.data[0]["image_url"],
+                    "alt": "Изображение поста",
+                    "source": "post"
+                }
+                
+                return PostImagesResponse(
+                    post_id=post_id,
+                    images=[image_data]
+                )
+            
+            # Если никаких изображений нет
+            return PostImagesResponse(
+                post_id=post_id,
+                images=[]
+            )
+        
+        # Получаем данные изображений по их ID
+        image_ids = [link["image_id"] for link in links_result.data]
+        images_result = supabase.table("saved_images").select("*").in_("id", image_ids).execute()
+        
+        if not hasattr(images_result, 'data'):
+            return PostImagesResponse(
+                post_id=post_id,
+                images=[]
+            )
+        
+        return PostImagesResponse(
+            post_id=post_id,
+            images=images_result.data
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении изображений поста: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- Функция для очистки форматирования в тексте ---
+def clean_text_formatting(text: str) -> str:
+    """Очищает текст от специальных символов форматирования Markdown."""
+    if not text:
+        return ""
+    
+    # Удаляем маркеры заголовков (### Title)
+    cleaned = re.sub(r'^#+\s+', '', text)
+    
+    # Удаляем маркеры жирного текста (**text**)
+    cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned)
+    
+    # Удаляем маркеры курсива (*text*)
+    cleaned = re.sub(r'\*(.*?)\*', r'\1', cleaned)
+    
+    # Удаляем маркеры подчеркивания (_text_)
+    cleaned = re.sub(r'_(.*?)_', r'\1', cleaned)
+    
+    # Регулярное выражение для поиска и исправления форматирования типа "### **1 день**"
+    cleaned = re.sub(r'###\s*\*\*(\d+)\s*день\*\*', r'День \1', cleaned)
+    cleaned = re.sub(r'##\s*\*\*(\d+)\s*день\*\*', r'День \1', cleaned)
+    cleaned = re.sub(r'#\s*\*\*(\d+)\s*день\*\*', r'День \1', cleaned)
+    
+    # Также исправляем варианты без решеток
+    cleaned = re.sub(r'\*\*(\d+)\s*день\*\*', r'День \1', cleaned)
+    
+    return cleaned.strip()
+
+# --- Функция для исправления форматирования в существующих идеях ---
+async def fix_existing_ideas_formatting():
+    """Исправляет форматирование в существующих идеях."""
+    if not supabase:
+        logger.error("Невозможно исправить форматирование: клиент Supabase не инициализирован")
+        return
+    
+    try:
+        # Получение всех идей
+        result = supabase.table("suggested_ideas").select("id,topic_idea,format_style").execute()
+        
+        if not hasattr(result, 'data') or len(result.data) == 0:
+            logger.info("Нет идей для исправления форматирования")
+            return
+        
+        fixed_count = 0
+        for idea in result.data:
+            original_topic = idea.get("topic_idea", "")
+            original_format = idea.get("format_style", "")
+            
+            # Очищаем форматирование
+            cleaned_topic = clean_text_formatting(original_topic)
+            cleaned_format = clean_text_formatting(original_format)
+            
+            # Если текст изменился, обновляем запись
+            if cleaned_topic != original_topic or cleaned_format != original_format:
+                supabase.table("suggested_ideas").update({
+                    "topic_idea": cleaned_topic,
+                    "format_style": cleaned_format
+                }).eq("id", idea["id"]).execute()
+                fixed_count += 1
+        
+        logger.info(f"Исправлено форматирование в {fixed_count} идеях")
+    except Exception as e:
+        logger.error(f"Ошибка при исправлении форматирования: {e}")
+
+# --- Запуск исправления форматирования при старте сервера ---
+@app.on_event("startup")
+async def startup_events():
+    """Действия при запуске сервера."""
+    # Исправляем форматирование в существующих идеях
+    await fix_existing_ideas_formatting()
