@@ -15,5 +15,9 @@ cd "$BACKEND_DIR"
 # Не создаем .env файл, т.к. переменные установлены в Render
 echo "Использую переменные окружения из Render..."
 
+# Запускаем скрипт миграции для создания таблиц
+echo "Запуск миграций базы данных..."
+python migrate.py
+
 echo "Запуск приложения..."
-exec gunicorn main:app --bind 0.0.0.0:10000 --workers 2 --worker-class uvicorn.workers.UvicornWorker 
+uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} 

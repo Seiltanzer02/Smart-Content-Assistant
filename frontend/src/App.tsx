@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import './App.css';
 import { TelegramAuth } from './components/TelegramAuth';
@@ -131,6 +131,7 @@ interface SavedPost {
   final_text: string;
   image_url?: string;
   channel_name?: string;
+  images_ids?: string[]; // Добавляем поддержку массива ID изображений
 }
 
 // Тип для дня календаря
@@ -210,6 +211,163 @@ const ImageUploader = ({ onImageUploaded }: { onImageUploaded: (imageUrl: string
         </span>
       </label>
       {uploadError && <p className="error-message">{uploadError}</p>}
+    </div>
+  );
+};
+
+// Компонент для отображения галереи изображений поста
+const PostImageGallery = ({ 
+  postId, 
+  onImageSelect 
+}: { 
+  postId: string; 
+  onImageSelect?: (imageUrl: string) => void 
+}) => {
+  const [images, setImages] = useState<any[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Функция для загрузки изображений
+  const loadImages = useCallback(async () => {
+    if (!postId) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // Запрашиваем изображения для поста
+      const response = await axios.get(`${API_BASE_URL}/posts/${postId}/images`);
+      
+      if (response.data && response.data.images) {
+        setImages(response.data.images);
+      }
+    } catch (err: any) {
+      console.error('Ошибка при загрузке изображений поста:', err);
+      setError('Не удалось загрузить изображения');
+    } finally {
+      setLoading(false);
+    }
+  }, [postId]);
+  
+  // Загружаем изображения при монтировании
+  useEffect(() => {
+    loadImages();
+  }, [loadImages]);
+  
+  // Функция для выбора изображения
+  const handleSelect = (image: any) => {
+    if (onImageSelect) {
+      onImageSelect(image.url);
+    }
+  };
+  
+  // Отображаем загрузку
+  if (loading) {
+    return (
+      <div className="post-image-gallery loading">
+        <div className="loading-spinner small"></div>
+        <p>Загрузка изображений...</p>
+      </div>
+    );
+  }
+  
+  // Отображаем ошибку
+  if (error) {
+    return (
+      <div className="post-image-gallery error">
+        <p>{error}</p>
+      </div>
+    );
+  }
+  
+  // Отображаем пустое состояние
+  if (!images || images.length === 0) {
+    return (
+      <div className="post-image-gallery empty">
+        <p>Нет изображений</p>
+      </div>
+    );
+  }
+  
+  // Отображаем галерею
+  return (
+    <div className="post-image-gallery">
+      <div className="image-grid">
+        {images.map((image, index) => (
+          <div 
+            key={image.id || index} 
+            className="image-item"
+            onClick={() => handleSelect(image)}
+          >
+            <img 
+              src={image.preview_url || image.url} 
+              alt={image.alt || "Изображение поста"} 
+              className="thumbnail"
+              onError={(e) => {
+                // Обработка ошибки загрузки изображения
+                const target = e.target as HTMLImageElement;
+                target.onerror = null;
+                target.src = 'https://via.placeholder.com/100?text=Ошибка';
+              }}
+            />
+            {image.author && (
+              <div className="image-author">
+                {image.author}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Компонент для отображения дня календаря
+const CalendarDay = ({ 
+  day, 
+  onEditPost, 
+  onDeletePost 
+}: { 
+  day: CalendarDay; 
+  onEditPost: (post: SavedPost) => void;
+  onDeletePost: (postId: string) => void;
+}) => {
+  const { date, posts, isCurrentMonth, isToday } = day;
+  const dayNumber = date.getDate();
+  
+  // Класс для ячейки календаря
+  const cellClass = `calendar-day ${isCurrentMonth ? '' : 'other-month'} ${isToday ? 'today' : ''}`;
+  
+  return (
+    <div className={cellClass}>
+      <div className="day-number">{dayNumber}</div>
+      {posts.length > 0 && (
+        <div className="day-posts">
+          {posts.map((post) => (
+            <div key={post.id} className="post-item">
+              <div className="post-title" title={post.topic_idea}>
+                {post.topic_idea}
+              </div>
+              <div className="post-actions">
+                <button 
+                  className="edit-button" 
+                  onClick={() => onEditPost(post)}
+                  title="Редактировать"
+                >
+                  ✎
+                </button>
+                <button 
+                  className="delete-button" 
+                  onClick={() => onDeletePost(post.id)}
+                  title="Удалить"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -501,69 +659,113 @@ function App() {
     }
   };
 
-  // Функция для сохранения поста
-  const savePost = async (dateForPost: Date) => {
-    if (!selectedIdea || !detailedPost) {
-      setError('Не удалось сохранить пост: отсутствуют данные');
-      return;
-    }
+  // Сохранение поста с правильной обработкой
+  const handleSavePost = async () => {
+    if (!detailedPost || !selectedIdea) return;
     
     setIsSavingPost(true);
-    setError('');
-    setSuccess('');
+    setError(null);
+    setSuccess(null);
     
     try {
-      // Формируем данные для сохранения
+      // Получаем URL выбранного изображения, если есть
+      const selectedImageUrl = selectedImage !== null && detailedPost.images && detailedPost.images.length > 0
+        ? detailedPost.images[selectedImage].url
+        : null;
+      
+      // Массив ID выбранных изображений
+      let imagesIds: string[] = [];
+      
+      // Если выбрано изображение, сохраняем информацию о нем в базе данных
+      if (selectedImage !== null && detailedPost.images && detailedPost.images.length > 0) {
+        try {
+          const selectedImg = detailedPost.images[selectedImage];
+          
+          // Проверяем, есть ли у изображения id, если нет - сохраняем его
+          if (selectedImg) {
+            const imageData = {
+              id: `img_${Date.now()}`,
+              url: selectedImg.url,
+              preview_url: selectedImg.url,
+              alt: selectedImg.alt || 'Изображение поста',
+              author: selectedImg.author || '',
+              author_url: selectedImg.author_url || '',
+              source: 'post'
+            };
+            
+            // Сохраняем информацию об изображении
+            const saveImageResponse = await axios.post(`${API_BASE_URL}/save-image`, imageData, {
+              headers: {
+                'x-telegram-user-id': userId || 'unknown'
+              }
+            });
+            
+            if (saveImageResponse.data && saveImageResponse.data.id) {
+              // Добавляем ID изображения в массив
+              imagesIds.push(saveImageResponse.data.id);
+            }
+          }
+        } catch (imgErr) {
+          console.warn('Не удалось сохранить информацию об изображении:', imgErr);
+          // Если ошибка сохранения изображения, пытаемся просто использовать URL
+        }
+      }
+      
+      // Создаем объект поста
       const postData = {
+        id: `post-${Date.now()}`, // Генерируем ID для нового поста
         topic_idea: selectedIdea.topic_idea,
         format_style: selectedIdea.format_style,
-        post_text: detailedPost.post_text,
-        channel_name: selectedIdea.channel_name,
-        target_date: dateForPost.toISOString(),
-        // Если выбрано изображение, отправляем только его, иначе первое изображение или пустой массив
-        images: selectedImage !== null && detailedPost.images.length > 0 
-          ? [detailedPost.images[selectedImage]]
-          : detailedPost.images.length > 0 
-            ? [detailedPost.images[0]] 
-            : []
+        final_text: detailedPost.post_text,
+        image_url: selectedImageUrl, // Для обратной совместимости
+        images_ids: imagesIds, // Добавляем массив ID изображений
+        target_date: selectedDate.toISOString().split('T')[0],
+        channel_name: selectedIdea.channel_name
       };
       
-      // Отправляем запрос на сохранение
+      // Отправляем запрос на сохранение поста
       const response = await axios.post(`${API_BASE_URL}/posts`, postData, {
         headers: {
           'x-telegram-user-id': userId || 'unknown'
         }
       });
       
-      if (response.data) {
-        setSuccess('Пост успешно сохранен');
+      // Обновляем список сохраненных постов
+      if (response.data && response.data.id) {
+        // Добавляем новый пост в список
+        setSavedPosts(prev => [...prev, response.data]);
         
-        // Обновляем список сохраненных постов
-        fetchSavedPosts();
-        
-        // Если у идеи есть id и он не генерируемый, пытаемся обновить её статус
-        if (selectedIdea.id && !selectedIdea.id.startsWith('idea-')) {
-          try {
-            await axios.put(`${API_BASE_URL}/ideas/${selectedIdea.id}`, 
-              { status: 'completed' },
-              {
-                headers: {
-                  'x-telegram-user-id': userId || 'unknown'
-                }
-              }
-            );
-          } catch (ideasErr) {
-            console.warn('Не удалось обновить статус идеи:', ideasErr);
-            // Не показываем эту ошибку пользователю, так как пост уже сохранен
+        // Обновляем статус идеи, если это возможно
+        // Не пытаемся преобразовать ID идеи в UUID
+        const ideaUpdateResponse = await axios.patch(
+          `${API_BASE_URL}/ideas/${selectedIdea.id}/status`,
+          { status: 'done' },
+          {
+            headers: {
+              'x-telegram-user-id': userId || 'unknown'
+            }
           }
+        ).catch(err => {
+          // Если ошибка связана с UUID, просто логируем и продолжаем
+          console.warn('Не удалось обновить статус идеи:', err.message);
+          return null;
+        });
+        
+        if (ideaUpdateResponse) {
+          // Обновляем список идей с новым статусом
+          setSuggestedIdeas(prev => 
+            prev.map(idea => 
+              idea.id === selectedIdea.id 
+                ? { ...idea, status: 'done' } 
+                : idea
+            )
+          );
         }
         
-        // Возвращаемся к списку идей или плана после короткой задержки
-        setTimeout(() => {
-          setCurrentView('plan');
-          setSelectedIdea(null);
-          setDetailedPost(null);
-        }, 1500);
+        setSuccess('Пост успешно сохранен');
+        
+        // Переходим на вкладку календаря
+        setCurrentView('calendar');
       }
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении поста');
@@ -881,86 +1083,6 @@ function App() {
   // Функция для выбора изображения
   const handleSelectImage = (index: number) => {
     setSelectedImage(index === selectedImage ? null : index);
-  };
-
-  // Сохранение поста с правильной обработкой
-  const handleSavePost = async () => {
-    if (!detailedPost || !selectedIdea) return;
-    
-    setIsSavingPost(true);
-    setError(null);
-    setSuccess(null);
-    
-    try {
-      // Получаем URL выбранного изображения, если есть
-      const selectedImageUrl = selectedImage !== null && detailedPost.images && detailedPost.images.length > 0
-        ? detailedPost.images[selectedImage].url
-        : null;
-      
-      // Создаем объект поста
-      const postData = {
-        post_id: `post-${Date.now()}`, // Генерируем ID для нового поста
-        idea_id: selectedIdea.id,
-        text: detailedPost.post_text,
-        image_url: selectedImageUrl,
-        created_at: new Date().toISOString(),
-        status: 'draft',
-        channel_name: selectedIdea.channel_name,
-        topic: selectedIdea.topic_idea,
-        format: selectedIdea.format_style,
-        telegram_user_id: userId || 'unknown'
-      };
-      
-      // Отправляем запрос на сохранение поста
-      const response = await axios.post(`${API_BASE_URL}/posts`, postData, {
-        headers: {
-          'x-telegram-user-id': userId || 'unknown'
-        }
-      });
-      
-      // Обновляем список сохраненных постов
-      if (response.data && response.data.post_id) {
-        // Добавляем новый пост в список
-        setSavedPosts(prev => [...prev, response.data]);
-        
-        // Обновляем статус идеи, если это возможно
-        // Не пытаемся преобразовать ID идеи в UUID
-        const ideaUpdateResponse = await axios.patch(
-          `${API_BASE_URL}/ideas/${selectedIdea.id}/status`,
-          { status: 'done' },
-          {
-            headers: {
-              'x-telegram-user-id': userId || 'unknown'
-            }
-          }
-        ).catch(err => {
-          // Если ошибка связана с UUID, просто логируем и продолжаем
-          console.warn('Не удалось обновить статус идеи:', err.message);
-          return null;
-        });
-        
-        if (ideaUpdateResponse) {
-          // Обновляем список идей с новым статусом
-          setSuggestedIdeas(prev => 
-            prev.map(idea => 
-              idea.id === selectedIdea.id 
-                ? { ...idea, status: 'done' } 
-                : idea
-            )
-          );
-        }
-        
-        setSuccess('Пост успешно сохранен');
-        
-        // Переходим на вкладку календаря
-        setCurrentView('calendar');
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении поста');
-      console.error('Ошибка при сохранении поста:', err);
-    } finally {
-      setIsSavingPost(false);
-    }
   };
 
   // Компонент загрузки
@@ -1367,7 +1489,7 @@ function App() {
                 
                 {/* Компактная кнопка добавления/удаления канала в фильтр */}
                 <div className="channels-actions">
-                <button 
+                  <button 
                     className="action-button"
                     onClick={() => {
                       // Добавить текущий канал в фильтр, если его еще нет
@@ -1377,148 +1499,90 @@ function App() {
                         localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
                       }
                     }}
-                    disabled={!channelName || selectedChannels.includes(channelName)}
                   >
-                    Добавить текущий канал
-                </button>
+                    + Добавить текущий канал
+                  </button>
                   
                   <button
                     className="action-button"
-                    onClick={() => {
-                      // Сбросить фильтр (показать все каналы)
-                      setSelectedChannels([]);
-                      localStorage.setItem('selectedChannels', JSON.stringify([]));
-                      fetchSavedPosts();
-                    }}
-                    disabled={selectedChannels.length === 0}
+                    onClick={filterPostsByChannels}
                   >
-                    Сбросить фильтр
-                </button>
-          </div>
+                    Применить фильтр
+                  </button>
+                </div>
                 
-                <div className="channels-checkboxes">
-                  {allChannels.map(channel => (
-                    <label key={channel} className="channel-checkbox">
-                      <input 
-                        type="checkbox"
-                        checked={selectedChannels.includes(channel)}
-                        onChange={() => {
-                          const newSelected = selectedChannels.includes(channel)
-                            ? selectedChannels.filter(ch => ch !== channel)
-                            : [...selectedChannels, channel];
-                          setSelectedChannels(newSelected);
-                          localStorage.setItem('selectedChannels', JSON.stringify(newSelected));
-                        }}
-                      />
-                      {channel}
-                      {/* Добавляем кнопку удаления канала из списка */}
+                {/* Отображение выбранных каналов */}
+                <div className="selected-channels">
+                  {selectedChannels.map((channel) => (
+                    <div key={channel} className="selected-channel">
+                      <span className="channel-name">@{channel}</span>
                       <button 
-                        className="remove-channel-button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          
-                          // Удаляем канал из списка всех каналов
-                          const updatedChannels = allChannels.filter(ch => ch !== channel);
-                          setAllChannels(updatedChannels);
-                          localStorage.setItem('allChannels', JSON.stringify(updatedChannels));
-                          
-                          // Также удаляем из выбранных, если он там был
-                          if (selectedChannels.includes(channel)) {
-                            const updatedSelected = selectedChannels.filter(ch => ch !== channel);
-                            setSelectedChannels(updatedSelected);
-                            localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
-                          }
+                        className="remove-channel"
+                        onClick={() => {
+                          const updatedSelected = selectedChannels.filter(c => c !== channel);
+                          setSelectedChannels(updatedSelected);
+                          localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
                         }}
                       >
                         ✕
                       </button>
-                    </label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              {/* Календарь */}
+              <div className="calendar-container">
+                {/* Заголовок с названием месяца и навигацией */}
+                <div className="calendar-header">
+                  <button 
+                    className="nav-button"
+                    onClick={() => {
+                      const newDate = new Date(currentMonth);
+                      newDate.setMonth(newDate.getMonth() - 1);
+                      setCurrentMonth(newDate);
+                    }}
+                  >
+                    &lt;
+                  </button>
+                  
+                  <h3>{currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}</h3>
+                  
+                  <button 
+                    className="nav-button"
+                    onClick={() => {
+                      const newDate = new Date(currentMonth);
+                      newDate.setMonth(newDate.getMonth() + 1);
+                      setCurrentMonth(newDate);
+                    }}
+                  >
+                    &gt;
+                  </button>
+                </div>
+                
+                {/* Дни недели */}
+                <div className="weekdays">
+                  {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day) => (
+                    <div key={day} className="weekday">{day}</div>
                   ))}
                 </div>
                 
-                <button 
-                  onClick={filterPostsByChannels}
-                  className="action-button apply-filter-button"
-                  disabled={loadingSavedPosts}
-                >
-                  Применить фильтр
-                </button>
-               </div>
-            
-              {loadingSavedPosts ? (
-                <div className="loading-indicator">
-                  <div className="loading-spinner"></div>
-                  <p>Загрузка постов...</p>
-          </div>
-              ) : (
-                <>
-                  {/* Навигация по месяцам */}
-                  <div className="calendar-navigation">
-                    <button onClick={goToPrevMonth} className="calendar-nav-button">
-                      &lt; Предыдущий
-                </button>
-                    <h3>
-                      {currentMonth.toLocaleString('ru-RU', { month: 'long', year: 'numeric' })}
-                    </h3>
-                    <button onClick={goToNextMonth} className="calendar-nav-button">
-                      Следующий &gt;
-                    </button>
-                  </div>
-                  
-                  {/* Сетка календаря */}
-                  <div className="calendar-grid">
-                    {/* Заголовки дней недели */}
-                    <div className="calendar-weekdays">
-                      {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map(day => (
-                        <div key={day} className="calendar-weekday">{day}</div>
-                      ))}
-                    </div>
-                    
-                    {/* Дни календаря */}
-                    <div className="calendar-days">
-                      {calendarDays.map((day, index) => (
-                        <div 
-                          key={index} 
-                          className={`calendar-day ${!day.isCurrentMonth ? 'other-month' : ''} ${day.isToday ? 'today' : ''}`}
-                        >
-                          <div className="day-number">{day.date.getDate()}</div>
-                          
-                          {day.posts.length > 0 && (
-                            <div className="day-posts">
-                              {day.posts.map(post => (
-                                <div key={post.id} className="calendar-post">
-                                  <div className="post-summary">
-                                    <strong>{post.topic_idea}</strong>
-                                    <span className="post-format">{post.format_style}</span>
-                                    {post.channel_name && (
-                                      <span className="post-channel">@{post.channel_name}</span>
-                                    )}
-                                  </div>
-                                  <div className="post-actions">
-                <button 
-                                      onClick={() => startEditingPost(post)}
-                                      className="action-button small"
-                                    >
-                                      Изменить
-                </button>
-                                    <button 
-                                      onClick={() => deletePost(post.id)}
-                                      className="action-button small delete"
-                                    >
-                                      Удалить
-                </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-            )}
-          </div>
-                      ))}
-      </div>
-      </div>
-                </>
-              )}
+                {/* Дни календаря */}
+                <div className="calendar-grid">
+                  {calendarDays.map((day, index) => (
+                    <CalendarDay 
+                      key={index} 
+                      day={day} 
+                      onEditPost={startEditingPost}
+                      onDeletePost={(postId) => {
+                        if (window.confirm('Вы уверены, что хотите удалить этот пост?')) {
+                          deletePost(postId);
+                        }
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
           )}
           
@@ -1562,8 +1626,39 @@ function App() {
                 </div>
                 
                 <div className="edit-image-section">
-                  <h3>Изображение:</h3>
-                  <div className="image-options">
+                  <h3>Изображение поста:</h3>
+                  {editedImageUrl && (
+                    <div className="current-image">
+                      <div className="image-preview">
+                        <img 
+                          src={editedImageUrl} 
+                          alt="Предпросмотр изображения"
+                          className="preview-image"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x200?text=Ошибка+загрузки';
+                          }}
+                        />
+                        <button 
+                          className="action-button small delete" 
+                          onClick={() => setEditedImageUrl('')}
+                        >
+                          Удалить изображение
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div className="image-selection">
+                    <h4>Выбрать изображение из галереи:</h4>
+                    <PostImageGallery 
+                      postId={editingPost.id}
+                      onImageSelect={(imageUrl) => setEditedImageUrl(imageUrl)}
+                    />
+                    
+                    <h4>или загрузить новое изображение:</h4>
+                    <ImageUploader onImageUploaded={(url) => setEditedImageUrl(url)} />
+                    
+                    <h4>или ввести URL изображения:</h4>
                     <div className="image-url-input-container">
                       <input 
                         type="text"
@@ -1573,30 +1668,7 @@ function App() {
                         placeholder="URL изображения"
                       />
                     </div>
-                    <div className="image-upload-container">
-                      <p>или</p>
-                      <ImageUploader onImageUploaded={(url) => setEditedImageUrl(url)} />
-                    </div>
                   </div>
-                  
-                  {editedImageUrl && (
-                    <div className="image-preview">
-                      <img 
-                        src={editedImageUrl} 
-                        alt="Предпросмотр изображения"
-                        className="preview-image"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x200?text=Ошибка+загрузки';
-                        }}
-                      />
-                      <button 
-                        className="action-button small delete" 
-                        onClick={() => setEditedImageUrl('')}
-                      >
-                        Удалить изображение
-                      </button>
-                    </div>
-                  )}
                 </div>
                 
                 <div className="edit-actions">
