@@ -27,6 +27,19 @@ fi
 node -v && echo "Версия Node.js: $(node -v)"
 npm -v && echo "Версия npm: $(npm -v)"
 
+# Подготовка файлов Python
+echo "Подготовка каталогов Python..."
+# Создаем __init__.py если их нет
+[ -f backend/__init__.py ] || echo "# Python package" > backend/__init__.py
+[ -d backend/migrations ] || mkdir -p backend/migrations
+[ -f backend/migrations/__init__.py ] || echo "# Python package" > backend/migrations/__init__.py
+
+# Проверяем наличие telegram_utils.py
+if [ ! -f backend/telegram_utils.py ]; then
+    echo "ОШИБКА: Файл telegram_utils.py отсутствует!"
+    exit 1
+fi
+
 # Устанавливаем зависимости npm для фронтенда
 echo "Установка зависимостей npm..."
 cd frontend && npm install
@@ -44,5 +57,8 @@ mkdir -p backend/static
 # Копируем собранное приложение в директорию статических файлов
 echo "Копирование собранного фронтенда в $BUILD_DIR/backend/static..."
 cp -r frontend/dist/* backend/static/
+
+# Делаем скрипты исполняемыми
+chmod +x start.sh
 
 echo "Сборка завершена успешно! Используйте start.sh для запуска приложения." 
