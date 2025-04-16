@@ -236,14 +236,12 @@ class PostData(BaseModel):
     channel_name: Optional[str] = Field(None, description="Имя канала, к которому относится пост")
 
 # --- Модель для сохраненного поста (для ответа GET /posts) --- 
-class SavedPostResponse(PostData): # Наследуем от PostData
+class SavedPostResponse(PostData):
     id: str 
     created_at: str 
     updated_at: str
-    # Переопределяем для ясности, хотя наследование сработало бы
     image_url: Optional[str] = Field(None, description="URL изображения (опционально)")
     images_ids: Optional[List[str]] = Field(None, description="Список ID изображений")
-    # Добавляем поле канала
     channel_name: Optional[str] = Field(None, description="Имя канала, к которому относится пост")
 
 # --- Функция для получения постов Telegram через HTTP парсинг ---
@@ -1046,7 +1044,7 @@ async def create_post(request: Request, post_data: PostData):
         
         # Создаем словарь с данными для сохранения
         post_to_save = post_data.dict()
-        post_to_save["user_id"] = telegram_user_id
+        post_to_save["user_id"] = int(telegram_user_id)
         
         # Создаем новую запись или обновляем существующую
         if "id" not in post_to_save or not post_to_save["id"]:
@@ -1065,7 +1063,7 @@ async def create_post(request: Request, post_data: PostData):
                     "preview_url": post_to_save["image_url"],
                     "alt": "Изображение поста",
                     "source": "post",
-                    "user_id": telegram_user_id,
+                    "user_id": int(telegram_user_id),
                     "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
                 }
                 
@@ -1097,7 +1095,7 @@ async def create_post(request: Request, post_data: PostData):
                         post_image_data = {
                             "post_id": post_id,
                             "image_id": img_id,
-                            "user_id": telegram_user_id
+                            "user_id": int(telegram_user_id)
                         }
                         
                         supabase.table("post_images").insert(post_image_data).execute()
@@ -1127,7 +1125,7 @@ async def update_post(post_id: str, request: Request, post_data: PostData):
             raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
         
         # Проверяем, что пост принадлежит пользователю
-        post_check = supabase.table("saved_posts").select("id").eq("id", post_id).eq("user_id", telegram_user_id).execute()
+        post_check = supabase.table("saved_posts").select("id").eq("id", post_id).eq("user_id", int(telegram_user_id)).execute()
         if not hasattr(post_check, 'data') or len(post_check.data) == 0:
             logger.warning(f"Попытка обновить чужой или несуществующий пост: {post_id}")
             raise HTTPException(status_code=404, detail="Пост не найден или нет прав на его редактирование")
@@ -1165,7 +1163,7 @@ async def delete_post(post_id: str, request: Request):
             raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
         
         # Проверяем, что пост принадлежит пользователю
-        post_check = supabase.table("saved_posts").select("id").eq("id", post_id).eq("user_id", telegram_user_id).execute()
+        post_check = supabase.table("saved_posts").select("id").eq("id", post_id).eq("user_id", int(telegram_user_id)).execute()
         if not hasattr(post_check, 'data') or len(post_check.data) == 0:
             logger.warning(f"Попытка удалить чужой или несуществующий пост: {post_id}")
             raise HTTPException(status_code=404, detail="Пост не найден или нет прав на его удаление")
@@ -1677,7 +1675,7 @@ async def save_image(request: Request, image_data: Dict[str, Any]):
             raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
         
         # Добавляем идентификатор пользователя к данным изображения
-        image_data["user_id"] = telegram_user_id
+        image_data["user_id"] = int(telegram_user_id)
         
         # Проверяем наличие обязательных полей
         if not image_data.get("url"):
@@ -1732,7 +1730,7 @@ async def get_user_images(request: Request, limit: int = 20):
             raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
         
         # Получаем все изображения пользователя
-        result = supabase.table("saved_images").select("*").eq("user_id", telegram_user_id).limit(limit).execute()
+        result = supabase.table("saved_images").select("*").eq("user_id", int(telegram_user_id)).limit(limit).execute()
         
         # Если в результате есть данные, возвращаем их
         if hasattr(result, 'data'):
@@ -1761,7 +1759,7 @@ async def get_post_images(request: Request, post_id: str):
             raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
         
         # Проверяем существование поста и принадлежность пользователю
-        post_check = supabase.table("saved_posts").select("id").eq("id", post_id).eq("user_id", telegram_user_id).execute()
+        post_check = supabase.table("saved_posts").select("id").eq("id", post_id).eq("user_id", int(telegram_user_id)).execute()
         
         if not hasattr(post_check, 'data') or len(post_check.data) == 0:
             logger.warning(f"Попытка получить изображения чужого или несуществующего поста {post_id}")
@@ -1878,7 +1876,7 @@ async def save_suggested_idea(idea_data: Dict[str, Any], request: Request):
         # Генерируем уникальный ID для идеи
         idea_id = f"idea_{int(time.time())}_{random.randint(1000, 9999)}"
         idea_data["id"] = idea_id
-        idea_data["user_id"] = telegram_user_id
+        idea_data["user_id"] = int(telegram_user_id)
         idea_data["created_at"] = datetime.now().isoformat()
         
         # Сохраняем идею в базе данных
