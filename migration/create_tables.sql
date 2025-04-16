@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS suggested_ideas (
     format_style TEXT,
     relative_day INTEGER DEFAULT 0,
     is_detailed BOOLEAN DEFAULT FALSE,
+    status TEXT DEFAULT 'new',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
@@ -35,7 +36,8 @@ CREATE TABLE IF NOT EXISTS saved_images (
     author TEXT,
     author_url TEXT,
     source TEXT DEFAULT 'unsplash',
-    user_id TEXT,
+    user_id TEXT NOT NULL,
+    local_path TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
