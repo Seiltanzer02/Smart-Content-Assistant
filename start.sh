@@ -13,7 +13,9 @@ echo "Использую переменные окружения из Render..."
 
 # Запускаем скрипт миграции для создания таблиц
 echo "Запуск миграций базы данных..."
-python backend/migrate.py
+python backend/migrate.py || {
+    echo "Предупреждение: Миграции не были применены полностью, но продолжаем запуск приложения..."
+}
 
 echo "Запуск приложения..."
-uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000} 
+exec uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2 
