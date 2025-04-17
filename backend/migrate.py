@@ -183,7 +183,7 @@ def check_table_exists(supabase: Client, table_name: str) -> bool:
             SELECT FROM information_schema.tables 
             WHERE table_schema = 'public' 
             AND table_name = '{table_name}'
-        ) as exists;
+        ) as exists
         """
         
         result = execute_sql_query_direct(supabase, sql)
