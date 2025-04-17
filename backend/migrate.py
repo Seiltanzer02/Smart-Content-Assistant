@@ -269,89 +269,202 @@ def execute_sql_individually(sql_content: str) -> bool:
         return False
 
 def run_migrations(supabase: Client) -> bool:
-    """Запуск всех SQL миграций из директории migrations."""
+    """Запуск миграций"""
     try:
         # Получаем список файлов миграций
-        migrations_dir = os.path.join(os.path.dirname(__file__), "migrations")
-        migration_files = []
+        migrations_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations")
+        migration_files = sorted(glob.glob(os.path.join(migrations_dir, "*.sql")))
         
-        for file in os.listdir(migrations_dir):
-            if file.endswith(".sql") and not file.startswith("_"):
-                migration_files.append(os.path.join(migrations_dir, file))
-        
-        # Сортируем файлы по имени
-        migration_files.sort()
-        
+        if not migration_files:
+            logger.warning(f"Файлы миграций не найдены в {migrations_dir}")
+            return False
+            
         logger.info(f"Найдено {len(migration_files)} файлов миграций")
         
-        # Проверяем, какие миграции уже выполнены
-        executed_migrations = []
-        try:
-            result = execute_sql_query_direct(
-                supabase,
-                "SELECT name FROM _migrations"
-            )
-            
-            if result and "data" in result:
-                executed_migrations = [item["name"] for item in result["data"]]
-                logger.info(f"Найдено {len(executed_migrations)} выполненных миграций")
-        except Exception as e:
-            logger.warning(f"Ошибка при получении списка выполненных миграций: {str(e)}")
+        # Получаем список уже выполненных миграций
+        executed_migrations = get_executed_migrations(supabase)
         
-        # Выполняем новые миграции
+        # Применяем миграции по порядку
         for migration_file in migration_files:
             file_name = os.path.basename(migration_file)
             
             if file_name in executed_migrations:
-                logger.info(f"Миграция {file_name} уже выполнена")
+                logger.info(f"Миграция {file_name} уже применена, пропускаем")
                 continue
-            
+                
             logger.info(f"Выполнение миграции {file_name}")
             
-            # Чтение SQL из файла
-            with open(migration_file, "r") as f:
-                sql = f.read()
-            
-            # Выполнение SQL
-            result = execute_sql_direct(supabase, sql)
-            
-            if not result:
-                logger.error(f"Ошибка при выполнении миграции {file_name}")
+            try:
+                with open(migration_file, 'r', encoding='utf-8') as f:
+                    sql_content = f.read()
+                
+                # Парсим SQL контент на отдельные команды
+                commands = parse_sql_commands(sql_content)
+                
+                # Выполняем каждую команду отдельно
+                success = True
+                for i, cmd in enumerate(commands):
+                    if not cmd.strip():
+                        continue
+                        
+                    # Пропускаем команды создания функций, которые мы уже создали
+                    if "CREATE OR REPLACE FUNCTION exec_sql" in cmd:
+                        logger.info("Пропуск создания функции exec_sql, так как она уже создана")
+                        continue
+                    
+                    # Блоки BEGIN-END обрабатываем особым образом
+                    if "BEGIN" in cmd and "END" in cmd:
+                        inner_commands = extract_commands_from_block(cmd)
+                        block_success = True
+                        
+                        for inner_cmd in inner_commands:
+                            if not inner_cmd.strip():
+                                continue
+                                
+                            inner_result = execute_sql_direct(supabase, inner_cmd)
+                            if not inner_result:
+                                logger.error(f"Ошибка при выполнении команды внутри блока BEGIN-END: {inner_cmd[:50]}...")
+                                block_success = False
+                                break
+                                
+                        if not block_success:
+                            success = False
+                            break
+                    else:
+                        # Обычные команды
+                        result = execute_sql_direct(supabase, cmd)
+                        if not result:
+                            logger.error(f"Ошибка при выполнении команды: {cmd[:50]}...")
+                            success = False
+                            break
+                
+                if success:
+                    logger.info(f"Миграция {file_name} успешно выполнена")
+                    # Записываем информацию о выполненной миграции
+                    record_migration_execution(supabase, file_name)
+                else:
+                    logger.error(f"Ошибка при выполнении миграции {file_name}")
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"Исключение при применении миграции {file_name}: {str(e)}")
                 return False
-            
-            # Запись информации о выполненной миграции
-            insert_result = execute_sql_direct(
-                supabase,
-                f"""
-                INSERT INTO _migrations (name)
-                VALUES ('{file_name}')
-                """
-            )
-            
-            if not insert_result:
-                logger.warning(f"Не удалось записать информацию о выполненной миграции {file_name}")
-            
-            logger.info(f"Миграция {file_name} успешно выполнена")
         
+        logger.info("Все миграции успешно выполнены")
         return True
-    
     except Exception as e:
-        logger.error(f"Ошибка при выполнении миграций: {str(e)}")
+        logger.error(f"Ошибка при запуске миграций: {str(e)}")
         return False
 
-def get_executed_migrations(supabase: Client):
+def parse_sql_commands(sql_content: str) -> list:
+    """Разбор SQL скрипта на отдельные команды"""
+    commands = []
+    current_command = ""
+    in_function_body = False
+    in_do_block = False
+    
+    for line in sql_content.splitlines():
+        line = line.strip()
+        
+        # Пропускаем пустые строки и комментарии
+        if not line or line.startswith('--'):
+            continue
+            
+        # Отслеживаем начало блоков DO
+        if line.startswith("DO $$") or line.startswith("DO $"):
+            in_do_block = True
+            current_command += line + "\n"
+            continue
+            
+        # Обрабатываем блоки DO
+        if in_do_block:
+            current_command += line + "\n"
+            if "END $$;" in line or "END $;" in line:
+                in_do_block = False
+                commands.append(current_command)
+                current_command = ""
+            continue
+            
+        # Отслеживаем функции
+        if ("CREATE OR REPLACE FUNCTION" in line or "CREATE FUNCTION" in line) and not in_function_body:
+            in_function_body = True
+            current_command += line + "\n"
+            continue
+            
+        if in_function_body:
+            current_command += line + "\n"
+            if ("$$;" in line or "LANGUAGE " in line) and ";" in line:
+                in_function_body = False
+                commands.append(current_command)
+                current_command = ""
+            continue
+            
+        # Обычные SQL команды
+        current_command += line + "\n"
+        if line.endswith(';') and not in_function_body and not in_do_block:
+            commands.append(current_command)
+            current_command = ""
+    
+    # Добавляем последнюю команду, если она осталась
+    if current_command.strip():
+        commands.append(current_command)
+        
+    return commands
+
+def extract_commands_from_block(block_content: str) -> list:
+    """Извлекаем команды из блока BEGIN-END"""
+    # Находим содержимое между BEGIN и END
+    begin_idx = block_content.find("BEGIN")
+    end_idx = block_content.rfind("END")
+    
+    if begin_idx == -1 or end_idx == -1 or begin_idx >= end_idx:
+        return []
+        
+    inner_content = block_content[begin_idx + 5:end_idx].strip()
+    
+    # Разбиваем на отдельные команды
+    commands = []
+    current_cmd = ""
+    
+    for line in inner_content.split('\n'):
+        line = line.strip()
+        if not line or line.startswith('--'):
+            continue
+            
+        current_cmd += line + " "
+        if line.endswith(';'):
+            commands.append(current_cmd.strip())
+            current_cmd = ""
+            
+    # Добавляем последнюю команду, если она осталась
+    if current_cmd.strip():
+        commands.append(current_cmd.strip())
+        
+    return commands
+
+def get_executed_migrations(supabase: Client) -> list:
     """
-    Получает список уже выполненных миграций из таблицы _migrations
+    Получение списка имен уже выполненных миграций
     """
     try:
-        result = execute_sql_query_direct(supabase, "SELECT name FROM _migrations WHERE success = true ORDER BY applied_at")
+        logger.info("Получение списка выполненных миграций...")
         
-        # Преобразуем результат в список имен миграций
+        executed_migrations = []
+        
+        result = execute_sql_query_direct(
+            supabase,
+            "SELECT name FROM _migrations"
+        )
+        
         if result and isinstance(result, list):
-            return [row.get('name', '') for row in result]
-        return []
+            for item in result:
+                if isinstance(item, dict) and "name" in item:
+                    executed_migrations.append(item["name"])
+                    
+        logger.info(f"Найдено {len(executed_migrations)} выполненных миграций")
+        return executed_migrations
     except Exception as e:
-        logger.error(f"Ошибка при получении списка выполненных миграций: {str(e)}")
+        logger.warning(f"Ошибка при получении списка выполненных миграций: {str(e)}")
         return []
 
 def record_migration(supabase: Client, migration_name: str, success: bool):
@@ -404,18 +517,22 @@ def record_migration(supabase: Client, migration_name: str, success: bool):
         # Не вызываем raise, чтобы миграция не прерывалась из-за ошибки записи
 
 def check_migrations_table(supabase: Client) -> bool:
-    """Проверка существования таблицы _migrations и создание ее при отсутствии."""
+    """Проверка существования таблицы _migrations и создание её при необходимости"""
     try:
         logger.info("Проверка существования таблицы _migrations")
         
+        # Проверяем существование таблицы
         table_exists = check_table_exists(supabase, "_migrations")
         
         if not table_exists:
             logger.info("Таблица _migrations не существует. Создание...")
+            
+            # Создаем таблицу для отслеживания миграций
             sql = """
             CREATE TABLE IF NOT EXISTS _migrations (
                 id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
+                executed_at BIGINT NOT NULL DEFAULT extract(epoch from now())::bigint,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
             CREATE INDEX IF NOT EXISTS idx_migrations_name ON _migrations(name);
@@ -423,15 +540,52 @@ def check_migrations_table(supabase: Client) -> bool:
             
             result = execute_sql_direct(supabase, sql)
             
-            if not result:
+            if result:
+                logger.info("Таблица _migrations успешно создана")
+                return True
+            else:
                 logger.error("Не удалось создать таблицу _migrations")
                 return False
-                
-            logger.info("Таблица _migrations успешно создана")
         
+        # Проверяем структуру таблицы _migrations
+        columns_sql = """
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = '_migrations' AND table_schema = 'public';
+        """
+        
+        columns_result = execute_sql_query_direct(supabase, columns_sql)
+        
+        columns = []
+        if isinstance(columns_result, list):
+            for item in columns_result:
+                if isinstance(item, dict) and 'column_name' in item:
+                    columns.append(item['column_name'])
+        
+        logger.info(f"Структура таблицы _migrations: {columns}")
+        
+        # Проверяем наличие поля executed_at и добавляем его, если оно отсутствует
+        if 'executed_at' not in columns:
+            logger.info("Поле executed_at отсутствует в таблице _migrations, добавляем...")
+            
+            add_column_sql = """
+            ALTER TABLE _migrations 
+            ADD COLUMN executed_at BIGINT NOT NULL DEFAULT extract(epoch from now())::bigint;
+            """
+            
+            add_result = execute_sql_direct(supabase, add_column_sql)
+            
+            if add_result:
+                logger.info("Поле executed_at успешно добавлено в таблицу _migrations")
+            else:
+                logger.error("Не удалось добавить поле executed_at в таблицу _migrations")
+                return False
+        
+        logger.info("Таблица _migrations существует или успешно создана")
         return True
+        
     except Exception as e:
-        logger.error(f"Ошибка при проверке/создании таблицы _migrations: {str(e)}")
+        logger.error(f"Ошибка при проверке существования таблицы _migrations: {str(e)}")
         return False
 
 def create_base_tables_directly():
@@ -595,6 +749,28 @@ def create_exec_sql_function(supabase: Client) -> bool:
             return False
     except Exception as e:
         logger.error(f"Исключение при создании функции exec_sql: {str(e)}")
+        return False
+
+def record_migration_execution(supabase: Client, migration_name: str) -> bool:
+    """Запись информации о выполненной миграции"""
+    try:
+        logger.info(f"Запись информации о выполненной миграции: {migration_name}")
+        
+        sql = f"""
+        INSERT INTO _migrations (name, executed_at) 
+        VALUES ('{migration_name}', extract(epoch from now())::bigint);
+        """
+        
+        result = execute_sql_direct(supabase, sql)
+        
+        if result:
+            logger.info(f"Информация о миграции {migration_name} успешно записана")
+            return True
+        else:
+            logger.error(f"Ошибка при записи информации о миграции {migration_name}")
+            return False
+    except Exception as e:
+        logger.error(f"Исключение при записи информации о миграции: {str(e)}")
         return False
 
 def main():

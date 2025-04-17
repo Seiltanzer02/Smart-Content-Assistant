@@ -2,6 +2,7 @@
 CREATE TABLE IF NOT EXISTS _migrations (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
+    executed_at BIGINT NOT NULL DEFAULT extract(epoch from now())::bigint,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
