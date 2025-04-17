@@ -22,6 +22,9 @@ from logger_config import setup_logger
 # Инициализация логгера
 logger = setup_logger("execute_migrations")
 
+# Определение пути к директории миграций
+MIGRATIONS_DIR = Path(__file__).parent / 'migrations'
+
 def parse_args() -> argparse.Namespace:
     """
     Разбор аргументов командной строки.
@@ -47,10 +50,10 @@ def init_supabase() -> Optional[Client]:
     load_dotenv()
     
     supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_KEY")
+    supabase_key = os.environ.get("SUPABASE_ANON_KEY")  # Изменено с SUPABASE_KEY на SUPABASE_ANON_KEY
     
     if not supabase_url or not supabase_key:
-        logger.error("Не найдены переменные окружения SUPABASE_URL или SUPABASE_KEY")
+        logger.error("Не найдены переменные окружения SUPABASE_URL или SUPABASE_ANON_KEY")
         return None
     
     try:
@@ -73,13 +76,18 @@ def execute_sql_direct(supabase: Client, sql: str) -> Optional[Dict[str, Any]]:
         Dict[str, Any]: Результат выполнения запроса или None в случае ошибки
     """
     try:
-        response = supabase.rpc('exec_sql', {'sql_query': sql}).execute()
-        if not response.data or not response.data.get('success', False):
-            error_info = response.data.get('error', {}) if response.data else {}
-            error_message = error_info.get('message', 'Неизвестная ошибка')
-            logger.error(f"Ошибка при выполнении SQL: {error_message}")
-            return None
-        return response.data
+        # Используем exec_sql_array_json вместо exec_sql
+        response = supabase.rpc('exec_sql_array_json', {"query": sql}).execute()
+        
+        # Проверка на ошибки в ответе
+        if hasattr(response, 'data'):
+            if isinstance(response.data, dict) and response.data.get('error'):
+                error_info = response.data.get('error', {})
+                error_message = error_info.get('message', 'Неизвестная ошибка')
+                logger.error(f"Ошибка при выполнении SQL: {error_message}")
+                return None
+            return {"success": True, "data": response.data}
+        return {"success": True}
     except Exception as e:
         logger.error(f"Ошибка при выполнении SQL через RPC: {e}")
         return None
@@ -96,15 +104,26 @@ def execute_sql_query_direct(supabase: Client, sql: str) -> Optional[List[Dict[s
         List[Dict[str, Any]]: Результат выполнения запроса или None в случае ошибки
     """
     try:
-        response = supabase.rpc('exec_sql', {'sql_query': sql}).execute()
-        if not response.data or not response.data.get('success', False):
-            error_info = response.data.get('error', {}) if response.data else {}
-            error_message = error_info.get('message', 'Неизвестная ошибка')
+        # Используем exec_sql_array_json вместо exec_sql
+        response = supabase.rpc('exec_sql_array_json', {"query": sql}).execute()
+        
+        if not hasattr(response, 'data'):
+            logger.error("Отсутствуют данные в ответе")
+            return None
+            
+        # Для exec_sql_array_json возвращается прямой массив результатов
+        result_data = response.data
+        if result_data is None:
+            return []
+            
+        # Если получили словарь с ошибкой
+        if isinstance(result_data, dict) and result_data.get('error'):
+            error_message = result_data.get('message', 'Неизвестная ошибка')
             logger.error(f"Ошибка при выполнении SQL запроса: {error_message}")
             return None
-        
-        # Возвращаем данные или пустой список, если данных нет
-        return response.data.get('data', [])
+            
+        # Возвращаем данные как список словарей
+        return result_data if isinstance(result_data, list) else [result_data]
     except Exception as e:
         logger.error(f"Ошибка при выполнении SQL запроса через RPC: {e}")
         return None
@@ -127,7 +146,7 @@ def check_migrations_table(supabase: Client) -> bool:
         SELECT FROM information_schema.tables 
         WHERE table_schema = 'public' 
         AND table_name = '_migrations'
-    );
+    ) as exists;
     """
     
     result = execute_sql_query_direct(supabase, sql_check)
@@ -135,7 +154,7 @@ def check_migrations_table(supabase: Client) -> bool:
         logger.error("Не удалось проверить наличие таблицы _migrations")
         return False
     
-    table_exists = result[0].get('exists', False) if result else False
+    table_exists = result[0].get('exists', False) if result and len(result) > 0 else False
     
     if table_exists:
         logger.info("Таблица _migrations уже существует")
@@ -144,12 +163,12 @@ def check_migrations_table(supabase: Client) -> bool:
     # Создаем таблицу _migrations, если она не существует
     logger.info("Создание таблицы _migrations")
     sql_create = """
-    CREATE TABLE _migrations (
+    CREATE TABLE IF NOT EXISTS _migrations (
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
-    CREATE INDEX idx_migrations_name ON _migrations(name);
+    CREATE INDEX IF NOT EXISTS idx_migrations_name ON _migrations(name);
     """
     
     result = execute_sql_direct(supabase, sql_create)
@@ -162,7 +181,7 @@ def check_migrations_table(supabase: Client) -> bool:
 
 def create_exec_sql_function(supabase: Client) -> bool:
     """
-    Создает функцию exec_sql для выполнения произвольных SQL запросов, если она не существует.
+    Создает функцию exec_sql_array_json для выполнения произвольных SQL запросов, если она не существует.
     
     Args:
         supabase: Клиент Supabase
@@ -170,89 +189,64 @@ def create_exec_sql_function(supabase: Client) -> bool:
     Returns:
         bool: True, если функция существует или была успешно создана, иначе False
     """
-    logger.info("Проверка наличия функции exec_sql")
+    logger.info("Проверка наличия функции exec_sql_array_json")
     
-    # Проверяем существование функции
-    sql_check = """
-    SELECT EXISTS (
-        SELECT FROM pg_proc
-        WHERE proname = 'exec_sql'
-        AND pg_get_function_arguments(oid) = 'sql_query text'
-    );
-    """
+    # Проверяем существование функции простым тестовым запросом
+    test_sql = "SELECT 1 as test"
+    test_result = execute_sql_query_direct(supabase, test_sql)
     
-    result = execute_sql_query_direct(supabase, sql_check)
-    if result is None:
-        logger.error("Не удалось проверить наличие функции exec_sql")
-        return False
-    
-    function_exists = result[0].get('exists', False) if result else False
-    
-    if function_exists:
-        logger.info("Функция exec_sql уже существует")
+    if test_result is not None:
+        logger.info("Функция exec_sql_array_json уже существует и работает")
         return True
     
-    # Создаем функцию exec_sql, если она не существует
-    logger.info("Создание функции exec_sql")
+    # Создаем функцию exec_sql_array_json, если она не существует
+    logger.info("Создание функции exec_sql_array_json")
     sql_create = """
-    CREATE OR REPLACE FUNCTION exec_sql(sql_query text) 
-    RETURNS jsonb
+    CREATE OR REPLACE FUNCTION exec_sql_array_json(query text)
+    RETURNS json
     LANGUAGE plpgsql
     SECURITY DEFINER
     AS $$
     DECLARE
-        result jsonb;
-        error_message text;
-        error_detail text;
-        error_hint text;
-        error_context text;
+        result json;
     BEGIN
-        -- Пытаемся выполнить SQL запрос
-        BEGIN
-            -- Выполняем запрос и сохраняем результат как JSON
-            EXECUTE 'SELECT jsonb_agg(t) FROM (' || sql_query || ') AS t' INTO result;
-            
-            -- Если запрос не возвращает данные или возвращает пустой результат
-            IF result IS NULL THEN
-                RETURN jsonb_build_object('success', true, 'message', 'Выполнено успешно');
-            ELSE
-                RETURN jsonb_build_object('success', true, 'data', result);
-            END IF;
-        EXCEPTION
-            -- Перехватываем любые ошибки и возвращаем их в формате JSON
-            WHEN OTHERS THEN
-                GET STACKED DIAGNOSTICS 
-                    error_message = MESSAGE_TEXT,
-                    error_detail = PG_EXCEPTION_DETAIL,
-                    error_hint = PG_EXCEPTION_HINT,
-                    error_context = PG_EXCEPTION_CONTEXT;
-                    
-                RETURN jsonb_build_object(
-                    'success', false,
-                    'error', jsonb_build_object(
-                        'message', error_message,
-                        'detail', error_detail,
-                        'hint', error_hint,
-                        'context', error_context
-                    )
-                );
-        END;
+        EXECUTE 'SELECT json_agg(t) FROM (' || query || ') AS t' INTO result;
+        RETURN COALESCE(result, '[]'::json);
+    EXCEPTION WHEN OTHERS THEN
+        RETURN json_build_object(
+            'error', true,
+            'message', SQLERRM,
+            'detail', SQLSTATE
+        );
     END;
     $$;
 
     -- Устанавливаем права на функцию
-    GRANT EXECUTE ON FUNCTION exec_sql(text) TO service_role;
-    GRANT EXECUTE ON FUNCTION exec_sql(text) TO anon;
-    GRANT EXECUTE ON FUNCTION exec_sql(text) TO authenticated;
+    GRANT EXECUTE ON FUNCTION exec_sql_array_json(text) TO service_role;
+    GRANT EXECUTE ON FUNCTION exec_sql_array_json(text) TO anon;
+    GRANT EXECUTE ON FUNCTION exec_sql_array_json(text) TO authenticated;
     """
     
-    result = execute_sql_direct(supabase, sql_create)
-    if result is None:
-        logger.error("Не удалось создать функцию exec_sql")
+    # Создаем функцию напрямую через SQL API
+    try:
+        url = f"{os.environ.get('SUPABASE_URL')}/rest/v1/sql"
+        import requests
+        headers = {
+            "apikey": os.environ.get("SUPABASE_ANON_KEY"),
+            "Authorization": f"Bearer {os.environ.get('SUPABASE_ANON_KEY')}",
+            "Content-Type": "application/json"
+        }
+        response = requests.post(url, json={"query": sql_create}, headers=headers)
+        
+        if response.status_code in [200, 201, 204]:
+            logger.info("Функция exec_sql_array_json успешно создана через SQL API")
+            return True
+        else:
+            logger.error(f"Ошибка при создании функции exec_sql_array_json через SQL API: {response.status_code} - {response.text}")
+            return False
+    except Exception as e:
+        logger.error(f"Исключение при создании функции exec_sql_array_json: {e}")
         return False
-    
-    logger.info("Функция exec_sql успешно создана")
-    return True
 
 def is_migration_applied(supabase: Client, migration_name: str) -> bool:
     """
@@ -269,7 +263,7 @@ def is_migration_applied(supabase: Client, migration_name: str) -> bool:
     SELECT EXISTS (
         SELECT FROM _migrations 
         WHERE name = '{migration_name}'
-    );
+    ) as exists;
     """
     
     result = execute_sql_query_direct(supabase, sql)
@@ -277,7 +271,7 @@ def is_migration_applied(supabase: Client, migration_name: str) -> bool:
         logger.error(f"Не удалось проверить статус миграции {migration_name}")
         return False
     
-    return result[0].get('exists', False) if result else False
+    return result[0].get('exists', False) if result and len(result) > 0 else False
 
 def record_migration(supabase: Client, migration_name: str) -> bool:
     """
@@ -310,14 +304,13 @@ def get_migration_files() -> List[str]:
     Returns:
         List[str]: Список имен файлов миграций
     """
-    migrations_dir = Path(__file__).parent / 'migrations'
-    if not migrations_dir.exists():
-        logger.error(f"Директория миграций не найдена: {migrations_dir}")
+    if not MIGRATIONS_DIR.exists():
+        logger.error(f"Директория миграций не найдена: {MIGRATIONS_DIR}")
         return []
     
     # Получаем все SQL файлы и сортируем их по имени
     migration_files = sorted([
-        f.name for f in migrations_dir.glob('*.sql')
+        f.name for f in MIGRATIONS_DIR.glob('*.sql')
         if f.is_file() and f.name.endswith('.sql')
     ])
     
@@ -334,8 +327,7 @@ def execute_single_migration(supabase: Client, migration_file: str) -> bool:
     Returns:
         bool: True, если миграция успешно выполнена, иначе False
     """
-    migrations_dir = Path(__file__).parent / 'migrations'
-    migration_path = migrations_dir / migration_file
+    migration_path = MIGRATIONS_DIR / migration_file
     
     if not migration_path.exists():
         logger.error(f"Файл миграции не найден: {migration_path}")
@@ -388,11 +380,26 @@ def execute_all_migrations(supabase: Client) -> bool:
     logger.info(f"Найдено {len(migration_files)} файлов миграций")
     
     success = True
+    applied_count = 0
+    skipped_count = 0
+    failed_count = 0
+    
     for migration_file in migration_files:
+        # Проверяем, была ли миграция уже применена
+        if is_migration_applied(supabase, migration_file):
+            logger.info(f"Миграция {migration_file} уже была применена, пропускаем")
+            skipped_count += 1
+            continue
+            
         # Если миграция не выполнена успешно, продолжаем, но отмечаем ошибку
-        if not execute_single_migration(supabase, migration_file):
+        if execute_single_migration(supabase, migration_file):
+            applied_count += 1
+        else:
+            logger.error(f"Не удалось выполнить миграцию {migration_file}")
+            failed_count += 1
             success = False
     
+    logger.info(f"Итого: выполнено {applied_count}, пропущено {skipped_count}, не удалось выполнить {failed_count}")
     return success
 
 def execute_custom_sql(supabase: Client, sql: str) -> bool:
@@ -427,42 +434,53 @@ def main() -> int:
     Returns:
         int: Код возврата (0 - успех, 1 - ошибка)
     """
-    # Разбор аргументов командной строки
-    args = parse_args()
-    
-    # Устанавливаем уровень логирования
-    if args.verbose:
-        logger.setLevel(logging.DEBUG)
-    
-    # Инициализация Supabase
-    supabase = init_supabase()
-    if not supabase:
-        return 1
-    
-    # Проверка наличия таблицы _migrations
-    if not check_migrations_table(supabase):
-        return 1
-    
-    # Создание функции exec_sql
-    if not create_exec_sql_function(supabase):
-        return 1
-    
-    # Выполнение миграций в зависимости от аргументов
-    if args.all:
-        logger.info("Запуск всех миграций")
-        if not execute_all_migrations(supabase):
+    try:
+        # Разбор аргументов командной строки
+        args = None
+        try:
+            args = parse_args()
+        except SystemExit:
+            # Если аргументы не переданы, выполняем все миграции по умолчанию
+            logger.info("Аргументы не переданы, выполняем все миграции по умолчанию")
+            
+        # Устанавливаем уровень логирования
+        if args and args.verbose:
+            logger.setLevel(logging.DEBUG)
+        
+        # Инициализация Supabase
+        supabase = init_supabase()
+        if not supabase:
             return 1
-    elif args.file:
-        logger.info(f"Запуск отдельной миграции: {args.file}")
-        if not execute_single_migration(supabase, args.file):
+        
+        # Проверка наличия таблицы _migrations
+        if not check_migrations_table(supabase):
             return 1
-    elif args.custom:
-        logger.info("Выполнение пользовательского SQL запроса")
-        if not execute_custom_sql(supabase, args.custom):
+        
+        # Создание функции exec_sql_array_json
+        if not create_exec_sql_function(supabase):
             return 1
-    
-    logger.info("Выполнение миграций завершено успешно")
-    return 0
+        
+        # Выполнение миграций в зависимости от аргументов
+        if not args or args.all:
+            logger.info("Запуск всех миграций")
+            if not execute_all_migrations(supabase):
+                return 1
+        elif args.file:
+            logger.info(f"Запуск отдельной миграции: {args.file}")
+            if not execute_single_migration(supabase, args.file):
+                return 1
+        elif args.custom:
+            logger.info("Выполнение пользовательского SQL запроса")
+            if not execute_custom_sql(supabase, args.custom):
+                return 1
+        
+        logger.info("Выполнение миграций завершено успешно")
+        return 0
+    except Exception as e:
+        import traceback
+        logger.error(f"Непредвиденная ошибка: {e}")
+        logger.debug(traceback.format_exc())
+        return 1
 
 if __name__ == "__main__":
     sys.exit(main()) 

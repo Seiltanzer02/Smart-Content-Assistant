@@ -14,6 +14,7 @@ import glob
 import time
 from typing import List, Optional, Tuple, Dict, Any, Union
 from os.path import dirname, abspath, join, basename
+from pathlib import Path
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -21,6 +22,9 @@ logger = logging.getLogger(__name__)
 
 # Загрузка переменных окружения
 load_dotenv(override=True)
+
+# Определение директории миграций
+MIGRATIONS_DIR = Path(__file__).parent / 'migrations'
 
 def init_supabase() -> Optional[Client]:
     """Инициализация клиента Supabase"""
@@ -310,8 +314,9 @@ def run_migrations(supabase: Client) -> bool:
     try:
         # Получаем все файлы миграций
         migration_files = []
-        for filename in os.listdir(MIGRATIONS_DIR):
-            if filename.endswith(".sql") and not filename.startswith("_"):
+        for file_path in MIGRATIONS_DIR.glob('*.sql'):
+            filename = file_path.name
+            if not filename.startswith("_"):
                 migration_files.append(filename)
         
         # Сортируем файлы миграций по имени
@@ -334,7 +339,7 @@ def run_migrations(supabase: Client) -> bool:
                 continue
             
             # Путь к файлу миграции
-            migration_path = os.path.join(MIGRATIONS_DIR, migration_file)
+            migration_path = MIGRATIONS_DIR / migration_file
             
             # Читаем SQL-запрос из файла
             try:
