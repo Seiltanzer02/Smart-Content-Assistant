@@ -146,7 +146,7 @@ def check_migrations_table(supabase: Client) -> bool:
         SELECT FROM information_schema.tables 
         WHERE table_schema = 'public' 
         AND table_name = '_migrations'
-    ) as exists;
+    ) as exists
     """
     
     result = execute_sql_query_direct(supabase, sql_check)
@@ -162,19 +162,29 @@ def check_migrations_table(supabase: Client) -> bool:
     
     # Создаем таблицу _migrations, если она не существует
     logger.info("Создание таблицы _migrations")
-    sql_create = """
+    
+    # Сначала создаем таблицу
+    sql_create_table = """
     CREATE TABLE IF NOT EXISTS _migrations (
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-    );
-    CREATE INDEX IF NOT EXISTS idx_migrations_name ON _migrations(name);
+    )
     """
     
-    result = execute_sql_direct(supabase, sql_create)
-    if result is None:
+    result_table = execute_sql_direct(supabase, sql_create_table)
+    if result_table is None:
         logger.error("Не удалось создать таблицу _migrations")
         return False
+        
+    # Затем создаем индекс отдельным запросом
+    sql_create_index = """
+    CREATE INDEX IF NOT EXISTS idx_migrations_name ON _migrations(name)
+    """
+    
+    result_index = execute_sql_direct(supabase, sql_create_index)
+    if result_index is None:
+        logger.warning("Не удалось создать индекс для таблицы _migrations, но таблица создана")
     
     logger.info("Таблица _migrations успешно создана")
     return True
