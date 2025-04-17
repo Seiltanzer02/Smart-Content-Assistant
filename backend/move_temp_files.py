@@ -62,7 +62,7 @@ def add_missing_columns() -> bool:
         """
         
         # Выполняем SQL запрос через RPC
-        result = supabase.rpc("exec_sql", {"query": alter_sql}).execute()
+        result = supabase.rpc("exec_sql_array_json", {"query": alter_sql}).execute()
         logger.info("Столбец author_url успешно добавлен в таблицу saved_images")
     except Exception as e:
         logger.error(f"Ошибка при добавлении столбца author_url: {str(e)}")
@@ -71,7 +71,7 @@ def add_missing_columns() -> bool:
             supabase_url = os.getenv('SUPABASE_URL')
             supabase_key = os.getenv('SUPABASE_ANON_KEY')
             
-            url = f"{supabase_url}/rest/v1/rpc/exec_sql"
+            url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
             headers = {
                 "apikey": supabase_key,
                 "Authorization": f"Bearer {supabase_key}",
@@ -101,7 +101,7 @@ def add_missing_columns() -> bool:
         """
         
         # Выполняем SQL запрос через RPC
-        result = supabase.rpc("exec_sql", {"query": alter_sql}).execute()
+        result = supabase.rpc("exec_sql_array_json", {"query": alter_sql}).execute()
         logger.info("Столбец analyzed_posts_count успешно добавлен в таблицу channel_analysis")
     except Exception as e:
         logger.error(f"Ошибка при добавлении столбца analyzed_posts_count: {str(e)}")
@@ -110,7 +110,7 @@ def add_missing_columns() -> bool:
             supabase_url = os.getenv('SUPABASE_URL')
             supabase_key = os.getenv('SUPABASE_ANON_KEY')
             
-            url = f"{supabase_url}/rest/v1/rpc/exec_sql"
+            url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
             headers = {
                 "apikey": supabase_key,
                 "Authorization": f"Bearer {supabase_key}",
