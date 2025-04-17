@@ -32,6 +32,47 @@ def init_supabase() -> Client:
         logger.error(f"Ошибка при инициализации Supabase: {str(e)}")
         return None
 
+def add_columns():
+    # Добавление колонок и индексов для хранения URL авторов
+    try:
+        # Добавление колонки author_url
+        client.table('posts').insert({"id": "00000000-0000-0000-0000-000000000000", "author_url": "test"}).execute()
+        print("Column 'author_url' already exists")
+    except Exception as e:
+        if "column \"author_url\" of relation \"posts\" does not exist" in str(e):
+            try:
+                # Добавляем колонку отдельным запросом
+                client.query("ALTER TABLE posts ADD COLUMN author_url TEXT").execute()
+                print("Added 'author_url' column to 'posts' table")
+                
+                # Создаем индекс отдельным запросом
+                client.query("CREATE INDEX idx_posts_author_url ON posts (author_url)").execute()
+                print("Created index on 'author_url' column")
+            except Exception as e2:
+                print(f"Error adding author_url column or index: {str(e2)}")
+        else:
+            print(f"Unknown error: {str(e)}")
+    
+    # Аналогично для других колонок, которые нужно добавить
+    try:
+        # Проверка существования колонки prompt_id
+        client.table('posts').insert({"id": "00000000-0000-0000-0000-000000000000", "prompt_id": "test"}).execute()
+        print("Column 'prompt_id' already exists")
+    except Exception as e:
+        if "column \"prompt_id\" of relation \"posts\" does not exist" in str(e):
+            try:
+                # Добавляем колонку отдельным запросом
+                client.query("ALTER TABLE posts ADD COLUMN prompt_id TEXT").execute()
+                print("Added 'prompt_id' column to 'posts' table")
+                
+                # Создаем индекс отдельным запросом
+                client.query("CREATE INDEX idx_posts_prompt_id ON posts (prompt_id)").execute()
+                print("Created index on 'prompt_id' column")
+            except Exception as e2:
+                print(f"Error adding prompt_id column or index: {str(e2)}")
+        else:
+            print(f"Unknown error: {str(e)}")
+
 def add_missing_columns() -> bool:
     """Добавление недостающих столбцов напрямую через клиент Supabase"""
     logger.info("Добавление столбцов напрямую через клиент Supabase...")
