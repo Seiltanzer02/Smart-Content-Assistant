@@ -232,6 +232,42 @@ def create_exec_sql_function() -> bool:
     """Создание функции exec_sql для выполнения SQL запросов через RPC"""
     logger.info("Создание функции exec_sql...")
     
+    # Сначала проверим, существует ли функция
+    try:
+        # Удаляем существующую функцию, чтобы избежать ошибки изменения типа возвращаемого значения
+        drop_sql = """
+        DROP FUNCTION IF EXISTS exec_sql(text);
+        """
+        
+        # Выполняем через RPC напрямую
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_ANON_KEY')
+        
+        if not supabase_url or not supabase_key:
+            logger.error("Не найдены переменные окружения SUPABASE_URL или SUPABASE_ANON_KEY")
+            return False
+            
+        url = f"{supabase_url}/rest/v1/rpc/exec_sql"
+        headers = {
+            "apikey": supabase_key,
+            "Authorization": f"Bearer {supabase_key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        }
+        
+        # Пробуем удалить функцию если она существует
+        try:
+            response = requests.post(url, json={"query": drop_sql}, headers=headers)
+            if response.status_code in [200, 201, 204]:
+                logger.info("Функция exec_sql успешно удалена перед пересозданием")
+            else:
+                logger.warning(f"Возможно, функция exec_sql не существовала: {response.status_code} - {response.text}")
+        except Exception as e:
+            logger.warning(f"Ошибка при удалении функции exec_sql: {str(e)}")
+    except Exception as e:
+        logger.warning(f"Ошибка при проверке функции exec_sql: {str(e)}")
+    
+    # SQL для создания функции
     sql = """
     CREATE OR REPLACE FUNCTION exec_sql(query text) 
     RETURNS text
@@ -405,11 +441,71 @@ def create_all_sql_functions() -> bool:
     """Создание всех необходимых SQL функций для работы с миграциями"""
     logger.info("Создание функций для работы с SQL...")
     
+    # Удаление всех функций перед созданием
+    try:
+        drop_functions_sql = """
+        DROP FUNCTION IF EXISTS exec_sql(text);
+        DROP FUNCTION IF EXISTS exec_sql_json(text);
+        DROP FUNCTION IF EXISTS exec_sql_array_json(text);
+        """
+        
+        # Не используем функцию execute_sql_direct, чтобы избежать рекурсии
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_ANON_KEY')
+        
+        if not supabase_url or not supabase_key:
+            logger.error("Не найдены переменные окружения SUPABASE_URL или SUPABASE_ANON_KEY")
+            return False
+            
+        # Пробуем выполнять каждую команду отдельно
+        for cmd in drop_functions_sql.split(";"):
+            cmd = cmd.strip()
+            if not cmd:
+                continue
+            
+            url = f"{supabase_url}/rest/v1/rpc/exec_sql"
+            headers = {
+                "apikey": supabase_key,
+                "Authorization": f"Bearer {supabase_key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal"
+            }
+            
+            try:
+                response = requests.post(url, json={"query": cmd + ";"}, headers=headers)
+                if response.status_code in [200, 201, 204]:
+                    logger.info(f"Успешно выполнено: {cmd}")
+                else:
+                    logger.warning(f"Проблема с выполнением: {cmd} - {response.status_code}")
+            except Exception as e:
+                logger.warning(f"Ошибка при выполнении {cmd}: {str(e)}")
+    except Exception as e:
+        logger.warning(f"Ошибка при удалении функций: {str(e)}")
+    
     # Создаем функцию exec_sql
-    exec_sql_created = create_exec_sql_function()
-    if not exec_sql_created:
+    exec_sql = """
+    CREATE OR REPLACE FUNCTION exec_sql(query text) 
+    RETURNS text
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+    DECLARE
+        result text;
+    BEGIN
+        EXECUTE query;
+        GET DIAGNOSTICS result = ROW_COUNT;
+        RETURN result || ' rows affected';
+    EXCEPTION WHEN OTHERS THEN
+        RETURN SQLERRM;
+    END;
+    $$;
+    """
+    
+    if not execute_sql_direct(exec_sql):
         logger.error("Не удалось создать функцию exec_sql")
         return False
+    
+    logger.info("Функция exec_sql успешно создана")
     
     # Создаем функцию exec_sql_json
     exec_sql_json = """
@@ -437,6 +533,8 @@ def create_all_sql_functions() -> bool:
         logger.error("Не удалось создать функцию exec_sql_json")
         return False
     
+    logger.info("Функция exec_sql_json успешно создана")
+    
     # Создаем функцию exec_sql_array_json
     exec_sql_array_json = """
     CREATE OR REPLACE FUNCTION exec_sql_array_json(query text)
@@ -463,6 +561,8 @@ def create_all_sql_functions() -> bool:
         logger.error("Не удалось создать функцию exec_sql_array_json")
         return False
     
+    logger.info("Функция exec_sql_array_json успешно создана")
+    
     logger.info("Все SQL функции успешно созданы")
     return True
 
@@ -470,9 +570,8 @@ def main():
     """Основная функция для запуска миграций"""
     logger.info("Запуск принудительных миграций...")
     
-    # Удаление старых функций (на случай конфликтов)
+    # Проверка соединения с сервером
     try:
-        # Базовое соединение для проверки доступности сервера
         supabase_url = os.getenv('SUPABASE_URL')
         supabase_key = os.getenv('SUPABASE_ANON_KEY')
         
@@ -497,19 +596,14 @@ def main():
         logger.error(f"Ошибка при проверке соединения с Supabase: {str(e)}")
         return False
         
-    # Создаем все необходимые SQL функции
+    # Шаг 1: Создаем все необходимые SQL функции
     if create_all_sql_functions():
         logger.info("Все необходимые SQL функции успешно созданы")
     else:
         logger.error("Не удалось создать все необходимые SQL функции")
-        
-    # Добавляем недостающие столбцы напрямую
-    if add_missing_columns():
-        logger.info("Недостающие столбцы успешно добавлены")
-    else:
-        logger.error("Ошибка при добавлении недостающих столбцов")
-        
-    # Создаем таблицу _migrations если она не существует
+        # Даже при ошибке продолжаем выполнение
+    
+    # Шаг 2: Создаем таблицу _migrations если она не существует
     create_migrations_table_sql = """
     CREATE TABLE IF NOT EXISTS _migrations (
         id SERIAL PRIMARY KEY,
@@ -524,7 +618,13 @@ def main():
     else:
         logger.error("Ошибка при создании таблицы _migrations")
         
-    # Запускаем все миграции вручную
+    # Шаг 3: Добавляем недостающие столбцы напрямую
+    if add_missing_columns():
+        logger.info("Недостающие столбцы успешно добавлены")
+    else:
+        logger.error("Ошибка при добавлении недостающих столбцов")
+    
+    # Шаг 4: Запускаем все миграции вручную
     if run_migrations_manually():
         logger.info("Все миграции успешно применены")
     else:

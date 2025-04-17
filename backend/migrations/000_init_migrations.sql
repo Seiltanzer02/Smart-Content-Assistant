@@ -11,23 +11,6 @@ CREATE INDEX IF NOT EXISTS idx_migrations_name ON _migrations(name);
 -- Добавление комментария к таблице
 COMMENT ON TABLE _migrations IS 'Таблица для отслеживания выполненных миграций';
 
--- Создание функции для выполнения произвольного SQL
-CREATE OR REPLACE FUNCTION exec_sql(query text) 
-RETURNS text
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-    result text;
-BEGIN
-    EXECUTE query;
-    GET DIAGNOSTICS result = ROW_COUNT;
-    RETURN result || ' rows affected';
-EXCEPTION WHEN OTHERS THEN
-    RETURN SQLERRM;
-END;
-$$;
-
 -- Включаем расширение для генерации UUID, если его еще нет
 DO $$ 
 BEGIN
