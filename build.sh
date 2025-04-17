@@ -58,7 +58,38 @@ mkdir -p backend/static
 echo "Копирование собранного фронтенда в $BUILD_DIR/backend/static..."
 cp -r frontend/dist/* backend/static/
 
-# Делаем скрипты исполняемыми
+# Создаем скрипт запуска
+echo "Создание скрипта запуска start.sh..."
+cat > start.sh << 'EOF'
+#!/bin/bash
+# Скрипт для запуска приложения на Render
+
+set -e  # Остановка скрипта при ошибках
+
+echo "Запуск приложения из директории: $(pwd)"
+
+# Установка переменных окружения
+if [ -f .env ]; then
+    echo "Использую переменные окружения из файла .env..."
+    export $(grep -v '^#' .env | xargs)
+else
+    echo "Использую переменные окружения из Render..."
+fi
+
+# Запуск миграций базы данных
+echo "Запуск миграций базы данных..."
+python -m backend.migrate
+
+# Запуск скрипта для прямого обновления таблиц
+echo "Запуск скрипта для прямого обновления таблиц..."
+python -m backend.move_temp_files
+
+# Запуск приложения
+echo "Запуск приложения..."
+cd backend && uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000}
+EOF
+
+# Делаем скрипт исполняемым
 chmod +x start.sh
 
 echo "Сборка завершена успешно! Используйте start.sh для запуска приложения." 
