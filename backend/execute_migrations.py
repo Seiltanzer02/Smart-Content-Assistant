@@ -201,7 +201,7 @@ def create_exec_sql_function(supabase: Client) -> bool:
     
     # Создаем функцию exec_sql_array_json, если она не существует
     logger.info("Создание функции exec_sql_array_json")
-    sql_create = """
+    sql_create_function = """
     CREATE OR REPLACE FUNCTION exec_sql_array_json(query text)
     RETURNS json
     LANGUAGE plpgsql
@@ -219,12 +219,7 @@ def create_exec_sql_function(supabase: Client) -> bool:
             'detail', SQLSTATE
         );
     END;
-    $$;
-
-    -- Устанавливаем права на функцию
-    GRANT EXECUTE ON FUNCTION exec_sql_array_json(text) TO service_role;
-    GRANT EXECUTE ON FUNCTION exec_sql_array_json(text) TO anon;
-    GRANT EXECUTE ON FUNCTION exec_sql_array_json(text) TO authenticated;
+    $$
     """
     
     # Создаем функцию напрямую через SQL API
@@ -236,14 +231,26 @@ def create_exec_sql_function(supabase: Client) -> bool:
             "Authorization": f"Bearer {os.environ.get('SUPABASE_ANON_KEY')}",
             "Content-Type": "application/json"
         }
-        response = requests.post(url, json={"query": sql_create}, headers=headers)
         
-        if response.status_code in [200, 201, 204]:
-            logger.info("Функция exec_sql_array_json успешно создана через SQL API")
-            return True
-        else:
+        # Сначала создаем саму функцию
+        response = requests.post(url, json={"query": sql_create_function}, headers=headers)
+        
+        if response.status_code not in [200, 201, 204]:
             logger.error(f"Ошибка при создании функции exec_sql_array_json через SQL API: {response.status_code} - {response.text}")
             return False
+            
+        # Теперь устанавливаем права доступа отдельными запросами
+        grant_sql1 = "GRANT EXECUTE ON FUNCTION exec_sql_array_json(text) TO service_role"
+        grant_sql2 = "GRANT EXECUTE ON FUNCTION exec_sql_array_json(text) TO anon"
+        grant_sql3 = "GRANT EXECUTE ON FUNCTION exec_sql_array_json(text) TO authenticated"
+        
+        for grant_sql in [grant_sql1, grant_sql2, grant_sql3]:
+            response = requests.post(url, json={"query": grant_sql}, headers=headers)
+            if response.status_code not in [200, 201, 204]:
+                logger.warning(f"Предупреждение при установке прав: {response.status_code} - {response.text}")
+                
+        logger.info("Функция exec_sql_array_json успешно создана через SQL API")
+        return True
     except Exception as e:
         logger.error(f"Исключение при создании функции exec_sql_array_json: {e}")
         return False
@@ -263,7 +270,7 @@ def is_migration_applied(supabase: Client, migration_name: str) -> bool:
     SELECT EXISTS (
         SELECT FROM _migrations 
         WHERE name = '{migration_name}'
-    ) as exists;
+    ) as exists
     """
     
     result = execute_sql_query_direct(supabase, sql)
