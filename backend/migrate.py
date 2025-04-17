@@ -332,50 +332,68 @@ def execute_do_blocks_migration(supabase: Client, sql_content: str) -> bool:
     try:
         logger.info("Выполнение миграции с блоками DO...")
         
-        # Разбиваем файл миграции на отдельные блоки DO и другие команды
+        # Разбиваем файл миграции на отдельные команды
+        commands = []
         lines = sql_content.splitlines()
-        blocks = []
-        current_block = ""
+        current_command = ""
         in_do_block = False
+        in_function_def = False
         
         for line in lines:
             line_stripped = line.strip()
             
             # Пропускаем пустые строки и комментарии вне блоков
-            if not in_do_block and (not line_stripped or line_stripped.startswith('--')):
+            if not in_do_block and not in_function_def and (not line_stripped or line_stripped.startswith('--')):
                 continue
                 
             # Начало блока DO
             if line_stripped.startswith('DO '):
                 in_do_block = True
-                current_block = line + "\n"
+                current_command = line + "\n"
                 continue
                 
-            # Внутри блока DO
-            if in_do_block:
-                current_block += line + "\n"
+            # Начало определения функции
+            if line_stripped.startswith('CREATE OR REPLACE FUNCTION'):
+                in_function_def = True
+                current_command = line + "\n"
+                continue
+                
+            # Внутри блока DO или определения функции
+            if in_do_block or in_function_def:
+                current_command += line + "\n"
                 
                 # Конец блока DO
-                if line_stripped.endswith('$$;'):
+                if in_do_block and line_stripped.endswith('$$;'):
                     in_do_block = False
-                    blocks.append(current_block)
-                    current_block = ""
-                continue
+                    commands.append(current_command)
+                    current_command = ""
+                    continue
                 
-            # Обычные SQL команды вне блоков DO
-            if line_stripped.endswith(';'):
-                blocks.append(line)
-        
-        # Выполняем все блоки по порядку
-        for i, block in enumerate(blocks):
-            if not block.strip():
-                continue
-                
-            logger.info(f"Выполнение блока {i+1}/{len(blocks)}...")
+                # Конец определения функции
+                if in_function_def and line_stripped == '$$;':
+                    in_function_def = False
+                    commands.append(current_command)
+                    current_command = ""
+                    continue
             
-            result = execute_sql_direct(supabase, block)
+            # Обычные SQL команды
+            elif line_stripped.endswith(';'):
+                commands.append(line)
+        
+        # Добавляем последнюю команду, если она есть
+        if current_command:
+            commands.append(current_command)
+        
+        # Выполняем все команды по порядку
+        for i, command in enumerate(commands):
+            if not command.strip():
+                continue
+                
+            logger.info(f"Выполнение команды {i+1}/{len(commands)}...")
+            
+            result = execute_sql_direct(supabase, command)
             if not result:
-                logger.error(f"Ошибка при выполнении блока {i+1}")
+                logger.error(f"Ошибка при выполнении команды {i+1}")
                 return False
                 
         return True
