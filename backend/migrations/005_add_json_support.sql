@@ -37,6 +37,9 @@ BEGIN
     RAISE NOTICE 'Функция exec_sql успешно обновлена';
 
     -- Создаем функцию exec_sql_json, возвращающую результаты в формате JSON
+    DROP FUNCTION IF EXISTS exec_sql_json(text);
+    RAISE NOTICE 'Удалена предыдущая версия функции exec_sql_json';
+
     CREATE OR REPLACE FUNCTION exec_sql_json(query text)
     RETURNS json
     LANGUAGE plpgsql
@@ -79,6 +82,9 @@ BEGIN
     RAISE NOTICE 'Функция exec_sql_jsonb создана';
 
     -- Создаем функцию exec_sql_array_json, возвращающую массив данных в формате JSON
+    DROP FUNCTION IF EXISTS exec_sql_array_json(text);
+    RAISE NOTICE 'Удалена предыдущая версия функции exec_sql_array_json';
+
     CREATE OR REPLACE FUNCTION exec_sql_array_json(query text)
     RETURNS json
     LANGUAGE plpgsql
