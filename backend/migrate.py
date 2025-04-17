@@ -298,45 +298,16 @@ def run_migrations(supabase: Client) -> bool:
                 with open(migration_file, 'r', encoding='utf-8') as f:
                     sql_content = f.read()
                 
-                # Парсим SQL контент на отдельные команды
-                commands = parse_sql_commands(sql_content)
-                
-                # Выполняем каждую команду отдельно
-                success = True
-                for i, cmd in enumerate(commands):
-                    if not cmd.strip():
-                        continue
-                        
-                    # Пропускаем команды создания функций, которые мы уже создали
-                    if "CREATE OR REPLACE FUNCTION exec_sql" in cmd:
-                        logger.info("Пропуск создания функции exec_sql, так как она уже создана")
-                        continue
+                # Проверяем, содержит ли миграция блоки DO
+                if "DO $$" in sql_content or "DO $" in sql_content:
+                    # Для миграций с блоками DO используем специальный обработчик
+                    success = execute_do_blocks_migration(supabase, sql_content)
+                else:
+                    # Парсим SQL контент на отдельные команды для обычных миграций
+                    commands = parse_sql_commands(sql_content)
                     
-                    # Блоки BEGIN-END обрабатываем особым образом
-                    if "BEGIN" in cmd and "END" in cmd:
-                        inner_commands = extract_commands_from_block(cmd)
-                        block_success = True
-                        
-                        for inner_cmd in inner_commands:
-                            if not inner_cmd.strip():
-                                continue
-                                
-                            inner_result = execute_sql_direct(supabase, inner_cmd)
-                            if not inner_result:
-                                logger.error(f"Ошибка при выполнении команды внутри блока BEGIN-END: {inner_cmd[:50]}...")
-                                block_success = False
-                                break
-                                
-                        if not block_success:
-                            success = False
-                            break
-                    else:
-                        # Обычные команды
-                        result = execute_sql_direct(supabase, cmd)
-                        if not result:
-                            logger.error(f"Ошибка при выполнении команды: {cmd[:50]}...")
-                            success = False
-                            break
+                    # Выполняем каждую команду отдельно
+                    success = execute_commands_batch(supabase, commands)
                 
                 if success:
                     logger.info(f"Миграция {file_name} успешно выполнена")
@@ -355,6 +326,103 @@ def run_migrations(supabase: Client) -> bool:
     except Exception as e:
         logger.error(f"Ошибка при запуске миграций: {str(e)}")
         return False
+
+def execute_do_blocks_migration(supabase: Client, sql_content: str) -> bool:
+    """Выполнение миграции с блоками DO"""
+    try:
+        logger.info("Выполнение миграции с блоками DO...")
+        
+        # Разбиваем файл миграции на отдельные блоки DO и другие команды
+        lines = sql_content.splitlines()
+        blocks = []
+        current_block = ""
+        in_do_block = False
+        
+        for line in lines:
+            line_stripped = line.strip()
+            
+            # Пропускаем пустые строки и комментарии вне блоков
+            if not in_do_block and (not line_stripped or line_stripped.startswith('--')):
+                continue
+                
+            # Начало блока DO
+            if line_stripped.startswith('DO '):
+                in_do_block = True
+                current_block = line + "\n"
+                continue
+                
+            # Внутри блока DO
+            if in_do_block:
+                current_block += line + "\n"
+                
+                # Конец блока DO
+                if line_stripped.endswith('$$;'):
+                    in_do_block = False
+                    blocks.append(current_block)
+                    current_block = ""
+                continue
+                
+            # Обычные SQL команды вне блоков DO
+            if line_stripped.endswith(';'):
+                blocks.append(line)
+        
+        # Выполняем все блоки по порядку
+        for i, block in enumerate(blocks):
+            if not block.strip():
+                continue
+                
+            logger.info(f"Выполнение блока {i+1}/{len(blocks)}...")
+            
+            result = execute_sql_direct(supabase, block)
+            if not result:
+                logger.error(f"Ошибка при выполнении блока {i+1}")
+                return False
+                
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка при выполнении миграции с блоками DO: {str(e)}")
+        return False
+
+def execute_commands_batch(supabase: Client, commands: list) -> bool:
+    """Выполнение набора команд SQL"""
+    success = True
+    
+    for i, cmd in enumerate(commands):
+        if not cmd.strip():
+            continue
+            
+        # Пропускаем команды создания функций, которые мы уже создали
+        if "CREATE OR REPLACE FUNCTION exec_sql" in cmd:
+            logger.info("Пропуск создания функции exec_sql, так как она уже создана")
+            continue
+        
+        # Блоки BEGIN-END обрабатываем особым образом
+        if "BEGIN" in cmd and "END" in cmd:
+            inner_commands = extract_commands_from_block(cmd)
+            block_success = True
+            
+            for inner_cmd in inner_commands:
+                if not inner_cmd.strip():
+                    continue
+                    
+                inner_result = execute_sql_direct(supabase, inner_cmd)
+                if not inner_result:
+                    logger.error(f"Ошибка при выполнении команды внутри блока BEGIN-END: {inner_cmd[:50]}...")
+                    block_success = False
+                    break
+                    
+            if not block_success:
+                success = False
+                break
+        else:
+            # Обычные команды
+            result = execute_sql_direct(supabase, cmd)
+            if not result:
+                logger.error(f"Ошибка при выполнении команды: {cmd[:50]}...")
+                success = False
+                break
+    
+    return success
 
 def parse_sql_commands(sql_content: str) -> list:
     """Разбор SQL скрипта на отдельные команды"""
@@ -412,8 +480,14 @@ def parse_sql_commands(sql_content: str) -> list:
     return commands
 
 def extract_commands_from_block(block_content: str) -> list:
-    """Извлекаем команды из блока BEGIN-END"""
-    # Находим содержимое между BEGIN и END
+    """Извлекаем команды из блока DO $$ BEGIN-END $$"""
+    # Для блоков DO $$ ... $$ лучше не извлекать команды, а выполнять их целиком
+    if "DO $$" in block_content or "DO $" in block_content:
+        # Просто возвращаем весь блок как одну команду
+        logger.info("Обнаружен блок DO $$, выполняем его целиком")
+        return [block_content.strip()]
+        
+    # Для обычных блоков BEGIN-END
     begin_idx = block_content.find("BEGIN")
     end_idx = block_content.rfind("END")
     
