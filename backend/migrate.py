@@ -39,7 +39,7 @@ def init_supabase() -> Optional[Client]:
         return None
 
 def execute_sql_direct(supabase: Client, sql_query: str) -> bool:
-    """Выполнение SQL запроса напрямую через REST API."""
+    """Выполнение SQL запроса напрямую через RPC API."""
     try:
         logger.info(f"Выполнение SQL запроса напрямую: {sql_query[:50]}...")
         
@@ -51,16 +51,7 @@ def execute_sql_direct(supabase: Client, sql_query: str) -> bool:
             logger.error("Не найдены переменные окружения SUPABASE_URL или SUPABASE_ANON_KEY")
             return False
         
-        # Проверяем наличие функции exec_sql
-        check_sql = """
-        SELECT EXISTS (
-            SELECT FROM pg_proc 
-            WHERE proname = 'exec_sql' 
-            AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
-        ) as exists;
-        """
-        
-        # Прямой запрос к базе данных через REST API
+        # Используем только RPC API, так как SQL API недоступен (404)
         url = f"{supabase_url}/rest/v1/rpc/exec_sql"
         headers = {
             "apikey": supabase_key,
@@ -69,64 +60,29 @@ def execute_sql_direct(supabase: Client, sql_query: str) -> bool:
             "Prefer": "return=minimal"
         }
         
-        # Сначала проверяем наличие функции exec_sql
-        test_response = requests.post(url, json={"query": check_sql}, headers=headers)
-        
-        # Если функция не существует и мы пытаемся её создать
-        if test_response.status_code != 200 and "CREATE OR REPLACE FUNCTION exec_sql" in sql_query:
-            logger.info("Создаем функцию exec_sql напрямую через SQL запрос...")
-            
-            # Используем прямой SQL API для создания функции
-            sql_url = f"{supabase_url}/rest/v1/sql"
-            sql_headers = {
-                "apikey": supabase_key,
-                "Authorization": f"Bearer {supabase_key}",
-                "Content-Type": "application/json",
-                "Prefer": "return=minimal"
-            }
-            
-            sql_response = requests.post(sql_url, json={"query": sql_query}, headers=sql_headers)
-            
-            if sql_response.status_code in [200, 201, 204]:
-                logger.info("SQL запрос выполнен успешно через прямой SQL API")
-                return True
-            else:
-                logger.error(f"Ошибка при выполнении SQL запроса через прямой SQL API: {sql_response.status_code} - {sql_response.text}")
-                return False
-        
-        # Стандартное выполнение через exec_sql если функция существует
+        # Стандартное выполнение через exec_sql
         response = requests.post(url, json={"query": sql_query}, headers=headers)
         
         if response.status_code in [200, 201, 204]:
-            logger.info("SQL запрос выполнен успешно")
+            logger.info("SQL запрос выполнен успешно через RPC")
             return True
         else:
-            # Если функция exec_sql не существует, пробуем выполнить запрос напрямую через SQL API
-            logger.warning(f"Ошибка при выполнении SQL запроса через exec_sql: {response.status_code} - {response.text}")
+            logger.warning(f"Ошибка при выполнении SQL запроса через RPC: {response.status_code} - {response.text}")
             
-            # Используем прямой SQL API
-            sql_url = f"{supabase_url}/rest/v1/sql"
-            sql_headers = {
-                "apikey": supabase_key,
-                "Authorization": f"Bearer {supabase_key}",
-                "Content-Type": "application/json",
-                "Prefer": "return=minimal"
-            }
-            
-            sql_response = requests.post(sql_url, json={"query": sql_query}, headers=sql_headers)
-            
-            if sql_response.status_code in [200, 201, 204]:
-                logger.info("SQL запрос выполнен успешно через прямой SQL API")
+            # Пробуем через Supabase клиент напрямую
+            try:
+                result = supabase.rpc("exec_sql", {"query": sql_query}).execute()
+                logger.info("SQL запрос выполнен успешно через Supabase клиент")
                 return True
-            else:
-                logger.error(f"Ошибка при выполнении SQL запроса: {sql_response.status_code} - {sql_response.text}")
+            except Exception as e:
+                logger.error(f"Ошибка при выполнении SQL запроса через Supabase клиент: {str(e)}")
                 return False
     except Exception as e:
         logger.error(f"Исключение при выполнении SQL запроса: {str(e)}")
         return False
 
 def execute_sql_query_direct(supabase: Client, sql_query: str) -> List[Dict[str, Any]]:
-    """Выполнение SQL запроса напрямую через REST API и возврат результатов."""
+    """Выполнение SQL запроса напрямую через RPC API и возврат результатов."""
     try:
         logger.info(f"Выполнение SQL запроса с возвратом результатов: {sql_query[:50]}...")
         
@@ -138,17 +94,20 @@ def execute_sql_query_direct(supabase: Client, sql_query: str) -> List[Dict[str,
             logger.error("Не найдены переменные окружения SUPABASE_URL или SUPABASE_ANON_KEY")
             return []
         
-        # Проверяем наличие функции exec_sql
-        check_sql = """
-        SELECT EXISTS (
-            SELECT FROM pg_proc 
-            WHERE proname = 'exec_sql' 
-            AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
-        ) as exists;
-        """
+        # Пробуем через клиент Supabase напрямую
+        try:
+            result = supabase.rpc("exec_sql_array_json", {"query": sql_query}).execute()
+            if result and hasattr(result, 'data'):
+                logger.info("SQL запрос выполнен успешно через Supabase клиент")
+                return result.data
+            else:
+                logger.warning("Нет данных в ответе от exec_sql_array_json")
+        except Exception as e:
+            logger.warning(f"Ошибка при выполнении SQL запроса через Supabase клиент: {str(e)}")
+            # Продолжаем выполнение и пробуем другой метод
         
-        # Прямой запрос к базе данных через REST API
-        url = f"{supabase_url}/rest/v1/rpc/exec_sql"
+        # Используем только RPC API с функцией exec_sql_array_json
+        url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
         headers = {
             "apikey": supabase_key,
             "Authorization": f"Bearer {supabase_key}",
@@ -156,55 +115,57 @@ def execute_sql_query_direct(supabase: Client, sql_query: str) -> List[Dict[str,
             "Prefer": "return=representation"
         }
         
-        # Сначала проверяем наличие функции exec_sql
-        test_response = requests.post(url, json={"query": check_sql}, headers=headers)
+        # Если функция exec_sql_array_json не существует, создаем её
+        try:
+            # Проверяем наличие функции exec_sql_array_json
+            create_query = """
+            CREATE OR REPLACE FUNCTION exec_sql_array_json(query text)
+            RETURNS json
+            LANGUAGE plpgsql
+            SECURITY DEFINER
+            AS $$
+            DECLARE
+                result json;
+            BEGIN
+                EXECUTE 'SELECT json_agg(t) FROM (' || query || ') t' INTO result;
+                RETURN COALESCE(result, '[]'::json);
+            EXCEPTION WHEN OTHERS THEN
+                RETURN json_build_object(
+                    'error', true,
+                    'message', SQLERRM,
+                    'detail', SQLSTATE
+                );
+            END;
+            $$;
+            """
+            create_response = supabase.rpc("exec_sql", {"query": create_query}).execute()
+            logger.info("Функция exec_sql_array_json создана/обновлена")
+        except Exception as e:
+            logger.warning(f"Ошибка при создании функции exec_sql_array_json: {str(e)}")
         
-        # Если функция не существует, используем прямой SQL API
-        if test_response.status_code != 200:
-            logger.warning("Функция exec_sql не найдена, используем прямой SQL API")
-            sql_url = f"{supabase_url}/rest/v1/sql"
-            sql_headers = {
-                "apikey": supabase_key,
-                "Authorization": f"Bearer {supabase_key}",
-                "Content-Type": "application/json",
-                "Prefer": "return=representation"
-            }
+        # Пробуем выполнить запрос через RPC
+        try:
+            response = requests.post(url, json={"query": sql_query}, headers=headers)
             
-            sql_response = requests.post(sql_url, json={"query": sql_query}, headers=sql_headers)
-            
-            if sql_response.status_code == 200:
-                logger.info("SQL запрос выполнен успешно через прямой SQL API")
-                return sql_response.json()
+            if response.status_code == 200:
+                logger.info("SQL запрос выполнен успешно через RPC exec_sql_array_json")
+                return response.json()
             else:
-                logger.error(f"Ошибка при выполнении SQL запроса через прямой SQL API: {sql_response.status_code} - {sql_response.text}")
-                return []
-        
-        # Стандартное выполнение через exec_sql если функция существует
-        response = requests.post(url, json={"query": sql_query}, headers=headers)
-        
-        if response.status_code == 200:
-            logger.info("SQL запрос выполнен успешно")
-            return response.json()
-        else:
-            # Если ошибка, пробуем через прямой SQL API
-            logger.warning(f"Ошибка при выполнении SQL запроса через exec_sql: {response.status_code} - {response.text}")
-            
-            sql_url = f"{supabase_url}/rest/v1/sql"
-            sql_headers = {
-                "apikey": supabase_key,
-                "Authorization": f"Bearer {supabase_key}",
-                "Content-Type": "application/json",
-                "Prefer": "return=representation"
-            }
-            
-            sql_response = requests.post(sql_url, json={"query": sql_query}, headers=sql_headers)
-            
-            if sql_response.status_code == 200:
-                logger.info("SQL запрос выполнен успешно через прямой SQL API")
-                return sql_response.json()
-            else:
-                logger.error(f"Ошибка при выполнении SQL запроса: {sql_response.status_code} - {sql_response.text}")
-                return []
+                logger.warning(f"Ошибка при выполнении SQL запроса через RPC exec_sql_array_json: {response.status_code} - {response.text}")
+                
+                # Если не работает exec_sql_array_json, пробуем exec_sql_json
+                url2 = f"{supabase_url}/rest/v1/rpc/exec_sql_json"
+                response2 = requests.post(url2, json={"query": sql_query}, headers=headers)
+                
+                if response2.status_code == 200:
+                    logger.info("SQL запрос выполнен успешно через RPC exec_sql_json")
+                    return response2.json()
+                else:
+                    logger.error(f"Ошибка при выполнении SQL запроса через RPC exec_sql_json: {response2.status_code} - {response2.text}")
+                    return []
+        except Exception as e:
+            logger.error(f"Ошибка при выполнении SQL запроса через RPC: {str(e)}")
+            return []
     except Exception as e:
         logger.error(f"Исключение при выполнении SQL запроса: {str(e)}")
         return []
