@@ -307,60 +307,76 @@ def execute_sql_individually(sql_content: str) -> bool:
         logger.error(f"Исключение при выполнении SQL запросов по отдельности: {str(e)}")
         return False
 
-def run_migrations(supabase: Client):
-    """
-    Ищет и применяет все SQL миграции из директории migrations
-    """
+def run_migrations(supabase: Client) -> bool:
+    """Запуск всех SQL миграций из директории migrations."""
     try:
-        # Проверяем таблицу миграций
-        if not check_migrations_table(supabase):
-            logger.error("Не удалось проверить/создать таблицу миграций, останавливаем процесс миграции")
-            return
+        # Получаем список файлов миграций
+        migrations_dir = os.path.join(os.path.dirname(__file__), "migrations")
+        migration_files = []
         
-        # Получаем список уже выполненных миграций
-        executed_migrations = get_executed_migrations(supabase)
-        logger.info(f"Найдено {len(executed_migrations)} выполненных миграций")
+        for file in os.listdir(migrations_dir):
+            if file.endswith(".sql") and not file.startswith("_"):
+                migration_files.append(os.path.join(migrations_dir, file))
         
-        # Находим все файлы миграций
-        migration_files = sorted(glob.glob(os.path.join(os.path.dirname(__file__), "migrations", "*.sql")))
+        # Сортируем файлы по имени
+        migration_files.sort()
+        
         logger.info(f"Найдено {len(migration_files)} файлов миграций")
         
-        # Применяем только новые миграции
-        for migration_file in migration_files:
-            migration_name = os.path.basename(migration_file)
+        # Проверяем, какие миграции уже выполнены
+        executed_migrations = []
+        try:
+            result = execute_sql_query_direct(
+                supabase,
+                "SELECT name FROM _migrations"
+            )
             
-            # Пропускаем уже выполненные миграции
-            if migration_name in executed_migrations:
-                logger.info(f"Миграция {migration_name} уже выполнена, пропускаем")
+            if result and "data" in result:
+                executed_migrations = [item["name"] for item in result["data"]]
+                logger.info(f"Найдено {len(executed_migrations)} выполненных миграций")
+        except Exception as e:
+            logger.warning(f"Ошибка при получении списка выполненных миграций: {str(e)}")
+        
+        # Выполняем новые миграции
+        for migration_file in migration_files:
+            file_name = os.path.basename(migration_file)
+            
+            if file_name in executed_migrations:
+                logger.info(f"Миграция {file_name} уже выполнена")
                 continue
             
-            logger.info(f"Применение миграции: {migration_name}")
+            logger.info(f"Выполнение миграции {file_name}")
             
-            try:
-                # Читаем содержимое файла миграции
-                with open(migration_file, 'r', encoding='utf-8') as f:
-                    sql_query = f.read()
-                
-                # Выполняем миграцию
-                result = execute_sql_direct(supabase, sql_query)
-                success = result is not None
-                
-                # Записываем информацию о выполненной миграции
-                record_migration(supabase, migration_name, success)
-                
-                if success:
-                    logger.info(f"Миграция {migration_name} успешно применена")
-                else:
-                    logger.error(f"Миграция {migration_name} не была применена успешно")
-            except Exception as e:
-                logger.error(f"Ошибка при применении миграции {migration_name}: {str(e)}")
-                record_migration(supabase, migration_name, False)
-                raise
+            # Чтение SQL из файла
+            with open(migration_file, "r") as f:
+                sql = f.read()
+            
+            # Выполнение SQL
+            result = execute_sql_direct(supabase, sql)
+            
+            if not result:
+                logger.error(f"Ошибка при выполнении миграции {file_name}")
+                return False
+            
+            # Запись информации о выполненной миграции
+            insert_result = execute_sql_direct(
+                supabase,
+                f"""
+                INSERT INTO _migrations (name)
+                VALUES ('{file_name}')
+                """
+            )
+            
+            if not insert_result:
+                logger.warning(f"Не удалось записать информацию о выполненной миграции {file_name}")
+            
+            logger.info(f"Миграция {file_name} успешно выполнена")
         
-        logger.info("Все миграции успешно применены")
+        return True
+    
     except Exception as e:
         logger.error(f"Ошибка при выполнении миграций: {str(e)}")
-        raise
+        return False
 
 def get_executed_migrations(supabase: Client):
     """
@@ -381,18 +397,50 @@ def record_migration(supabase: Client, migration_name: str, success: bool):
     """
     Записывает информацию о выполненной миграции в таблицу _migrations
     """
-    success_value = "true" if success else "false"
-    sql = f"""
-    INSERT INTO _migrations (name, applied_at, success) 
-    VALUES ('{migration_name}', NOW(), {success_value})
-    """
     try:
+        # Проверяем структуру таблицы _migrations
+        check_columns_sql = """
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = '_migrations'
+        """
+        columns_result = execute_sql_query_direct(supabase, check_columns_sql)
+        
+        # Получаем список колонок
+        column_names = [col.get('column_name', '') for col in columns_result] if columns_result else []
+        logger.info(f"Структура таблицы _migrations: {column_names}")
+        
+        success_value = "true" if success else "false"
+        
+        # Выбираем правильный формат SQL в зависимости от структуры таблицы
+        if 'applied_at' in column_names:
+            sql = f"""
+            INSERT INTO _migrations (name, applied_at, success) 
+            VALUES ('{migration_name}', NOW(), {success_value})
+            """
+        elif 'executed_at' in column_names:
+            sql = f"""
+            INSERT INTO _migrations (name, executed_at) 
+            VALUES ('{migration_name}', extract(epoch from now())::bigint)
+            """
+        elif 'migration_name' in column_names:
+            sql = f"""
+            INSERT INTO _migrations (migration_name, executed_at) 
+            VALUES ('{migration_name}', CURRENT_TIMESTAMP)
+            """
+        else:
+            # Если ни одна из известных структур не подходит, используем минимальный вариант
+            sql = f"""
+            INSERT INTO _migrations (name) 
+            VALUES ('{migration_name}')
+            """
+            
         execute_sql_direct(supabase, sql)
         status = "успешно" if success else "с ошибкой"
         logger.info(f"Миграция {migration_name} записана в журнал ({status})")
     except Exception as e:
         logger.error(f"Ошибка при записи информации о миграции {migration_name}: {str(e)}")
-        raise
+        # Не вызываем raise, чтобы миграция не прерывалась из-за ошибки записи
 
 def check_migrations_table(supabase: Client) -> bool:
     """Проверка существования таблицы _migrations и создание ее при отсутствии."""
@@ -407,8 +455,7 @@ def check_migrations_table(supabase: Client) -> bool:
             CREATE TABLE IF NOT EXISTS _migrations (
                 id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
-                applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                success BOOLEAN NOT NULL
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
             CREATE INDEX IF NOT EXISTS idx_migrations_name ON _migrations(name);
             """
