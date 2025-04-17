@@ -142,7 +142,7 @@ def execute_sql_query_direct(supabase: Client, sql_query: str) -> List[Dict[str,
             END;
             $$;
             """
-            create_response = supabase.rpc("exec_sql", {"query": create_query}).execute()
+            create_response = supabase.rpc("exec_sql_array_json", {"query": create_query}).execute()
             logger.info("Функция exec_sql_array_json создана/обновлена")
         except Exception as e:
             logger.warning(f"Ошибка при создании функции exec_sql_array_json: {str(e)}")
