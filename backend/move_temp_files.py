@@ -53,16 +53,23 @@ def add_missing_columns() -> bool:
     # Добавление столбца author_url в таблицу saved_images
     logger.info("Добавление столбца author_url в таблицу saved_images")
     try:
+        # Выполняем каждую команду по отдельности
+        # Добавление столбца
         alter_sql = """
         ALTER TABLE IF EXISTS saved_images 
-        ADD COLUMN IF NOT EXISTS author_url TEXT;
-
-        CREATE INDEX IF NOT EXISTS idx_saved_images_author_url 
-        ON saved_images(author_url);
+        ADD COLUMN IF NOT EXISTS author_url TEXT
         """
         
-        # Выполняем SQL запрос через RPC
         result = supabase.rpc("exec_sql_array_json", {"query": alter_sql}).execute()
+        
+        # Создание индекса
+        index_sql = """
+        CREATE INDEX IF NOT EXISTS idx_saved_images_author_url 
+        ON saved_images(author_url)
+        """
+        
+        result = supabase.rpc("exec_sql_array_json", {"query": index_sql}).execute()
+        
         logger.info("Столбец author_url успешно добавлен в таблицу saved_images")
     except Exception as e:
         logger.error(f"Ошибка при добавлении столбца author_url: {str(e)}")
@@ -78,30 +85,41 @@ def add_missing_columns() -> bool:
                 "Content-Type": "application/json"
             }
             
-            # Разбиваем на отдельные команды
-            for cmd in alter_sql.split(";"):
-                if cmd.strip():
-                    response = requests.post(url, json={"query": cmd + ";"}, headers=headers)
-                    if response.status_code in [200, 204]:
-                        logger.info(f"Команда выполнена успешно: {cmd[:50]}...")
-                    else:
-                        logger.warning(f"Ошибка при выполнении команды: {cmd[:50]}... - {response.status_code} - {response.text}")
+            # Выполняем команды по отдельности
+            commands = [
+                """ALTER TABLE IF EXISTS saved_images ADD COLUMN IF NOT EXISTS author_url TEXT""",
+                """CREATE INDEX IF NOT EXISTS idx_saved_images_author_url ON saved_images(author_url)"""
+            ]
+            
+            for cmd in commands:
+                response = requests.post(url, json={"query": cmd}, headers=headers)
+                if response.status_code in [200, 204]:
+                    logger.info(f"Команда выполнена успешно: {cmd[:50]}...")
+                else:
+                    logger.warning(f"Ошибка при выполнении команды: {cmd[:50]}... - {response.status_code} - {response.text}")
         except Exception as e2:
             logger.error(f"Ошибка при альтернативном добавлении столбца author_url: {str(e2)}")
     
     # Добавление столбца analyzed_posts_count в таблицу channel_analysis
     logger.info("Добавление столбца analyzed_posts_count в таблицу channel_analysis")
     try:
+        # Выполняем каждую команду по отдельности
+        # Добавление столбца
         alter_sql = """
         ALTER TABLE IF EXISTS channel_analysis 
-        ADD COLUMN IF NOT EXISTS analyzed_posts_count INTEGER DEFAULT 0;
-
-        CREATE INDEX IF NOT EXISTS idx_channel_analysis_analyzed_posts_count 
-        ON channel_analysis(analyzed_posts_count);
+        ADD COLUMN IF NOT EXISTS analyzed_posts_count INTEGER DEFAULT 0
         """
         
-        # Выполняем SQL запрос через RPC
         result = supabase.rpc("exec_sql_array_json", {"query": alter_sql}).execute()
+        
+        # Создание индекса
+        index_sql = """
+        CREATE INDEX IF NOT EXISTS idx_channel_analysis_analyzed_posts_count 
+        ON channel_analysis(analyzed_posts_count)
+        """
+        
+        result = supabase.rpc("exec_sql_array_json", {"query": index_sql}).execute()
+        
         logger.info("Столбец analyzed_posts_count успешно добавлен в таблицу channel_analysis")
     except Exception as e:
         logger.error(f"Ошибка при добавлении столбца analyzed_posts_count: {str(e)}")
@@ -117,14 +135,18 @@ def add_missing_columns() -> bool:
                 "Content-Type": "application/json"
             }
             
-            # Разбиваем на отдельные команды
-            for cmd in alter_sql.split(";"):
-                if cmd.strip():
-                    response = requests.post(url, json={"query": cmd + ";"}, headers=headers)
-                    if response.status_code in [200, 204]:
-                        logger.info(f"Команда выполнена успешно: {cmd[:50]}...")
-                    else:
-                        logger.warning(f"Ошибка при выполнении команды: {cmd[:50]}... - {response.status_code} - {response.text}")
+            # Выполняем команды по отдельности
+            commands = [
+                """ALTER TABLE IF EXISTS channel_analysis ADD COLUMN IF NOT EXISTS analyzed_posts_count INTEGER DEFAULT 0""",
+                """CREATE INDEX IF NOT EXISTS idx_channel_analysis_analyzed_posts_count ON channel_analysis(analyzed_posts_count)"""
+            ]
+            
+            for cmd in commands:
+                response = requests.post(url, json={"query": cmd}, headers=headers)
+                if response.status_code in [200, 204]:
+                    logger.info(f"Команда выполнена успешно: {cmd[:50]}...")
+                else:
+                    logger.warning(f"Ошибка при выполнении команды: {cmd[:50]}... - {response.status_code} - {response.text}")
         except Exception as e2:
             logger.error(f"Ошибка при альтернативном добавлении столбца analyzed_posts_count: {str(e2)}")
     

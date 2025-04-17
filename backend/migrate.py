@@ -285,7 +285,7 @@ def get_executed_migrations(supabase: Client) -> list:
     try:
         result = execute_sql_query_direct(
             supabase,
-            "SELECT name FROM _migrations ORDER BY created_at ASC;"
+            "SELECT name FROM _migrations ORDER BY created_at ASC"
         )
         
         if not result or 'data' not in result:
@@ -746,9 +746,9 @@ def create_exec_sql_function(supabase: Client) -> bool:
         else:
             logger.info("Создание функции exec_sql_json...")
             
-            # SQL для создания функции exec_sql_json
-            sql = """
-            -- Создаем функцию для выполнения SQL запросов и возврата JSON
+            # Создаем каждую функцию отдельно
+            # Сначала exec_sql_json
+            exec_sql_json_function = """
             CREATE OR REPLACE FUNCTION exec_sql_json(query text)
             RETURNS json
             LANGUAGE plpgsql
@@ -766,9 +766,18 @@ def create_exec_sql_function(supabase: Client) -> bool:
                     'detail', SQLSTATE
                 );
             END;
-            $$;
+            $$
+            """
             
-            -- Создаем функцию для выполнения SQL запросов и возврата JSON массива
+            # Выполняем SQL для создания первой функции
+            if not execute_sql_direct(supabase, exec_sql_json_function):
+                logger.error("Ошибка при создании функции exec_sql_json")
+                return False
+                
+            logger.info("Функция exec_sql_json успешно создана")
+            
+            # Затем exec_sql_array_json
+            exec_sql_array_json_function = """
             CREATE OR REPLACE FUNCTION exec_sql_array_json(query text)
             RETURNS json
             LANGUAGE plpgsql
@@ -786,15 +795,31 @@ def create_exec_sql_function(supabase: Client) -> bool:
                     'detail', SQLSTATE
                 );
             END;
-            $$;
+            $$
             """
             
-            # Выполняем SQL для создания функций
-            if execute_sql_direct(supabase, sql):
-                logger.info("Функции для работы с JSON успешно созданы")
-            else:
-                logger.error("Ошибка при создании функций для работы с JSON")
+            # Выполняем SQL для создания второй функции
+            if not execute_sql_direct(supabase, exec_sql_array_json_function):
+                logger.error("Ошибка при создании функции exec_sql_array_json")
                 return False
+                
+            logger.info("Функция exec_sql_array_json успешно создана")
+            
+            # Назначаем права доступа на функции
+            grant_sql = """
+            GRANT EXECUTE ON FUNCTION exec_sql_json(text) TO service_role, anon, authenticated;
+            """
+            
+            execute_sql_direct(supabase, grant_sql)
+            
+            grant_sql2 = """
+            GRANT EXECUTE ON FUNCTION exec_sql_array_json(text) TO service_role, anon, authenticated;
+            """
+            
+            execute_sql_direct(supabase, grant_sql2)
+            
+            logger.info("Права на функции успешно назначены")
+            logger.info("Функции для работы с JSON успешно созданы")
         
         return True
     except Exception as e:
