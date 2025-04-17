@@ -54,15 +54,26 @@ def run_migrations(supabase: Client) -> None:
                 file_name = os.path.basename(sql_file)
                 logger.info(f"Применение миграции: {file_name}")
                 
-                # Выполняем SQL запрос
-                supabase.table("migrations").select("*").execute()  # Проверка подключения
+                # Читаем содержимое SQL файла
+                with open(sql_file, 'r', encoding='utf-8') as f:
+                    sql_content = f.read()
                 
-                # Используем PostgreSQL функционал
-                result = supabase.rpc('run_sql', {'sql_query': sql_file}).execute()
+                logger.info(f"Загружено SQL-содержимое: {len(sql_content)} байт")
+                
+                # Проверяем подключение
+                try:
+                    supabase.table("_migrations").select("*").limit(1).execute()
+                    logger.info("Проверка подключения прошла успешно")
+                except Exception as conn_err:
+                    logger.warning(f"Таблица _migrations может не существовать: {str(conn_err)}")
+                
+                # Используем PostgreSQL функционал с содержимым файла
+                result = supabase.rpc('run_sql', {'sql_query': sql_content}).execute()
                 
                 logger.info(f"Миграция успешно применена: {file_name}")
             except Exception as e:
                 logger.error(f"Ошибка при применении миграции {file_name}: {str(e)}")
+                logger.error(f"Детали: {type(e).__name__}: {str(e)}")
     except Exception as e:
         logger.error(f"Общая ошибка при запуске миграций: {str(e)}")
 
@@ -71,6 +82,8 @@ def create_rpc_function(supabase: Client) -> None:
     try:
         # SQL для создания функции run_sql
         sql = """
+        DROP FUNCTION IF EXISTS run_sql(text);
+        
         CREATE OR REPLACE FUNCTION run_sql(sql_query TEXT)
         RETURNS JSONB
         LANGUAGE plpgsql
@@ -99,12 +112,48 @@ def create_rpc_function(supabase: Client) -> None:
         
         import requests
         url = f"{os.getenv('SUPABASE_URL')}/rest/v1/rpc/run_sql"
+        
+        try:
+            # Сначала пробуем удалить функцию, если она существует
+            drop_sql = "DROP FUNCTION IF EXISTS run_sql(text);"
+            drop_response = requests.post(url, json={"sql_query": drop_sql}, headers=headers)
+            logger.info(f"Результат удаления функции run_sql: {drop_response.status_code}")
+        except Exception as drop_err:
+            logger.warning(f"Ошибка при удалении функции run_sql: {str(drop_err)}")
+        
+        # Создаем функцию заново
         response = requests.post(url, json={"sql_query": sql}, headers=headers)
         
         if response.status_code == 200:
             logger.info("RPC функция run_sql успешно создана")
         else:
-            logger.error(f"Ошибка при создании RPC функции: {response.text}")
+            logger.error(f"Ошибка при создании RPC функции: {response.status_code} - {response.text}")
+            
+            # Попробуем создать функцию без предварительного DROP
+            simplified_sql = """
+            CREATE OR REPLACE FUNCTION run_sql(sql_query TEXT)
+            RETURNS JSONB
+            LANGUAGE plpgsql
+            SECURITY DEFINER
+            AS $$
+            DECLARE
+                result JSONB;
+            BEGIN
+                EXECUTE sql_query;
+                result := '{"status": "success"}'::JSONB;
+                RETURN result;
+            EXCEPTION WHEN OTHERS THEN
+                result := jsonb_build_object('status', 'error', 'message', SQLERRM);
+                RETURN result;
+            END;
+            $$;
+            """
+            retry_response = requests.post(url, json={"sql_query": simplified_sql}, headers=headers)
+            if retry_response.status_code == 200:
+                logger.info("RPC функция run_sql успешно создана при повторной попытке")
+            else:
+                logger.error(f"Повторная ошибка при создании RPC функции: {retry_response.status_code} - {retry_response.text}")
+            
     except Exception as e:
         logger.error(f"Ошибка при создании RPC функции: {str(e)}")
 
