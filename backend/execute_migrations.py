@@ -91,31 +91,44 @@ def execute_sql_direct(sql_query: str) -> bool:
         return False
 
 def execute_sql_individually(sql_content: str) -> bool:
-    """Выполнение SQL запросов по отдельности"""
+    """Выполнение SQL запросов по отдельности через RPC"""
     try:
         logger.info("Разбиение SQL скрипта на отдельные команды...")
+        
+        # Получаем данные из переменных окружения
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_ANON_KEY')
+        
+        if not supabase_url or not supabase_key:
+            logger.error("Не найдены переменные окружения SUPABASE_URL или SUPABASE_ANON_KEY")
+            return False
         
         # Разбиваем SQL на отдельные команды
         sql_commands = []
         current_command = ""
         in_function_body = False
+        in_comment = False
         
         for line in sql_content.splitlines():
-            line = line.strip()
+            stripped_line = line.strip()
             
-            # Пропускаем пустые строки и комментарии
-            if not line or line.startswith('--'):
+            # Пропускаем пустые строки
+            if not stripped_line:
+                continue
+                
+            # Обрабатываем комментарии
+            if stripped_line.startswith('--'):
                 continue
                 
             # Отслеживаем начало и конец блоков функций
-            if "DO $$" in line:
+            if "DO $$" in stripped_line:
                 in_function_body = True
                 current_command += line + "\n"
                 continue
                 
             if in_function_body:
                 current_command += line + "\n"
-                if "END $$;" in line:
+                if "END $$;" in stripped_line:
                     in_function_body = False
                     sql_commands.append(current_command)
                     current_command = ""
@@ -123,7 +136,7 @@ def execute_sql_individually(sql_content: str) -> bool:
                 
             # Обычные SQL команды
             current_command += line + "\n"
-            if line.endswith(';'):
+            if stripped_line.endswith(';') and not in_function_body:
                 sql_commands.append(current_command)
                 current_command = ""
         
@@ -133,20 +146,107 @@ def execute_sql_individually(sql_content: str) -> bool:
             
         logger.info(f"Найдено {len(sql_commands)} SQL команд для выполнения")
         
+        # Вызовы RPC exec_sql
+        rpc_url = f"{supabase_url}/rest/v1/rpc/exec_sql"
+        rpc_headers = {
+            "apikey": supabase_key,
+            "Authorization": f"Bearer {supabase_key}", 
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        }
+        
+        # Непосредственное выполнение SQL через SQL API
+        sql_url = f"{supabase_url}/rest/v1/sql"
+        sql_headers = {
+            "apikey": supabase_key,
+            "Authorization": f"Bearer {supabase_key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        }
+        
         success = True
         for i, cmd in enumerate(sql_commands):
             if not cmd.strip():
                 continue
                 
-            logger.info(f"Выполнение команды {i+1}/{len(sql_commands)}: {cmd[:50]}...")
-            if not execute_sql_direct(cmd):
-                logger.error(f"Ошибка при выполнении команды {i+1}")
-                success = False
-                # Но продолжаем выполнение остальных команд
+            logger.info(f"Выполнение команды {i+1}/{len(sql_commands)}")
             
+            # Удаляем блоки DO $$ ... END $$; из запроса, извлекая внутренности
+            if "DO $$" in cmd and "END $$;" in cmd:
+                # Извлекаем SQL из блока DO
+                start_idx = cmd.find("DO $$") + 5
+                end_idx = cmd.find("END $$;")
+                if start_idx > 0 and end_idx > start_idx:
+                    inner_sql = cmd[start_idx:end_idx].strip()
+                    
+                    # Ищем SQL операторы внутри блока DO
+                    if "ALTER TABLE" in inner_sql:
+                        clean_cmd = inner_sql.replace("BEGIN", "").replace("END", "").replace("IF NOT EXISTS", "").strip()
+                        # Извлекаем команды ALTER TABLE
+                        alter_commands = []
+                        for line in clean_cmd.split("\n"):
+                            line = line.strip()
+                            if line.startswith("ALTER TABLE") and ";" in line:
+                                alter_commands.append(line)
+                            elif line.startswith("CREATE INDEX") and ";" in line:
+                                alter_commands.append(line)
+                        
+                        # Выполняем каждую команду ALTER TABLE отдельно
+                        for alter_cmd in alter_commands:
+                            logger.info(f"Выполнение команды ALTER TABLE: {alter_cmd[:50]}...")
+                            try:
+                                # Сначала пробуем через RPC
+                                response = requests.post(rpc_url, json={"query": alter_cmd}, headers=rpc_headers)
+                                
+                                if response.status_code not in [200, 201, 204]:
+                                    logger.warning(f"Ошибка при выполнении через RPC: {response.status_code} - {response.text}")
+                                    
+                                    # Затем пробуем через SQL API
+                                    sql_response = requests.post(sql_url, json={"query": alter_cmd}, headers=sql_headers)
+                                    
+                                    if sql_response.status_code not in [200, 201, 204]:
+                                        logger.error(f"Ошибка при выполнении через SQL API: {sql_response.status_code} - {sql_response.text}")
+                                        success = False
+                                    else:
+                                        logger.info("Команда выполнена успешно через SQL API")
+                                else:
+                                    logger.info("Команда выполнена успешно через RPC")
+                            except Exception as e:
+                                logger.error(f"Ошибка при выполнении команды: {str(e)}")
+                                success = False
+                        
+                        continue
+            
+            # Проверяем, есть ли в команде CREATE OR REPLACE FUNCTION
+            if "CREATE OR REPLACE FUNCTION" in cmd:
+                logger.info(f"Пропуск создания функции: {cmd[:50]}...")
+                continue
+            
+            # Для обычных команд пробуем выполнить через RPC, затем через SQL API
+            try:
+                # Сначала пробуем через RPC
+                response = requests.post(rpc_url, json={"query": cmd}, headers=rpc_headers)
+                
+                if response.status_code not in [200, 201, 204]:
+                    logger.warning(f"Ошибка при выполнении через RPC: {response.status_code} - {response.text}")
+                    
+                    # Затем пробуем через SQL API
+                    sql_response = requests.post(sql_url, json={"query": cmd}, headers=sql_headers)
+                    
+                    if sql_response.status_code not in [200, 201, 204]:
+                        logger.error(f"Ошибка при выполнении через SQL API: {sql_response.status_code} - {sql_response.text}")
+                        success = False
+                    else:
+                        logger.info(f"Команда {i+1} выполнена успешно через SQL API")
+                else:
+                    logger.info(f"Команда {i+1} выполнена успешно через RPC")
+            except Exception as e:
+                logger.error(f"Ошибка при выполнении команды {i+1}: {str(e)}")
+                success = False
+        
         return success
     except Exception as e:
-        logger.error(f"Исключение при разборе SQL: {str(e)}")
+        logger.error(f"Ошибка при выполнении SQL команд: {str(e)}")
         return False
 
 def create_exec_sql_function() -> bool:

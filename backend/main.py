@@ -34,6 +34,7 @@ from bs4 import BeautifulSoup
 import telethon
 import aiohttp
 from telegram_utils import get_telegram_posts, get_mock_telegram_posts
+import move_temp_files
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -1606,15 +1607,17 @@ async def fix_existing_ideas_formatting():
 
 # --- Запуск исправления форматирования при старте сервера ---
 @app.on_event("startup")
-async def startup_events():
-    """Действия при запуске сервера."""
+async def startup_event():
+    """Запуск обслуживающих процессов при старте приложения."""
     logger.info("Запуск обслуживающих процессов...")
     
-    # Исправляем форматирование в существующих идеях
-    await fix_existing_ideas_formatting()
+    # Проверка и добавление недостающих столбцов
+    if not await check_db_tables():
+        logger.error("Ошибка при проверке таблиц в базе данных!")
+        # Продолжаем работу приложения даже при ошибке
     
-    # Исправляем форматирование в существующих постах
-    await fix_existing_posts_formatting()
+    # Исправление форматирования в JSON полях
+    await fix_formatting_in_json_fields()
     
     logger.info("Обслуживающие процессы запущены успешно")
 
@@ -1891,3 +1894,34 @@ async def save_suggested_idea(idea_data: Dict[str, Any], request: Request):
     except Exception as e:
         logging.error(f"Error saving idea: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+async def check_db_tables():
+    """Проверка наличия необходимых таблиц в базе данных."""
+    try:
+        # Проверка наличия таблицы suggested_ideas
+        result = supabase.table("suggested_ideas").select("id").limit(1).execute()
+        logger.info("Таблица suggested_ideas существует и доступна.")
+        
+        # Автоматическое добавление недостающих столбцов
+        try:
+            move_temp_files.add_missing_columns()
+            logger.info("Проверка и добавление недостающих столбцов выполнены.")
+        except Exception as e:
+            logger.warning(f"Ошибка при добавлении недостающих столбцов: {str(e)}")
+            
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка при проверке таблиц: {str(e)}")
+        return False
+
+async def fix_formatting_in_json_fields():
+    """Исправление форматирования в JSON полях."""
+    try:
+        # Исправляем форматирование в существующих идеях
+        await fix_existing_ideas_formatting()
+        
+        # Исправляем форматирование в существующих постах
+        await fix_existing_posts_formatting()
+    except Exception as e:
+        logger.error(f"Ошибка при исправлении форматирования: {str(e)}")
+        # Продолжаем работу приложения даже при ошибке
