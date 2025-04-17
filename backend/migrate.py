@@ -37,80 +37,185 @@ def init_supabase() -> Optional[Client]:
         logger.error(f"Ошибка при инициализации Supabase: {str(e)}")
         return None
 
-def execute_sql_direct(sql: str) -> bool:
-    """Выполнение SQL напрямую через SQL API Supabase."""
+def execute_sql_direct(sql_query: str) -> bool:
+    """Выполнение SQL запроса напрямую через REST API."""
     try:
-        url = f"{os.getenv('SUPABASE_URL')}/rest/v1/sql"
+        logger.info(f"Выполнение SQL запроса напрямую: {sql_query[:50]}...")
+        
+        # Проверяем наличие функции exec_sql
+        check_sql = """
+        SELECT EXISTS (
+            SELECT FROM pg_proc 
+            WHERE proname = 'exec_sql' 
+            AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+        ) as exists;
+        """
+        
+        # Прямой запрос к базе данных через REST API
+        url = f"{os.getenv('SUPABASE_URL')}/rest/v1/rpc/exec_sql"
         headers = {
             "apikey": os.getenv("SUPABASE_ANON_KEY"),
             "Authorization": f"Bearer {os.getenv('SUPABASE_ANON_KEY')}",
-            "Content-Type": "text/plain",  # Для SQL API нужен text/plain
+            "Content-Type": "application/json",
             "Prefer": "return=minimal"
         }
         
-        logger.info(f"Выполнение SQL напрямую через {url}")
-        response = requests.post(url, data=sql, headers=headers)
+        # Сначала проверяем наличие функции exec_sql
+        test_response = requests.post(url, json={"query": check_sql}, headers=headers)
         
-        if response.status_code == 200:
-            logger.info(f"SQL запрос успешно выполнен напрямую через SQL API")
+        # Если функция не существует и мы пытаемся её создать
+        if test_response.status_code != 200 and "CREATE OR REPLACE FUNCTION exec_sql" in sql_query:
+            logger.info("Создаем функцию exec_sql напрямую через SQL запрос...")
+            
+            # Используем прямой SQL API для создания функции
+            sql_url = f"{os.getenv('SUPABASE_URL')}/rest/v1/sql"
+            sql_headers = {
+                "apikey": os.getenv("SUPABASE_ANON_KEY"),
+                "Authorization": f"Bearer {os.getenv('SUPABASE_ANON_KEY')}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal"
+            }
+            
+            sql_response = requests.post(sql_url, json={"query": sql_query}, headers=sql_headers)
+            
+            if sql_response.status_code in [200, 201, 204]:
+                logger.info("SQL запрос выполнен успешно через прямой SQL API")
+                return True
+            else:
+                logger.error(f"Ошибка при выполнении SQL запроса через прямой SQL API: {sql_response.status_code} - {sql_response.text}")
+                return False
+        
+        # Стандартное выполнение через exec_sql если функция существует
+        response = requests.post(url, json={"query": sql_query}, headers=headers)
+        
+        if response.status_code in [200, 201, 204]:
+            logger.info("SQL запрос выполнен успешно")
             return True
         else:
-            logger.error(f"Ошибка выполнения SQL напрямую: {response.status_code} - {response.text}")
-            logger.error(f"Содержимое ответа: {response.content}")
-            # Логирование заголовков для отладки
-            logger.error(f"Заголовки ответа: {dict(response.headers)}")
-            return False
+            # Если функция exec_sql не существует, пробуем выполнить запрос напрямую через SQL API
+            logger.warning(f"Ошибка при выполнении SQL запроса через exec_sql: {response.status_code} - {response.text}")
+            
+            # Используем прямой SQL API
+            sql_url = f"{os.getenv('SUPABASE_URL')}/rest/v1/sql"
+            sql_headers = {
+                "apikey": os.getenv("SUPABASE_ANON_KEY"),
+                "Authorization": f"Bearer {os.getenv('SUPABASE_ANON_KEY')}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal"
+            }
+            
+            sql_response = requests.post(sql_url, json={"query": sql_query}, headers=sql_headers)
+            
+            if sql_response.status_code in [200, 201, 204]:
+                logger.info("SQL запрос выполнен успешно через прямой SQL API")
+                return True
+            else:
+                logger.error(f"Ошибка при выполнении SQL запроса: {sql_response.status_code} - {sql_response.text}")
+                return False
     except Exception as e:
-        logger.error(f"Ошибка при прямом выполнении SQL: {str(e)}")
+        logger.error(f"Исключение при выполнении SQL запроса: {str(e)}")
         return False
 
-def execute_sql_query_direct(sql: str) -> Tuple[bool, List[Dict[str, Any]]]:
-    """Выполнение SQL-запроса напрямую через SQL API Supabase с возвратом результатов."""
+def execute_sql_query_direct(sql_query: str) -> Tuple[bool, List[Dict[str, Any]]]:
+    """Выполнение SQL запроса напрямую через REST API и возврат результатов."""
     try:
-        url = f"{os.getenv('SUPABASE_URL')}/rest/v1/sql"
+        logger.info(f"Выполнение SQL запроса с возвратом результатов: {sql_query[:50]}...")
+        
+        # Проверяем наличие функции exec_sql
+        check_sql = """
+        SELECT EXISTS (
+            SELECT FROM pg_proc 
+            WHERE proname = 'exec_sql' 
+            AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+        ) as exists;
+        """
+        
+        # Прямой запрос к базе данных через REST API
+        url = f"{os.getenv('SUPABASE_URL')}/rest/v1/rpc/exec_sql"
         headers = {
             "apikey": os.getenv("SUPABASE_ANON_KEY"),
             "Authorization": f"Bearer {os.getenv('SUPABASE_ANON_KEY')}",
-            "Content-Type": "text/plain",
-            "Accept": "application/json"  # Ожидаем JSON в ответе
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
         }
         
-        logger.info(f"Выполнение SQL-запроса с возвратом данных через {url}")
-        response = requests.post(url, data=sql, headers=headers)
+        # Сначала проверяем наличие функции exec_sql
+        test_response = requests.post(url, json={"query": check_sql}, headers=headers)
+        
+        # Если функция не существует, используем прямой SQL API
+        if test_response.status_code != 200:
+            logger.warning("Функция exec_sql не найдена, используем прямой SQL API")
+            sql_url = f"{os.getenv('SUPABASE_URL')}/rest/v1/sql"
+            sql_headers = {
+                "apikey": os.getenv("SUPABASE_ANON_KEY"),
+                "Authorization": f"Bearer {os.getenv('SUPABASE_ANON_KEY')}",
+                "Content-Type": "application/json",
+                "Prefer": "return=representation"
+            }
+            
+            sql_response = requests.post(sql_url, json={"query": sql_query}, headers=sql_headers)
+            
+            if sql_response.status_code == 200:
+                logger.info("SQL запрос выполнен успешно через прямой SQL API")
+                return True, sql_response.json()
+            else:
+                logger.error(f"Ошибка при выполнении SQL запроса через прямой SQL API: {sql_response.status_code} - {sql_response.text}")
+                return False, []
+        
+        # Стандартное выполнение через exec_sql если функция существует
+        response = requests.post(url, json={"query": sql_query}, headers=headers)
         
         if response.status_code == 200:
-            try:
-                results = response.json()
-                logger.info(f"SQL-запрос успешно выполнен, получено {len(results)} строк")
-                return True, results
-            except json.JSONDecodeError:
-                logger.error(f"Не удалось декодировать JSON из ответа: {response.text}")
-                return False, []
+            logger.info("SQL запрос выполнен успешно")
+            return True, response.json()
         else:
-            logger.error(f"Ошибка выполнения SQL-запроса: {response.status_code} - {response.text}")
-            return False, []
+            # Если ошибка, пробуем через прямой SQL API
+            logger.warning(f"Ошибка при выполнении SQL запроса через exec_sql: {response.status_code} - {response.text}")
+            
+            sql_url = f"{os.getenv('SUPABASE_URL')}/rest/v1/sql"
+            sql_headers = {
+                "apikey": os.getenv("SUPABASE_ANON_KEY"),
+                "Authorization": f"Bearer {os.getenv('SUPABASE_ANON_KEY')}",
+                "Content-Type": "application/json",
+                "Prefer": "return=representation"
+            }
+            
+            sql_response = requests.post(sql_url, json={"query": sql_query}, headers=sql_headers)
+            
+            if sql_response.status_code == 200:
+                logger.info("SQL запрос выполнен успешно через прямой SQL API")
+                return True, sql_response.json()
+            else:
+                logger.error(f"Ошибка при выполнении SQL запроса: {sql_response.status_code} - {sql_response.text}")
+                return False, []
     except Exception as e:
-        logger.error(f"Ошибка при выполнении SQL-запроса: {str(e)}")
+        logger.error(f"Исключение при выполнении SQL запроса: {str(e)}")
         return False, []
 
 def check_table_exists(table_name: str) -> bool:
     """Проверка существования таблицы в базе данных."""
-    sql = f"""
-    SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name = '{table_name}'
-    ) as exists;
-    """
-    
-    success, results = execute_sql_query_direct(sql)
-    if success and results and len(results) > 0:
-        exists = results[0].get('exists', False)
+    try:
+        logger.info(f"Проверка существования таблицы: {table_name}")
+        sql = f"""
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name = '{table_name}'
+        ) as exists;
+        """
+        
+        success, result = execute_sql_query_direct(sql)
+        
+        if not success or not result:
+            logger.warning(f"Не удалось проверить существование таблицы {table_name}")
+            return False
+        
+        exists = result[0].get("exists", False)
         logger.info(f"Таблица {table_name} {'существует' if exists else 'не существует'}")
         return exists
-    
-    logger.warning(f"Не удалось проверить существование таблицы {table_name}")
-    return False
+    except Exception as e:
+        logger.error(f"Ошибка при проверке существования таблицы {table_name}: {str(e)}")
+        return False
 
 def create_migrations_table():
     """Создание таблицы _migrations для отслеживания выполненных миграций."""
@@ -151,12 +256,49 @@ def run_migrations(supabase: Client) -> None:
             return
         
         # Проверяем наличие таблицы _migrations
-        if not check_table_exists('_migrations'):
-            logger.warning("Таблица _migrations не существует, создаём...")
-            if not create_migrations_table():
-                logger.error("Не удалось создать таблицу _migrations, миграции могут не отслеживаться корректно")
+        try:
+            # Используем Supabase клиент для проверки таблицы
+            test_migrations_table = supabase.table("_migrations").select("*").limit(1).execute()
+            logger.info("Таблица _migrations существует")
+        except Exception as e:
+            logger.warning(f"Ошибка при проверке таблицы _migrations: {str(e)}")
+            # Пробуем создать таблицу через supabase клиент
+            try:
+                logger.info("Попытка создать таблицу _migrations через REST API...")
+                
+                # Используем admin_key для создания таблицы
+                admin_url = f"{os.getenv('SUPABASE_URL')}/rest/v1"
+                admin_headers = {
+                    "apikey": os.getenv("SUPABASE_ANON_KEY"),
+                    "Authorization": f"Bearer {os.getenv('SUPABASE_ANON_KEY')}",
+                    "Content-Type": "application/json",
+                    "Prefer": "return=minimal"
+                }
+                
+                # Проверяем, существуют ли другие таблицы
+                tables_response = requests.get(f"{admin_url}/suggested_ideas?select=id&limit=1", headers=admin_headers)
+                if tables_response.status_code == 200:
+                    logger.info("Доступ к таблицам через REST API работает, но создание _migrations невозможно без функции exec_sql")
+                else:
+                    logger.warning(f"Невозможно создать таблицу _migrations: {tables_response.status_code} - {tables_response.text}")
+            except Exception as create_err:
+                logger.error(f"Не удалось создать таблицу _migrations: {str(create_err)}")
         
         exec_sql_available = check_exec_sql_function(supabase)
+        
+        # Проверяем доступ к Supabase Tables API
+        try:
+            tables_result = supabase.table("suggested_ideas").select("id").limit(1).execute()
+            logger.info(f"Таблицы доступны через Supabase клиент")
+            tables_accessible = True
+        except Exception as tables_err:
+            logger.warning(f"Ошибка доступа к таблицам: {str(tables_err)}")
+            tables_accessible = False
+        
+        # Если таблицы доступны, но exec_sql недоступен, пропускаем миграции
+        if tables_accessible and not exec_sql_available:
+            logger.info("Таблицы доступны, но функция exec_sql недоступна. Пропускаем миграции.")
+            return
         
         for sql_file in sql_files:
             try:
@@ -275,7 +417,6 @@ def record_migration_execution(migration_name: str) -> bool:
 def check_exec_sql_function(supabase: Client) -> bool:
     """Проверка наличия функции exec_sql в базе данных."""
     try:
-        # Прямой запрос через REST API для проверки существования функции
         url = f"{os.getenv('SUPABASE_URL')}/rest/v1/rpc/exec_sql"
         headers = {
             "apikey": os.getenv("SUPABASE_ANON_KEY"),
@@ -284,36 +425,181 @@ def check_exec_sql_function(supabase: Client) -> bool:
             "Prefer": "return=minimal"
         }
         
-        # Простой запрос, который должен выполниться без ошибок, если функция существует
-        test_query = "SELECT 1 as test"
-        response = requests.post(url, json={"query": test_query}, headers=headers)
+        # Пытаемся вызвать функцию с тестовым запросом
+        response = requests.post(url, json={"query": "SELECT 1"}, headers=headers)
         
-        if response.status_code == 200:
-            logger.info("Функция exec_sql существует и доступна")
+        if response.status_code in [200, 201, 204]:
+            logger.info("Функция exec_sql существует и работает корректно")
             return True
         else:
-            logger.warning(f"Функция exec_sql недоступна: {response.status_code} - {response.text}")
+            logger.warning(f"Проверка функции exec_sql вернула код {response.status_code}: {response.text}")
             return False
     except Exception as e:
-        logger.error(f"Ошибка при проверке функции exec_sql: {str(e)}")
+        logger.warning(f"Ошибка при проверке функции exec_sql: {str(e)}")
         return False
 
-def create_exec_sql_function() -> bool:
-    """Создание функции exec_sql через прямой SQL-запрос."""
+def create_exec_sql_function(supabase: Client) -> bool:
+    """Создание функции exec_sql для выполнения SQL запросов через RPC"""
     try:
-        # SQL для создания функции exec_sql
-        sql = """
-        CREATE OR REPLACE FUNCTION exec_sql(query text) RETURNS void AS $$
+        logger.info("Проверка наличия функции exec_sql...")
+        
+        # Проверяем существование функции через прямой SQL запрос
+        check_sql = """
+        SELECT EXISTS (
+            SELECT FROM pg_proc 
+            WHERE proname = 'exec_sql' 
+            AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+        ) as exists;
+        """
+        
+        success, results = execute_sql_query_direct(check_sql)
+        
+        if success and results and len(results) > 0 and results[0].get('exists', False):
+            logger.info("Функция exec_sql уже существует")
+            return True
+            
+        # Функция не существует, создаем её
+        logger.info("Создание функции exec_sql...")
+        
+        # SQL для создания функции
+        create_function_sql = """
+        CREATE OR REPLACE FUNCTION exec_sql(query text) RETURNS json AS $$
+        DECLARE
+            result json;
         BEGIN
             EXECUTE query;
+            result := json_build_object('success', true);
+            RETURN result;
+        EXCEPTION WHEN OTHERS THEN
+            result := json_build_object(
+                'success', false,
+                'error', SQLERRM,
+                'detail', SQLSTATE
+            );
+            RETURN result;
         END;
         $$ LANGUAGE plpgsql SECURITY DEFINER;
         """
         
-        return execute_sql_direct(sql)
+        # Попытка создать функцию через прямой SQL запрос
+        if execute_sql_direct(create_function_sql):
+            logger.info("Функция exec_sql успешно создана")
+            return True
+        else:
+            logger.error("Не удалось создать функцию exec_sql напрямую")
+            return False
+            
     except Exception as e:
         logger.error(f"Ошибка при создании функции exec_sql: {str(e)}")
         return False
+
+def check_migrations_table() -> bool:
+    """Проверка наличия таблицы миграций и её создание при необходимости."""
+    logger.info("Проверка наличия таблицы _migrations...")
+    
+    try:
+        # Проверка существования таблицы
+        check_sql = """
+        SELECT EXISTS (
+            SELECT FROM pg_tables 
+            WHERE schemaname = 'public' 
+            AND tablename = '_migrations'
+        ) as exists;
+        """
+        
+        success, results = execute_sql_query_direct(check_sql)
+        
+        if success and results and len(results) > 0 and results[0].get('exists', False):
+            logger.info("Таблица _migrations уже существует")
+            return True
+            
+        # Таблица не существует, создаем её
+        logger.info("Создание таблицы _migrations...")
+        
+        # SQL для создания таблицы
+        create_table_sql = """
+        CREATE TABLE IF NOT EXISTS _migrations (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            executed_at BIGINT NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        
+        -- Создание индекса для ускорения поиска по имени миграции
+        CREATE INDEX IF NOT EXISTS idx_migrations_name ON _migrations(name);
+        
+        -- Добавление комментария к таблице
+        COMMENT ON TABLE _migrations IS 'Таблица для отслеживания выполненных миграций SQL';
+        """
+        
+        # Попытка создать таблицу через прямой SQL запрос
+        if execute_sql_direct(create_table_sql):
+            logger.info("Таблица _migrations успешно создана")
+            return True
+        else:
+            logger.error("Не удалось создать таблицу _migrations напрямую")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Ошибка при создании таблицы _migrations: {str(e)}")
+        return False
+
+def create_base_tables_directly():
+    """Создание базовых таблиц напрямую через клиент Supabase."""
+    logger.info("Попытка создать базовые таблицы напрямую...")
+    
+    # Используем клиент Supabase для проверки существования таблиц
+    supabase = init_supabase()
+    if not supabase:
+        logger.error("Не удалось инициализировать Supabase для создания таблиц")
+        return
+    
+    try:
+        # Проверяем доступность таблицы suggested_ideas
+        try:
+            result = supabase.table("suggested_ideas").select("id").limit(1).execute()
+            logger.info("Таблица suggested_ideas существует")
+            tables_exist = True
+        except Exception:
+            logger.warning("Таблица suggested_ideas не найдена")
+            tables_exist = False
+        
+        # Если таблицы уже существуют, пропускаем создание
+        if tables_exist:
+            logger.info("Базовые таблицы уже существуют, пропускаем их создание")
+            return
+        
+        logger.warning("Таблицы не существуют, но создать их через API не получится без функции exec_sql")
+        logger.info("Рекомендуется создать таблицы вручную через SQL редактор Supabase")
+            
+    except Exception as e:
+        logger.error(f"Ошибка при проверке/создании базовых таблиц: {str(e)}")
+
+def skip_migrations():
+    """Пропуск миграций и переход к приложению при проблемах с SQL API."""
+    logger.warning("Пропуск миграций из-за ограничений Supabase SQL API в текущей среде")
+    logger.info("Приложение продолжит работу, полагаясь на существующую структуру базы данных")
+    # Здесь могут быть дополнительные действия, если необходимо
+
+def get_executed_migrations() -> List[str]:
+    """Получение списка уже выполненных миграций из таблицы _migrations."""
+    logger.info("Получение списка выполненных миграций...")
+    
+    try:
+        sql = "SELECT name FROM _migrations ORDER BY executed_at ASC;"
+        success, result = execute_sql_query_direct(sql)
+        
+        if not success or not result:
+            logger.error(f"Ошибка при получении выполненных миграций")
+            return []
+            
+        executed_migrations = [row.get('name') for row in result]
+        logger.info(f"Найдено {len(executed_migrations)} выполненных миграций")
+        return executed_migrations
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении выполненных миграций: {str(e)}")
+        return []
 
 def main():
     """Основная функция для запуска миграций."""
@@ -324,180 +610,38 @@ def main():
         logger.error("Не удалось инициализировать Supabase. Миграции не будут применены.")
         return
     
-    # Проверяем доступность SQL API
-    logger.info("Проверка доступности SQL API...")
-    sql_test = "SELECT version();"
-    if execute_sql_direct(sql_test):
-        logger.info("SQL API доступен и работает")
-    else:
-        logger.warning("SQL API недоступен или ограничен. Миграции могут не примениться корректно.")
+    # Проверка доступа к базе данных
+    logger.info("Проверка доступа к базе данных...")
+    try:
+        tables_result = supabase.table("suggested_ideas").select("id").limit(1).execute()
+        logger.info(f"Успешное подключение к базе данных через Supabase клиент")
+        db_accessible = True
+    except Exception as e:
+        logger.warning(f"Ошибка при проверке доступа к базе данных: {str(e)}")
+        db_accessible = False
     
     # Проверяем наличие функции exec_sql
     has_exec_sql = check_exec_sql_function(supabase)
     
-    # Если нет функции exec_sql, пробуем создать её напрямую
     if not has_exec_sql:
-        logger.warning("Функция exec_sql не найдена, попытка создать её напрямую")
-        if create_exec_sql_function():
-            logger.info("Функция exec_sql успешно создана напрямую")
+        logger.warning("Функция exec_sql не найдена, попытка создать её")
+        if create_exec_sql_function(supabase):
+            logger.info("Функция exec_sql успешно создана")
         else:
-            logger.warning("Не удалось создать функцию exec_sql напрямую, продолжаем без неё")
+            logger.warning("Не удалось создать функцию exec_sql, продолжаем без неё")
     
-    # Создаем базовые таблицы напрямую, если функции exec_sql не существует
-    if not has_exec_sql:
+    # Если таблицы не доступны, но есть функция exec_sql, создаем базовые таблицы
+    if not db_accessible and has_exec_sql:
         create_base_tables_directly()
-    
-    # Запускаем миграции
-    run_migrations(supabase)
+    # Если есть доступ к таблицам, но нет функции exec_sql, скипаем миграции
+    elif db_accessible and not has_exec_sql:
+        logger.info("Таблицы доступны, но функция exec_sql недоступна. Пропускаем миграции.")
+        skip_migrations()
+    else:
+        # Запускаем миграции, если есть доступ к таблицам или функция exec_sql
+        run_migrations(supabase)
     
     logger.info("Процесс миграции завершен.")
-
-def create_base_tables_directly():
-    """Создание базовых таблиц напрямую через SQL API."""
-    logger.info("Попытка создать базовые таблицы напрямую...")
-    
-    # Создаем расширение uuid-ossp
-    extension_sql = """
-    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-    """
-    
-    if execute_sql_direct(extension_sql):
-        logger.info("Расширение uuid-ossp успешно создано или уже существует")
-    else:
-        logger.warning("Не удалось создать расширение uuid-ossp")
-    
-    # Создаем функцию для обновления временной метки
-    func_sql = """
-    CREATE OR REPLACE FUNCTION update_updated_at_column()
-    RETURNS TRIGGER AS $$
-    BEGIN
-        NEW.updated_at = now();
-        RETURN NEW;
-    END;
-    $$ LANGUAGE plpgsql;
-    """
-    
-    if execute_sql_direct(func_sql):
-        logger.info("Функция update_updated_at_column успешно создана")
-    else:
-        logger.warning("Не удалось создать функцию update_updated_at_column")
-    
-    # SQL для создания базовых таблиц
-    sql = """
-    -- Таблица для хранения изображений
-    CREATE TABLE IF NOT EXISTS saved_images (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        url TEXT NOT NULL,
-        preview_url TEXT,
-        alt TEXT,
-        author TEXT,
-        author_url TEXT,
-        source TEXT DEFAULT 'unsplash',
-        local_path TEXT,
-        description TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-    );
-    
-    -- Таблица для хранения анализа каналов
-    CREATE TABLE IF NOT EXISTS channel_analysis (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id TEXT NOT NULL,
-        channel_name TEXT NOT NULL,
-        themes JSONB,
-        styles JSONB,
-        analyzed_posts_count INTEGER DEFAULT 0,
-        sample_posts JSONB,
-        best_posting_time TEXT,
-        is_sample_data BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-    );
-    
-    -- Таблица для хранения предложенных идей
-    CREATE TABLE IF NOT EXISTS suggested_ideas (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id TEXT NOT NULL,
-        channel_name TEXT,
-        topic_idea TEXT NOT NULL,
-        format_style TEXT,
-        relative_day INTEGER DEFAULT 0,
-        is_detailed BOOLEAN DEFAULT FALSE,
-        status TEXT DEFAULT 'new',
-        cleaned_title TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-    );
-    
-    -- Таблица для хранения постов
-    CREATE TABLE IF NOT EXISTS saved_posts (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id TEXT NOT NULL,
-        channel_name TEXT,
-        topic_idea TEXT NOT NULL,
-        format_style TEXT,
-        final_text TEXT,
-        image_url TEXT,
-        images_ids TEXT[],
-        target_date DATE,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-    );
-    
-    -- Таблица для хранения связей между постами и изображениями
-    CREATE TABLE IF NOT EXISTS post_images (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        post_id UUID REFERENCES saved_posts(id) ON DELETE CASCADE,
-        image_id TEXT REFERENCES saved_images(id) ON DELETE SET NULL,
-        user_id TEXT NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-        UNIQUE(post_id, image_id)
-    );
-    
-    -- Индексы для таблиц
-    CREATE INDEX IF NOT EXISTS idx_saved_images_user_id ON saved_images(user_id);
-    CREATE INDEX IF NOT EXISTS idx_channel_analysis_user_id ON channel_analysis(user_id);
-    CREATE INDEX IF NOT EXISTS idx_channel_analysis_channel_name ON channel_analysis(channel_name);
-    CREATE INDEX IF NOT EXISTS idx_suggested_ideas_user_id ON suggested_ideas(user_id);
-    CREATE INDEX IF NOT EXISTS idx_suggested_ideas_channel_name ON suggested_ideas(channel_name);
-    CREATE INDEX IF NOT EXISTS idx_saved_posts_user_id ON saved_posts(user_id);
-    CREATE INDEX IF NOT EXISTS idx_saved_posts_channel_name ON saved_posts(channel_name);
-    CREATE INDEX IF NOT EXISTS idx_saved_posts_target_date ON saved_posts(target_date);
-    CREATE INDEX IF NOT EXISTS idx_post_images_post_id ON post_images(post_id);
-    CREATE INDEX IF NOT EXISTS idx_post_images_image_id ON post_images(image_id);
-    """
-    
-    if execute_sql_direct(sql):
-        logger.info("Базовые таблицы успешно созданы напрямую")
-    else:
-        logger.error("Не удалось создать базовые таблицы напрямую")
-        
-    # Создаем триггеры для обновления временных меток
-    triggers_sql = """
-    -- Триггеры для автоматического обновления полей updated_at
-    DROP TRIGGER IF EXISTS update_saved_posts_updated_at ON saved_posts;
-    CREATE TRIGGER update_saved_posts_updated_at
-    BEFORE UPDATE ON saved_posts
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-    
-    DROP TRIGGER IF EXISTS update_channel_analysis_updated_at ON channel_analysis;
-    CREATE TRIGGER update_channel_analysis_updated_at
-    BEFORE UPDATE ON channel_analysis
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-    
-    DROP TRIGGER IF EXISTS update_suggested_ideas_updated_at ON suggested_ideas;
-    CREATE TRIGGER update_suggested_ideas_updated_at
-    BEFORE UPDATE ON suggested_ideas
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-    """
-    
-    if execute_sql_direct(triggers_sql):
-        logger.info("Триггеры успешно созданы напрямую")
-    else:
-        logger.warning("Не удалось создать триггеры напрямую")
 
 if __name__ == "__main__":
     main() 
