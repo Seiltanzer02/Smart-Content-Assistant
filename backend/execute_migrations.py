@@ -37,7 +37,7 @@ def init_supabase() -> Client:
         return None
 
 def execute_sql_direct(sql_query: str) -> bool:
-    """Выполнение SQL запроса напрямую через REST API"""
+    """Выполнение SQL запроса напрямую через RPC API"""
     try:
         logger.info(f"Выполнение SQL запроса напрямую: {sql_query[:50]}...")
         
@@ -48,44 +48,23 @@ def execute_sql_direct(sql_query: str) -> bool:
             logger.error("Не найдены переменные окружения SUPABASE_URL или SUPABASE_ANON_KEY")
             return False
             
-        # Выполнение запроса через SQL API
-        sql_url = f"{supabase_url}/rest/v1/sql"
+        # Используем только RPC API, так как SQL API недоступен (404)
+        url = f"{supabase_url}/rest/v1/rpc/exec_sql"
         headers = {
             "apikey": supabase_key,
-            "Authorization": f"Bearer {supabase_key}",
+            "Authorization": f"Bearer {supabase_key}", 
             "Content-Type": "application/json",
             "Prefer": "return=minimal"
         }
         
-        response = requests.post(sql_url, json={"query": sql_query}, headers=headers)
+        response = requests.post(url, json={"query": sql_query}, headers=headers)
         
         if response.status_code in [200, 201, 204]:
-            logger.info("SQL запрос выполнен успешно")
+            logger.info("SQL запрос выполнен успешно через RPC")
             return True
         else:
-            logger.error(f"Ошибка при выполнении SQL запроса: {response.status_code} - {response.text}")
-            
-            # Пробуем выполнить запрос через RPC если есть функция exec_sql
-            try:
-                url = f"{supabase_url}/rest/v1/rpc/exec_sql"
-                rpc_headers = {
-                    "apikey": supabase_key,
-                    "Authorization": f"Bearer {supabase_key}", 
-                    "Content-Type": "application/json",
-                    "Prefer": "return=minimal"
-                }
-                
-                rpc_response = requests.post(url, json={"query": sql_query}, headers=rpc_headers)
-                
-                if rpc_response.status_code in [200, 201, 204]:
-                    logger.info("SQL запрос выполнен успешно через RPC")
-                    return True
-                else:
-                    logger.error(f"Ошибка при выполнении через RPC: {rpc_response.status_code} - {rpc_response.text}")
-                    return False
-            except Exception as rpc_err:
-                logger.error(f"Ошибка при выполнении запроса через RPC: {str(rpc_err)}")
-                return False
+            logger.error(f"Ошибка при выполнении через RPC: {response.status_code} - {response.text}")
+            return False
     except Exception as e:
         logger.error(f"Исключение при выполнении SQL запроса: {str(e)}")
         return False
@@ -422,33 +401,128 @@ def run_migrations_manually() -> bool:
             
     return success
 
+def create_all_sql_functions() -> bool:
+    """Создание всех необходимых SQL функций для работы с миграциями"""
+    logger.info("Создание функций для работы с SQL...")
+    
+    # Создаем функцию exec_sql
+    exec_sql_created = create_exec_sql_function()
+    if not exec_sql_created:
+        logger.error("Не удалось создать функцию exec_sql")
+        return False
+    
+    # Создаем функцию exec_sql_json
+    exec_sql_json = """
+    CREATE OR REPLACE FUNCTION exec_sql_json(query text)
+    RETURNS json
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+    DECLARE
+        result json;
+    BEGIN
+        EXECUTE query INTO result;
+        RETURN result;
+    EXCEPTION WHEN OTHERS THEN
+        RETURN json_build_object(
+            'error', true,
+            'message', SQLERRM,
+            'detail', SQLSTATE
+        );
+    END;
+    $$;
+    """
+    
+    if not execute_sql_direct(exec_sql_json):
+        logger.error("Не удалось создать функцию exec_sql_json")
+        return False
+    
+    # Создаем функцию exec_sql_array_json
+    exec_sql_array_json = """
+    CREATE OR REPLACE FUNCTION exec_sql_array_json(query text)
+    RETURNS json
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+    DECLARE
+        result json;
+    BEGIN
+        EXECUTE 'SELECT json_agg(t) FROM (' || query || ') t' INTO result;
+        RETURN COALESCE(result, '[]'::json);
+    EXCEPTION WHEN OTHERS THEN
+        RETURN json_build_object(
+            'error', true,
+            'message', SQLERRM,
+            'detail', SQLSTATE
+        );
+    END;
+    $$;
+    """
+    
+    if not execute_sql_direct(exec_sql_array_json):
+        logger.error("Не удалось создать функцию exec_sql_array_json")
+        return False
+    
+    logger.info("Все SQL функции успешно созданы")
+    return True
+
 def main():
     """Основная функция для запуска миграций"""
     logger.info("Запуск принудительных миграций...")
     
-    # Инициализация Supabase
-    supabase = init_supabase()
-    if not supabase:
-        logger.error("Не удалось инициализировать клиент Supabase")
+    # Удаление старых функций (на случай конфликтов)
+    try:
+        # Базовое соединение для проверки доступности сервера
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_ANON_KEY')
+        
+        if not supabase_url or not supabase_key:
+            logger.error("Не найдены переменные окружения SUPABASE_URL или SUPABASE_ANON_KEY")
+            return False
+        
+        # Проверяем, отвечает ли сервер
+        url = f"{supabase_url}/rest/v1/suggested_ideas?select=id&limit=1"
+        headers = {
+            "apikey": supabase_key,
+            "Authorization": f"Bearer {supabase_key}"
+        }
+        
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            logger.info("Соединение с Supabase работает")
+        else:
+            logger.error(f"Ошибка при проверке соединения с Supabase: {response.status_code} - {response.text}")
+            return False
+    except Exception as e:
+        logger.error(f"Ошибка при проверке соединения с Supabase: {str(e)}")
         return False
         
-    # Создаем функцию exec_sql
-    if create_exec_sql_function():
-        logger.info("Функция exec_sql успешно создана или обновлена")
+    # Создаем все необходимые SQL функции
+    if create_all_sql_functions():
+        logger.info("Все необходимые SQL функции успешно созданы")
     else:
-        logger.error("Не удалось создать функцию exec_sql")
-        
-    # Создаем JSON функции
-    if create_json_functions():
-        logger.info("Функции для работы с JSON успешно созданы")
-    else:
-        logger.error("Не удалось создать функции для работы с JSON")
+        logger.error("Не удалось создать все необходимые SQL функции")
         
     # Добавляем недостающие столбцы напрямую
     if add_missing_columns():
         logger.info("Недостающие столбцы успешно добавлены")
     else:
         logger.error("Ошибка при добавлении недостающих столбцов")
+        
+    # Создаем таблицу _migrations если она не существует
+    create_migrations_table_sql = """
+    CREATE TABLE IF NOT EXISTS _migrations (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_migrations_name ON _migrations(name);
+    """
+    
+    if execute_sql_direct(create_migrations_table_sql):
+        logger.info("Таблица _migrations успешно создана (если не существовала)")
+    else:
+        logger.error("Ошибка при создании таблицы _migrations")
         
     # Запускаем все миграции вручную
     if run_migrations_manually():
