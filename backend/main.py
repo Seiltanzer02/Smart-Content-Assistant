@@ -1906,6 +1906,39 @@ async def check_db_tables():
         try:
             move_temp_files.add_missing_columns()
             logger.info("Проверка и добавление недостающих столбцов выполнены.")
+            
+            # Явное добавление столбца updated_at в таблицу channel_analysis и обновление кэша схемы
+            try:
+                # Получение URL и ключа Supabase
+                supabase_url = os.getenv('SUPABASE_URL')
+                supabase_key = os.getenv('SUPABASE_ANON_KEY')
+                
+                if supabase_url and supabase_key:
+                    # Прямой запрос через API
+                    url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
+                    headers = {
+                        "apikey": supabase_key,
+                        "Authorization": f"Bearer {supabase_key}",
+                        "Content-Type": "application/json"
+                    }
+                    
+                    # SQL-команда для добавления столбца и обновления кэша
+                    sql_query = """
+                    ALTER TABLE channel_analysis 
+                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+                    
+                    NOTIFY pgrst, 'reload schema';
+                    """
+                    
+                    response = requests.post(url, json={"query": sql_query}, headers=headers)
+                    
+                    if response.status_code in [200, 204]:
+                        logger.info("Столбец updated_at успешно добавлен и кэш схемы обновлен")
+                    else:
+                        logger.warning(f"Ошибка при добавлении столбца updated_at: {response.status_code} - {response.text}")
+            except Exception as column_e:
+                logger.warning(f"Ошибка при явном добавлении столбца updated_at: {str(column_e)}")
+            
         except Exception as e:
             logger.warning(f"Ошибка при добавлении недостающих столбцов: {str(e)}")
             
