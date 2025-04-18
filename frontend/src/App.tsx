@@ -107,9 +107,12 @@ interface DetailedPost {
 // Тип для изображения поста
 interface PostImage {
   url: string;
+  id?: string;
+  preview_url?: string;
   alt?: string;
   author?: string;
   author_url?: string;
+  source?: string;
 }
 
 // Тип для плана публикаций
@@ -833,80 +836,63 @@ function App() {
     }
   };
 
-  // Сохранение поста с правильной обработкой
+  // Функция сохранения поста
   const handleSavePost = async () => {
     if (!selectedIdea || !detailedPost) {
-      setError("Пожалуйста, выберите идею и создайте пост перед сохранением");
-        return; 
+      setError("Нет данных для сохранения");
+      return;
     }
 
     setIsSavingPost(true);
     setError("");
-    setSuccess("");
-
-    // Сохраняем выбранные изображения перед сохранением поста
-    const savedImageIds: string[] = [];
-    
-    // Проверяем, есть ли изображения в детализированном посте
-    if (detailedPost.images && detailedPost.images.length > 0) {
-      for (const img of detailedPost.images) {
-        // Проверяем, что изображение имеет url перед сохранением
-        if (img && img.url) {
-          try {
-            // Генерируем уникальный ID для изображения, если его нет
-            const imageId = `img_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-            
-            // Сохраняем изображение в базе данных
-            const response = await axios.post(`${API_BASE_URL}/save-image`, {
-              id: imageId,
-              url: img.url,
-              alt_description: img.alt || "",
-              source: "unsplash"
-            }, {
-              headers: { "x-telegram-user-id": userId ? Number(userId) : 'unknown' }
-            });
-            
-            savedImageIds.push(imageId);
-            console.log("Изображение успешно сохранено:", response.data);
-          } catch (error) {
-            // Логируем ошибку, но продолжаем процесс - не прерываем сохранение поста из-за ошибки с изображением
-            console.error("Ошибка при сохранении изображения:", error);
-            setError(`Ошибка при сохранении изображения: ${error instanceof Error ? error.message : String(error)}`);
-          }
-        } else {
-          console.warn("Пропущено изображение без URL:", img);
-        }
-      }
-    }
 
     try {
-      const postData = {
-        topic_idea: selectedIdea?.topic_idea || "",
-        format_style: selectedIdea?.format_style || "",
-        post_text: detailedPost.post_text,
-        channel_name: selectedIdea?.channel_name || "",
-        target_date: selectedDate,
-        images: savedImageIds
+      // Определяем URL изображения, если оно выбрано
+      let imageUrl: string | undefined = undefined;
+      let imagesIds: string[] | undefined = undefined;
+
+      if (selectedImage !== null && detailedPost.images && detailedPost.images[selectedImage]) {
+        const selectedImg = detailedPost.images[selectedImage];
+        
+        // Если изображение из Unsplash или другого внешнего источника, используем его URL и ID
+        if (selectedImg.id && selectedImg.source) {
+          imagesIds = [selectedImg.id];
+        } else {
+          // Для пользовательских изображений используем URL
+          imageUrl = selectedImg.url;
+        }
+      }
+
+      // Создаем объект поста для сохранения
+      const postToSave = {
+        target_date: selectedDate.toISOString().split('T')[0],
+        topic_idea: selectedIdea.topic_idea,
+        format_style: selectedIdea.format_style,
+        final_text: detailedPost.post_text,
+        image_url: imageUrl,
+        images_ids: imagesIds,
+        channel_name: selectedIdea.channel_name
       };
 
-      console.log("Сохраняемые данные поста:", postData);
-      
-      const response = await axios.post(`${API_BASE_URL}/posts`, postData, {
-        headers: { "x-telegram-user-id": userId ? Number(userId) : 'unknown' }
+      // Отправляем запрос на сохранение поста
+      const response = await axios.post('/posts', postToSave, {
+        headers: {
+          'x-telegram-user-id': userId
+        }
       });
 
-      console.log("Пост успешно сохранен:", response.data);
-      setSuccess("Пост успешно сохранен!");
-      
-      // Обновляем список сохраненных постов
-      fetchSavedPosts();
-      
-      // Очищаем выбранные данные
-      setSelectedIdea(null);
-      setDetailedPost(null);
-    } catch (error) {
-      console.error("Ошибка при сохранении поста:", error);
-      setError(`Ошибка при сохранении поста: ${error instanceof Error ? error.message : String(error)}`);
+      if (response.data) {
+        setSuccess("Пост успешно сохранен");
+        
+        // Обновляем список сохраненных постов
+        await fetchSavedPosts();
+        
+        // Переходим в календарь для просмотра созданного поста
+        setCurrentView('calendar');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении поста');
+      console.error('Ошибка при сохранении поста:', err);
     } finally {
       setIsSavingPost(false);
     }
@@ -1149,6 +1135,20 @@ function App() {
       setSelectedImage(null);
       setError("");
 
+      // Проверяем кэш, если детали уже были сгенерированы
+      if (detailsCache && detailsCache[idea.id]) {
+        setDetailedPost(detailsCache[idea.id]);
+        setIsDetailGenerating(false);
+        setCurrentView('details');
+        
+        // Устанавливаем первое изображение как выбранное, если есть изображения
+        if (detailsCache[idea.id].images.length > 0) {
+          setSelectedImage(0);
+        }
+        
+        return;
+      }
+
       // Запрос на генерацию деталей поста
       const response = await axios.post(
         `${API_BASE_URL}/generate-post-details`,
@@ -1169,10 +1169,13 @@ function App() {
         const newDetails = {
           post_text: response.data.generated_text || 'Не удалось сгенерировать текст поста.',
           images: response.data.found_images ? response.data.found_images.map((img: any) => ({
+            id: img.id,
             url: img.regular_url || img.preview_url,
+            preview_url: img.preview_url,
             alt: img.description,
             author: img.author_name,
-            author_url: img.author_url
+            author_url: img.author_url,
+            source: img.source
           })) : []
         };
         
