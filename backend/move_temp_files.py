@@ -129,6 +129,30 @@ def add_missing_columns() -> bool:
     except Exception as e:
         logger.error(f"Ошибка при добавлении столбца author_url: {str(e)}")
     
+    # Добавление столбца preview_url в таблицу saved_images
+    logger.info("Добавление столбца preview_url в таблицу saved_images")
+    try:
+        add_column_cmd = "ALTER TABLE saved_images ADD COLUMN IF NOT EXISTS preview_url TEXT"
+        
+        if execute_sql_command(add_column_cmd):
+            logger.info("Столбец preview_url успешно добавлен в таблицу saved_images")
+        else:
+            logger.warning("Возникли проблемы при добавлении столбца preview_url")
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении столбца preview_url: {str(e)}")
+    
+    # Добавление столбца updated_at в таблицу channel_analysis
+    logger.info("Добавление столбца updated_at в таблицу channel_analysis")
+    try:
+        add_column_cmd = "ALTER TABLE channel_analysis ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()"
+        
+        if execute_sql_command(add_column_cmd):
+            logger.info("Столбец updated_at успешно добавлен в таблицу channel_analysis")
+        else:
+            logger.warning("Возникли проблемы при добавлении столбца updated_at")
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении столбца updated_at: {str(e)}")
+    
     # Добавление столбца analyzed_posts_count в таблицу channel_analysis
     logger.info("Добавление столбца analyzed_posts_count в таблицу channel_analysis")
     try:
