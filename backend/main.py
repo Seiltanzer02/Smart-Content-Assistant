@@ -1783,7 +1783,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
         return PostDetailsResponse(
             generated_text=post_text,
             found_images=found_images[:5],  # Возвращаем не более 5 изображений
-            message=f"Сгенерирован пост с {len(found_images)} изображениями"
+            message=f"Сгенерирован пост с {len(found_images)} предложенными изображениями"
         )
                 
     except Exception as e:
