@@ -37,8 +37,9 @@ from telegram_utils import get_telegram_posts, get_mock_telegram_posts
 import move_temp_files
 from datetime import datetime
 import traceback
-import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
-from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
+# Убираем неиспользуемые импорты psycopg2
+# import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
+# from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -1510,7 +1511,7 @@ async def search_unsplash_images(query: str, count: int = 5, topic: str = "", fo
                                             image_data['external_id'] = photo['id'] # Используем id фото как external_id
 
                                         # Формируем SQL запрос для вставки
-                                        # Используем psycopg2.sql для безопасного экранирования данных - НЕТ, используем ручное экранирование для _execute_sql_direct
+                                        # Используем ручное экранирование для _execute_sql_direct
                                         
                                         # Функция для безопасного экранирования строк (если не импортирована глобально)
                                         def escape_sql_string(value):
