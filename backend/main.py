@@ -36,6 +36,7 @@ import aiohttp
 from telegram_utils import get_telegram_posts, get_mock_telegram_posts
 import move_temp_files
 from datetime import datetime
+import traceback
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -1483,86 +1484,77 @@ async def search_unsplash_images(query: str, count: int = 5, topic: str = "", fo
 # --- Endpoint для генерации деталей поста ---
 @app.post("/generate-post-details", response_model=PostDetailsResponse)
 async def generate_post_details(request: Request, req: GeneratePostDetailsRequest):
-    """Генерация деталей поста: текст и изображения."""
+    """Генерация детального поста на основе идеи, с текстом и релевантными изображениями."""
     try:
         # Получение telegram_user_id из заголовков
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
         if not telegram_user_id:
-            logger.warning("Запрос генерации деталей поста без идентификации пользователя Telegram")
+            logger.warning("Запрос генерации поста без идентификации пользователя Telegram")
             return PostDetailsResponse(
-                generated_text="Для генерации деталей поста необходимо авторизоваться через Telegram",
+                generated_text="Для генерации постов необходимо авторизоваться через Telegram",
                 found_images=[],
-                message="Ошибка авторизации"
+                message="Ошибка аутентификации"
             )
             
         topic_idea = req.topic_idea
         format_style = req.format_style
-        keywords = req.keywords or []
-        post_samples = req.post_samples or []
+        channel_name = req.channel_name if hasattr(req, 'channel_name') else ""
         
-        # Извлекаем имя канала из параметров, если есть
-        channel_name = request.query_params.get("channel_name", "Unknown")
-        
-        # Если нет ключа API для OpenRouter, используем заглушку
+        # Проверка наличия API ключа
         if not OPENROUTER_API_KEY:
-            logger.warning("Генерация текста поста невозможна: отсутствует OPENROUTER_API_KEY")
-            
-            # Генерируем заглушечный текст
-            generated_text = f"""Пример текста для поста на тему "{topic_idea}" в стиле "{format_style}".
-            
-Это заглушка, так как отсутствует API ключ для генерации текста. 
-В реальном приложении здесь будет сгенерированный ИИ контент на основе темы и стиля.
-
-#контент #демо #пример"""
-            
-            # Поиск изображений по ключевым словам или теме
-            images = await search_unsplash_images(
-                query="",
-                count=IMAGE_SEARCH_COUNT,
-                topic=topic_idea,
-                format_style=format_style,
-                post_text=generated_text
-            )
-            
+            logger.warning("Генерация деталей поста невозможна: отсутствует OPENROUTER_API_KEY")
             return PostDetailsResponse(
-                generated_text=generated_text,
-                found_images=images[:IMAGE_RESULTS_COUNT],  # Ограничиваем количество
-                message="Текст и изображения сгенерированы в демо-режиме (API ключи недоступны)"
+                generated_text=f"Не удалось сгенерировать пост по идее: {topic_idea}. API недоступен.",
+                found_images=[],
+                message="API для генерации текста недоступен"
             )
             
+        # Проверка наличия имени канала для получения примеров постов
+        post_samples = []
+        if channel_name:
+            try:
+                # Пытаемся получить примеры постов из имеющегося анализа канала
+                channel_data = await get_channel_analysis(request, channel_name)
+                if channel_data and "analyzed_posts_sample" in channel_data:
+                    post_samples = channel_data["analyzed_posts_sample"]
+                    logger.info(f"Получено {len(post_samples)} примеров постов для канала @{channel_name}")
+            except Exception as e:
+                logger.warning(f"Не удалось получить примеры постов для канала @{channel_name}: {e}")
+                # Продолжаем без примеров
+                pass
+                
         # Формируем системный промпт
-        system_prompt = """Ты - опытный копирайтер, специализирующийся на создании контента для социальных сетей.
-Твоя задача - написать текст поста для Telegram-канала на основе предоставленной идеи, стиля и примеров постов.
+        system_prompt = """Ты - опытный контент-маркетолог для Telegram-каналов.
+Твоя задача - сгенерировать текст поста на основе идеи и формата, который будет готов к публикации.
 
 Пост должен быть:
-1. Содержательным и интересным
+1. Хорошо структурированным и легко читаемым
 2. Соответствовать указанной теме/идее
-3. Выдержан в указанном стиле/формате
-4. Включать хештеги, если уместно
-5. Иметь длину, подходящую для Telegram (рекомендуется 500-1500 символов)
+3. Соответствовать указанному формату/стилю
+4. Иметь правильное форматирование для Telegram (если нужно - с эмодзи, абзацами, списками)
 
-ВАЖНО:
-- НЕ ИСПОЛЬЗУЙ маркеры форматирования (**жирный**, *курсив*, ##заголовки)
-- Текст должен быть готов к публикации БЕЗ дополнительного редактирования
-- Используй только обычный текст и эмодзи
-- Не используй маркдаун или другие специальные форматы
+Не используй хэштеги, если это не является частью формата.
+Сделай пост уникальным и интересным, учитывая специфику Telegram-аудитории.
+Используй примеры постов канала, если они предоставлены, чтобы сохранить стиль."""
 
-Анализируй примеры постов, чтобы понять тональность и стиль канала. Не копируй примеры напрямую, а используй их как ориентир."""
-
-        # Формируем запрос к пользователю
-        user_prompt = f"""Напиши текст поста для Telegram-канала "@{channel_name}" на тему/идею:
+        # Формируем запрос пользователя
+        user_prompt = f"""Создай пост для Telegram-канала "@{channel_name}" на тему:
 "{topic_idea}"
 
-Стиль/формат поста:
-"{format_style}"
+Формат поста: {format_style}
 
-Примеры постов из этого канала для анализа стиля:
-{' '.join([f'Пример {i+1}: "{sample[:100]}..."' for i, sample in enumerate(post_samples[:3])])}"
+Напиши полный текст поста, который будет готов к публикации.
+"""
 
-Ключевые слова и фразы для включения в текст (опционально):
-{', '.join(keywords) if keywords else 'Нет конкретных ключевых слов, ориентируйся на тему'}
+        # Если есть примеры постов канала, добавляем их
+        if post_samples:
+            sample_text = "\n\n".join(post_samples[:3])  # Берем до 3 примеров, чтобы не превышать токены
+            user_prompt += f"""
+            
+Вот несколько примеров постов из этого канала для сохранения стиля:
 
-НАПОМИНАНИЕ: Текст должен быть готов к прямой публикации. НЕ используй маркеры форматирования (**, ##, --). Используй обычный текст."""
+{sample_text}
+"""
 
         # Настройка клиента OpenAI для использования OpenRouter
         client = AsyncOpenAI(
@@ -1570,62 +1562,124 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
             api_key=OPENROUTER_API_KEY
         )
         
-        # Запрос к API для генерации текста
-        logger.info(f"Отправка запроса на генерацию текста поста на тему '{topic_idea}'")
+        # Запрос к API
+        logger.info(f"Отправка запроса на генерацию поста по идее: {topic_idea}")
         response = await client.chat.completions.create(
             model="deepseek/deepseek-chat",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.7,  # Средняя креативность
-            max_tokens=1500,
-            timeout=60,
+            temperature=0.75,
+            max_tokens=2000,
+            timeout=120,
             extra_headers={
                 "HTTP-Referer": "https://content-manager.onrender.com",
                 "X-Title": "Smart Content Assistant"
             }
         )
         
-        # Извлечение сгенерированного текста
-        generated_text = response.choices[0].message.content.strip()
-        logger.info(f"Получен текст поста длиной {len(generated_text)} символов")
+        # Извлечение текста
+        post_text = response.choices[0].message.content.strip()
+        logger.info(f"Получен текст поста ({len(post_text)} символов)")
+
+        # Генерируем ключевые слова для поиска изображений на основе темы и текста
+        image_keywords = await generate_image_keywords(post_text, topic_idea, format_style)
+        logger.info(f"Сгенерированы ключевые слова для поиска изображений: {image_keywords}")
         
-        # Очистка текста от возможных маркеров форматирования
-        cleaned_text = generated_text
-        # Удаляем маркеры жирного текста
-        cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned_text)
-        # Удаляем маркеры курсива
-        cleaned_text = re.sub(r'\*(.*?)\*', r'\1', cleaned_text)
-        # Удаляем маркеры заголовков
-        cleaned_text = re.sub(r'#{1,6}\s+(.*?)(?:\n|$)', r'\1\n', cleaned_text)
-        # Удаляем другие возможные маркеры
-        cleaned_text = re.sub(r'__(.*?)__', r'\1', cleaned_text)
-        cleaned_text = re.sub(r'~~(.*?)~~', r'\1', cleaned_text)
-        cleaned_text = re.sub(r'\+\+(.*?)\+\+', r'\1', cleaned_text)
+        # Поиск изображений по ключевым словам
+        found_images = []
+        for keyword in image_keywords[:3]:  # Ограничиваем до 3 ключевых слов для поиска
+            try:
+                # Получаем не более 5 изображений
+                image_count = min(5 - len(found_images), 3)
+                if image_count <= 0:
+                    break
+                    
+                images = await search_unsplash_images(
+                    keyword, 
+                    count=image_count,
+                    topic=topic_idea,
+                    format_style=format_style,
+                    post_text=post_text
+                )
+                
+                # Добавляем только уникальные изображения
+                existing_ids = {img.id for img in found_images}
+                unique_images = [img for img in images if img.id not in existing_ids]
+                found_images.extend(unique_images)
+                
+                # Ограничиваем до 5 изображений всего
+                if len(found_images) >= 5:
+                    found_images = found_images[:5]
+                    break
+                    
+                logger.info(f"Найдено {len(unique_images)} уникальных изображений по ключевому слову '{keyword}'")
+            except Exception as e:
+                logger.error(f"Ошибка при поиске изображений для ключевого слова '{keyword}': {e}")
+                continue
         
-        logger.info(f"Текст очищен от маркеров форматирования")
+        # Если изображения не найдены, повторяем поиск с общей идеей
+        if not found_images:
+            try:
+                found_images = await search_unsplash_images(
+                    topic_idea, 
+                    count=5,
+                    topic=topic_idea,
+                    format_style=format_style
+                )
+                logger.info(f"Найдено {len(found_images)} изображений по основной теме")
+            except Exception as e:
+                logger.error(f"Ошибка при поиске изображений по основной теме: {e}")
+                found_images = []
         
-        # Используем ИИ для поиска оптимальных ключевых слов для изображений
-        # Запускаем поиск изображений с улучшенными параметрами
-        images = await search_unsplash_images(
-            query="",  # Пустой запрос, т.к. используем ключевые слова из ИИ
-            count=IMAGE_SEARCH_COUNT,
-            topic=topic_idea,
-            format_style=format_style,
-            post_text=cleaned_text
-        )
+        # Сохраняем найденные изображения в базе данных
+        saved_images = []
+        for image in found_images:
+            try:
+                # Создаем объект для сохранения
+                image_data = {
+                    "source": image.source,
+                    "external_id": image.id,
+                    "preview_url": image.preview_url,
+                    "regular_url": image.regular_url,
+                    "description": image.description or "",
+                    "author_name": image.author_name or "",
+                    "author_url": image.author_url or "",
+                    "user_id": telegram_user_id
+                }
+                
+                # Проверяем, существует ли уже это изображение в базе
+                if supabase:
+                    existing = await supabase.table("saved_images").select("*").eq("external_id", image.id).eq("user_id", telegram_user_id).limit(1).execute()
+                    if existing.data and len(existing.data) > 0:
+                        # Изображение уже существует
+                        saved_images.append(image)
+                        continue
+                
+                    # Сохраняем новое изображение
+                    result = await supabase.table("saved_images").insert(image_data).execute()
+                    if result.data and len(result.data) > 0:
+                        saved_images.append(image)
+                        logger.info(f"Изображение {image.id} успешно сохранено в БД")
+                    else:
+                        logger.warning(f"Не удалось сохранить изображение {image.id} в БД")
+            except Exception as e:
+                logger.error(f"Ошибка при сохранении изображения {image.id}: {e}")
+                continue
         
         return PostDetailsResponse(
-            generated_text=cleaned_text,
-            found_images=images[:IMAGE_RESULTS_COUNT],
-            message="Текст и изображения успешно сгенерированы"
+            generated_text=post_text,
+            found_images=found_images[:5],  # Возвращаем не более 5 изображений
+            message=f"Сгенерирован пост с {len(found_images)} изображениями"
         )
+                
     except Exception as e:
         logger.error(f"Ошибка при генерации деталей поста: {e}")
+        traceback.print_exc()
         return PostDetailsResponse(
-            generated_text=f"Произошла ошибка при генерации текста: {str(e)}",
-            found_images=[],  # Пустой список при ошибке
+            generated_text=f"Произошла ошибка при генерации поста: {str(e)}",
+            found_images=[],
             message=f"Ошибка: {str(e)}"
         )
 
@@ -2021,59 +2075,53 @@ async def fix_formatting_in_json_fields():
 
 @app.get("/fix-schema")
 async def fix_schema():
-    """Исправление схемы базы данных - добавление недостающего столбца updated_at и обновление кэша схемы."""
+    """Исправление схемы базы данных: добавление недостающих колонок и обновление кэша схемы."""
     try:
-        # Получение URL и ключа Supabase
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_ANON_KEY')
+        if not supabase:
+            logger.error("Клиент Supabase не инициализирован")
+            return {
+                "success": False,
+                "message": "Ошибка: не удалось подключиться к базе данных",
+                "response_code": 500
+            }
         
-        if not supabase_url or not supabase_key:
-            return {"success": False, "message": "Не найдены переменные окружения SUPABASE_URL или SUPABASE_ANON_KEY"}
+        # Прямой SQL-запрос для добавления preview_url в таблицу saved_images
+        preview_url_result = await execute_sql_direct("""
+            ALTER TABLE saved_images 
+            ADD COLUMN IF NOT EXISTS preview_url TEXT;
+        """)
         
-        # Прямой запрос через API
-        url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
-        headers = {
-            "apikey": supabase_key,
-            "Authorization": f"Bearer {supabase_key}",
-            "Content-Type": "application/json"
-        }
+        # Прямой SQL-запрос для добавления updated_at в таблицу channel_analysis
+        updated_at_result = await execute_sql_direct("""
+            ALTER TABLE channel_analysis 
+            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+        """)
         
-        # SQL-команда для добавления столбца и обновления кэша
-        sql_query = """
-        -- Добавление столбца updated_at в таблицу channel_analysis
-        ALTER TABLE channel_analysis 
-        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+        # Принудительно обновляем кэш схемы
+        refresh_result = await execute_sql_direct("""
+            NOTIFY pgrst, 'reload schema';
+        """)
         
-        -- Обновление схемы кэша для таблиц
-        NOTIFY pgrst, 'reload schema';
-        """
+        refresh_status = 200 if refresh_result.get("status_code") == 200 else 500
         
-        response = requests.post(url, json={"query": sql_query}, headers=headers)
-        
-        if response.status_code in [200, 204]:
+        if refresh_status == 200:
             logger.info("Столбец updated_at успешно добавлен и кэш схемы обновлен")
-            
-            # Дополнительно выполним запрос для обновления кэша через второй метод
-            refresh_query = "SELECT pg_notify('pgrst', 'reload schema');"
-            refresh_response = requests.post(url, json={"query": refresh_query}, headers=headers)
-            
-            return {
-                "success": True, 
-                "message": "Схема обновлена, колонка updated_at добавлена и кэш обновлен", 
-                "response_code": response.status_code,
-                "refresh_response_code": refresh_response.status_code if 'refresh_response' in locals() else None
-            }
         else:
-            logger.warning(f"Ошибка при добавлении столбца updated_at: {response.status_code} - {response.text}")
-            return {
-                "success": False, 
-                "message": f"Ошибка при добавлении столбца updated_at: {response.status_code}", 
-                "response_text": response.text
-            }
-            
+            logger.error(f"Не удалось обновить кэш схемы: {refresh_result}")
+        
+        return {
+            "success": True,
+            "message": "Схема обновлена, колонка updated_at добавлена и кэш обновлен",
+            "response_code": 200,
+            "refresh_response_code": refresh_status
+        }
     except Exception as e:
-        logger.error(f"Исключение при исправлении схемы: {str(e)}")
-        return {"success": False, "message": f"Ошибка: {str(e)}"}
+        logger.error(f"Ошибка при исправлении схемы БД: {e}")
+        return {
+            "success": False,
+            "message": f"Ошибка при исправлении схемы: {e}",
+            "response_code": 500
+        }
 
 @app.get("/check-schema")
 async def check_schema():
