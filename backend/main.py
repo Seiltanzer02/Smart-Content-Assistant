@@ -541,6 +541,14 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         # Сохранение результата анализа в базе данных (если есть telegram_user_id)
         if telegram_user_id and supabase:
             try:
+                # Перед сохранением результатов анализа вызываем функцию исправления схемы
+                try:
+                    logger.info("Вызов функции fix_schema перед сохранением результатов анализа")
+                    schema_fix_result = await fix_schema()
+                    logger.info(f"Результат исправления схемы: {schema_fix_result}")
+                except Exception as schema_error:
+                    logger.warning(f"Ошибка при исправлении схемы: {schema_error}")
+                
                 # Проверяем, существует ли уже запись для этого пользователя и канала
                 analysis_check = supabase.table("channel_analysis").select("id").eq("user_id", telegram_user_id).eq("channel_name", username).execute()
                 
@@ -1958,3 +1966,59 @@ async def fix_formatting_in_json_fields():
     except Exception as e:
         logger.error(f"Ошибка при исправлении форматирования: {str(e)}")
         # Продолжаем работу приложения даже при ошибке
+
+@app.get("/fix-schema")
+async def fix_schema():
+    """Исправление схемы базы данных - добавление недостающего столбца updated_at и обновление кэша схемы."""
+    try:
+        # Получение URL и ключа Supabase
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_ANON_KEY')
+        
+        if not supabase_url or not supabase_key:
+            return {"success": False, "message": "Не найдены переменные окружения SUPABASE_URL или SUPABASE_ANON_KEY"}
+        
+        # Прямой запрос через API
+        url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
+        headers = {
+            "apikey": supabase_key,
+            "Authorization": f"Bearer {supabase_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # SQL-команда для добавления столбца и обновления кэша
+        sql_query = """
+        -- Добавление столбца updated_at в таблицу channel_analysis
+        ALTER TABLE channel_analysis 
+        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+        
+        -- Обновление схемы кэша для таблиц
+        NOTIFY pgrst, 'reload schema';
+        """
+        
+        response = requests.post(url, json={"query": sql_query}, headers=headers)
+        
+        if response.status_code in [200, 204]:
+            logger.info("Столбец updated_at успешно добавлен и кэш схемы обновлен")
+            
+            # Дополнительно выполним запрос для обновления кэша через второй метод
+            refresh_query = "SELECT pg_notify('pgrst', 'reload schema');"
+            refresh_response = requests.post(url, json={"query": refresh_query}, headers=headers)
+            
+            return {
+                "success": True, 
+                "message": "Схема обновлена, колонка updated_at добавлена и кэш обновлен", 
+                "response_code": response.status_code,
+                "refresh_response_code": refresh_response.status_code if 'refresh_response' in locals() else None
+            }
+        else:
+            logger.warning(f"Ошибка при добавлении столбца updated_at: {response.status_code} - {response.text}")
+            return {
+                "success": False, 
+                "message": f"Ошибка при добавлении столбца updated_at: {response.status_code}", 
+                "response_text": response.text
+            }
+            
+    except Exception as e:
+        logger.error(f"Исключение при исправлении схемы: {str(e)}")
+        return {"success": False, "message": f"Ошибка: {str(e)}"}
