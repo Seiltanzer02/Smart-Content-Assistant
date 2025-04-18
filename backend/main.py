@@ -37,6 +37,8 @@ from telegram_utils import get_telegram_posts, get_mock_telegram_posts
 import move_temp_files
 from datetime import datetime
 import traceback
+import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
+from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -123,6 +125,45 @@ else:
         logger.error(f"Ошибка при инициализации Supabase: {e}")
         supabase = None
 # ---------------------------------------
+
+# --- Вспомогательная функция для прямых SQL-запросов через API Supabase ---
+async def _execute_sql_direct(sql_query: str) -> Dict[str, Any]:
+    """Выполняет прямой SQL запрос через Supabase API."""
+    supabase_url = os.getenv('SUPABASE_URL')
+    supabase_key = os.getenv('SUPABASE_ANON_KEY')
+    
+    if not supabase_url or not supabase_key:
+        logger.error("Не найдены переменные окружения SUPABASE_URL или SUPABASE_ANON_KEY для прямого SQL")
+        return {"status_code": 500, "error": "Missing Supabase credentials"}
+        
+    url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json" # Используем нашу RPC функцию
+    headers = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(url, json={"query": sql_query}, headers=headers)
+        
+        if response.status_code in [200, 204]:
+            try:
+                return {"status_code": response.status_code, "data": response.json()}
+            except json.JSONDecodeError:
+                # Для 204 ответа тела может не быть
+                return {"status_code": response.status_code, "data": None}
+        else:
+            logger.error(f"Ошибка при выполнении прямого SQL запроса: {response.status_code} - {response.text}")
+            return {"status_code": response.status_code, "error": response.text}
+            
+    except httpx.RequestError as e:
+        logger.error(f"Ошибка HTTP запроса при выполнении прямого SQL: {e}")
+        return {"status_code": 500, "error": str(e)}
+    except Exception as e:
+        logger.error(f"Непредвиденная ошибка при выполнении прямого SQL: {e}")
+        return {"status_code": 500, "error": str(e)}
+# -------------------------------------------------------------------
 
 # --- Инициализация FastAPI --- 
 app = FastAPI(
@@ -1442,10 +1483,80 @@ async def search_unsplash_images(query: str, count: int = 5, topic: str = "", fo
                                     "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
                                 }
                                 
-                                supabase.table("saved_images").insert(image_data).execute()
-                                logger.debug(f"Сохранено изображение {photo['id']} в базе данных")
+                                # Пытаемся сохранить через API
+                                try:
+                                    insert_response = supabase.table("saved_images").insert(image_data).execute()
+                                    # Добавляем проверку на успешность операции
+                                    if not hasattr(insert_response, 'data') or len(insert_response.data) == 0:
+                                         logger.warning(f"API insert для изображения {photo['id']} не вернул данных. Пробуем прямой SQL.")
+                                         raise APIError("API insert returned no data", {}) # Имитируем ошибку API
+
+                                    logger.debug(f"Сохранено изображение {photo['id']} через API")
+                                    
+                                # Обрабатываем ошибку отсутствия колонки в кеше или другие ошибки API
+                                except (APIError, Exception) as api_error:
+                                    error_details = str(api_error)
+                                    # Проверяем, связана ли ошибка с отсутствием колонки (PGRST204 или 42703)
+                                    # или если API вызов не вернул данных
+                                    if "PGRST204" in error_details or \
+                                       "column saved_images.preview_url does not exist" in error_details or \
+                                       "column saved_images.external_id does not exist" in error_details or \
+                                       "API insert returned no data" in error_details:
+                                        
+                                        logger.warning(f"Ошибка API при сохранении изображения {photo['id']} (вероятно, кеш или нет данных): {api_error}. Пробуем прямой SQL.")
+                                        
+                                        # Убедимся, что external_id есть в данных
+                                        if 'external_id' not in image_data:
+                                            image_data['external_id'] = photo['id'] # Используем id фото как external_id
+
+                                        # Формируем SQL запрос для вставки
+                                        # Используем psycopg2.sql для безопасного экранирования данных - НЕТ, используем ручное экранирование для _execute_sql_direct
+                                        
+                                        # Функция для безопасного экранирования строк (если не импортирована глобально)
+                                        def escape_sql_string(value):
+                                             if value is None:
+                                                 return 'NULL'
+                                             # Простейшее экранирование одинарных кавычек
+                                             escaped = str(value).replace("'", "''")
+                                             return f"'{escaped}'"
+
+                                        sql_query_direct = f"""
+                                        INSERT INTO saved_images (id, url, preview_url, alt, author, author_url, source, created_at, external_id) 
+                                        VALUES (
+                                            {escape_sql_string(image_data['id'])}, 
+                                            {escape_sql_string(image_data['url'])}, 
+                                            {escape_sql_string(image_data['preview_url'])}, 
+                                            {escape_sql_string(image_data['alt'])}, 
+                                            {escape_sql_string(image_data['author'])}, 
+                                            {escape_sql_string(image_data['author_url'])}, 
+                                            {escape_sql_string(image_data['source'])}, 
+                                            {escape_sql_string(image_data['created_at'])},
+                                            {escape_sql_string(image_data['external_id'])}
+                                        )
+                                        ON CONFLICT (url) DO NOTHING; 
+                                        """
+
+                                        # Выполняем прямой SQL запрос
+                                        sql_result = await _execute_sql_direct(sql_query_direct)
+                                        
+                                        if sql_result.get("status_code") in [200, 204]:
+                                            logger.info(f"Изображение {photo['id']} успешно сохранено через прямой SQL.")
+                                        else:
+                                             logger.error(f"Ошибка при сохранении изображения {photo['id']} через прямой SQL: {sql_result.get('error')}")
+                                    else:
+                                        # Если ошибка другая, просто логируем ее
+                                        logger.error(f"Неизвестная ошибка при сохранении изображения {photo['id']}: {api_error}")
+                                        
+                        # Обработка других ошибок (не APIError, не связанных с кешем)
                         except Exception as db_error:
-                            logger.error(f"Ошибка при сохранении изображения в БД: {db_error}")
+                           # Пропускаем обработанные выше ошибки APIError
+                           if not isinstance(db_error, APIError) or \
+                              ("PGRST204" not in str(db_error) and \
+                               "column saved_images.preview_url does not exist" not in str(db_error) and \
+                               "column saved_images.external_id does not exist" not in str(db_error) and \
+                               "API insert returned no data" not in str(db_error)):
+                                
+                                logger.error(f"Общая ошибка при сохранении изображения {photo['id']} в БД: {db_error}")
                 
             except Exception as e:
                 logger.error(f"Ошибка при выполнении запроса к Unsplash по ключевому слову '{keyword}': {e}")
@@ -2086,33 +2197,42 @@ async def fix_schema():
             }
         
         # Прямой SQL-запрос для добавления preview_url в таблицу saved_images
-        preview_url_result = await execute_sql_direct("""
+        preview_url_result = await _execute_sql_direct("""
             ALTER TABLE saved_images 
             ADD COLUMN IF NOT EXISTS preview_url TEXT;
         """)
         
         # Прямой SQL-запрос для добавления updated_at в таблицу channel_analysis
-        updated_at_result = await execute_sql_direct("""
+        updated_at_result = await _execute_sql_direct("""
             ALTER TABLE channel_analysis 
             ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
         """)
         
+        # Прямой SQL-запрос для добавления external_id в таблицу saved_images (если отсутствует)
+        external_id_result = await _execute_sql_direct("""
+            ALTER TABLE saved_images 
+            ADD COLUMN IF NOT EXISTS external_id TEXT;
+        """)
+
         # Принудительно обновляем кэш схемы
-        refresh_result = await execute_sql_direct("""
+        refresh_result = await _execute_sql_direct("""
             NOTIFY pgrst, 'reload schema';
         """)
         
         refresh_status = 200 if refresh_result.get("status_code") == 200 else 500
         
         if refresh_status == 200:
-            logger.info("Столбец updated_at успешно добавлен и кэш схемы обновлен")
+            logger.info("Колонки добавлены (если отсутствовали) и кэш схемы обновлен")
         else:
             logger.error(f"Не удалось обновить кэш схемы: {refresh_result}")
         
         return {
             "success": True,
-            "message": "Схема обновлена, колонка updated_at добавлена и кэш обновлен",
+            "message": "Схема обновлена, необходимые колонки добавлены (если отсутствовали) и кэш обновлен",
             "response_code": 200,
+            "preview_url_result_code": preview_url_result.get("status_code"),
+            "updated_at_result_code": updated_at_result.get("status_code"),
+            "external_id_result_code": external_id_result.get("status_code"),
             "refresh_response_code": refresh_status
         }
     except Exception as e:
