@@ -35,6 +35,7 @@ import telethon
 import aiohttp
 from telegram_utils import get_telegram_posts, get_mock_telegram_posts
 import move_temp_files
+from datetime import datetime
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -552,9 +553,12 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                 # Проверяем, существует ли уже запись для этого пользователя и канала
                 analysis_check = supabase.table("channel_analysis").select("id").eq("user_id", telegram_user_id).eq("channel_name", username).execute()
                 
+                # Получение текущей даты-времени в ISO формате для updated_at
+                current_datetime = datetime.now().isoformat()
+                
                 # Создаем словарь с данными анализа
                 analysis_data = {
-                    "user_id": telegram_user_id,
+                    "user_id": int(telegram_user_id),  # Убедимся, что user_id - целое число
                     "channel_name": username,
                     "themes": themes,
                     "styles": styles,
@@ -562,18 +566,66 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                     "sample_posts": sample_posts[:5] if len(sample_posts) > 5 else sample_posts,
                     "best_posting_time": "18:00 - 20:00 МСК",  # Временная заглушка
                     "is_sample_data": sample_data_used,
-                    "updated_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                    "updated_at": current_datetime
                 }
                 
-                # Если запись существует, обновляем ее, иначе создаем новую
-                if hasattr(analysis_check, 'data') and len(analysis_check.data) > 0:
-                    # Обновляем существующую запись
-                    result = supabase.table("channel_analysis").update(analysis_data).eq("user_id", telegram_user_id).eq("channel_name", username).execute()
-                    logger.info(f"Обновлен результат анализа для канала @{username} пользователя {telegram_user_id}")
-                else:
-                    # Создаем новую запись
-                    result = supabase.table("channel_analysis").insert(analysis_data).execute()
-                    logger.info(f"Сохранен новый результат анализа для канала @{username} пользователя {telegram_user_id}")
+                # Попробуем прямой SQL запрос для вставки/обновления данных, если обычный метод не сработает
+                try:
+                    # Если запись существует, обновляем ее, иначе создаем новую
+                    if hasattr(analysis_check, 'data') and len(analysis_check.data) > 0:
+                        # Обновляем существующую запись
+                        result = supabase.table("channel_analysis").update(analysis_data).eq("user_id", telegram_user_id).eq("channel_name", username).execute()
+                        logger.info(f"Обновлен результат анализа для канала @{username} пользователя {telegram_user_id}")
+                    else:
+                        # Создаем новую запись
+                        result = supabase.table("channel_analysis").insert(analysis_data).execute()
+                        logger.info(f"Сохранен новый результат анализа для канала @{username} пользователя {telegram_user_id}")
+                except Exception as api_error:
+                    logger.warning(f"Ошибка при сохранении через API: {api_error}. Пробуем прямой SQL запрос.")
+                    
+                    # Получаем URL и ключ Supabase
+                    supabase_url = os.getenv('SUPABASE_URL')
+                    supabase_key = os.getenv('SUPABASE_ANON_KEY')
+                    
+                    if supabase_url and supabase_key:
+                        # Прямой запрос через SQL
+                        url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
+                        headers = {
+                            "apikey": supabase_key,
+                            "Authorization": f"Bearer {supabase_key}",
+                            "Content-Type": "application/json"
+                        }
+                        
+                        # Сериализуем JSON данные для SQL запроса
+                        themes_json = json.dumps(themes)
+                        styles_json = json.dumps(styles)
+                        sample_posts_json = json.dumps(sample_posts[:5] if len(sample_posts) > 5 else sample_posts)
+                        
+                        # SQL запрос для вставки/обновления
+                        sql_query = f"""
+                        INSERT INTO channel_analysis 
+                        (user_id, channel_name, themes, styles, analyzed_posts_count, sample_posts, best_posting_time, is_sample_data, updated_at)
+                        VALUES 
+                        ({telegram_user_id}, '{username}', '{themes_json}'::jsonb, '{styles_json}'::jsonb, {len(posts)}, 
+                         '{sample_posts_json}'::jsonb, '18:00 - 20:00 МСК', {sample_data_used}, '{current_datetime}')
+                        ON CONFLICT (user_id, channel_name) 
+                        DO UPDATE SET 
+                        themes = '{themes_json}'::jsonb,
+                        styles = '{styles_json}'::jsonb,
+                        analyzed_posts_count = {len(posts)},
+                        sample_posts = '{sample_posts_json}'::jsonb,
+                        best_posting_time = '18:00 - 20:00 МСК',
+                        is_sample_data = {sample_data_used},
+                        updated_at = '{current_datetime}';
+                        """
+                        
+                        response = requests.post(url, json={"query": sql_query}, headers=headers)
+                        
+                        if response.status_code in [200, 204]:
+                            logger.info(f"Результат анализа для канала @{username} сохранен через прямой SQL запрос")
+                        else:
+                            logger.error(f"Ошибка при выполнении прямого SQL запроса: {response.status_code} - {response.text}")
+                
             except Exception as db_error:
                 logger.error(f"Ошибка при сохранении результатов анализа в БД: {db_error}")
                 errors_list.append(f"Ошибка БД: {str(db_error)}")
@@ -2021,4 +2073,213 @@ async def fix_schema():
             
     except Exception as e:
         logger.error(f"Исключение при исправлении схемы: {str(e)}")
+        return {"success": False, "message": f"Ошибка: {str(e)}"}
+
+@app.get("/check-schema")
+async def check_schema():
+    """Проверка структуры таблицы channel_analysis и содержимого кэша схемы."""
+    try:
+        # Получение URL и ключа Supabase
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_ANON_KEY')
+        
+        if not supabase_url or not supabase_key:
+            return {"success": False, "message": "Не найдены переменные окружения SUPABASE_URL или SUPABASE_ANON_KEY"}
+        
+        # Прямой запрос через API
+        url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
+        headers = {
+            "apikey": supabase_key,
+            "Authorization": f"Bearer {supabase_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # SQL запрос для проверки структуры таблицы
+        table_structure_query = """
+        SELECT column_name, data_type, is_nullable
+        FROM information_schema.columns
+        WHERE table_name = 'channel_analysis'
+        AND table_schema = 'public'
+        ORDER BY ordinal_position;
+        """
+        
+        # SQL запрос для проверки кэша схемы
+        cache_query = """
+        SELECT pg_notify('pgrst', 'reload schema');
+        SELECT 'Cache reloaded' as status;
+        """
+        
+        # Выполнение запроса для получения структуры таблицы
+        table_response = requests.post(url, json={"query": table_structure_query}, headers=headers)
+        
+        # Выполнение запроса для обновления кэша схемы
+        cache_response = requests.post(url, json={"query": cache_query}, headers=headers)
+        
+        # Проверка наличия колонки updated_at
+        updated_at_exists = False
+        columns = []
+        if table_response.status_code == 200:
+            try:
+                table_data = table_response.json()
+                columns = table_data
+                for column in table_data:
+                    if column.get('column_name') == 'updated_at':
+                        updated_at_exists = True
+                        break
+            except Exception as parse_error:
+                logger.error(f"Ошибка при разборе ответа: {parse_error}")
+        
+        # Если колонки updated_at нет, добавляем ее
+        if not updated_at_exists:
+            add_column_query = """
+            ALTER TABLE channel_analysis 
+            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+            
+            NOTIFY pgrst, 'reload schema';
+            """
+            add_column_response = requests.post(url, json={"query": add_column_query}, headers=headers)
+            
+            # Повторная проверка структуры после добавления колонки
+            table_response2 = requests.post(url, json={"query": table_structure_query}, headers=headers)
+            if table_response2.status_code == 200:
+                try:
+                    columns = table_response2.json()
+                    for column in columns:
+                        if column.get('column_name') == 'updated_at':
+                            updated_at_exists = True
+                            break
+                except Exception:
+                    pass
+        
+        return {
+            "success": True,
+            "table_structure": columns,
+            "updated_at_exists": updated_at_exists,
+            "cache_response": {
+                "status_code": cache_response.status_code,
+                "response": cache_response.json() if cache_response.status_code == 200 else None
+            }
+        }
+            
+    except Exception as e:
+        logger.error(f"Исключение при проверке схемы: {str(e)}")
+        return {"success": False, "message": f"Ошибка: {str(e)}"}
+
+@app.get("/recreate-schema")
+async def recreate_schema():
+    """Пересоздание таблицы channel_analysis с нужной структурой."""
+    try:
+        # Получение URL и ключа Supabase
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_ANON_KEY')
+        
+        if not supabase_url or not supabase_key:
+            return {"success": False, "message": "Не найдены переменные окружения SUPABASE_URL или SUPABASE_ANON_KEY"}
+        
+        # Прямой запрос через API
+        url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
+        headers = {
+            "apikey": supabase_key,
+            "Authorization": f"Bearer {supabase_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # SQL запрос для создания резервной копии данных
+        backup_query = """
+        CREATE TEMPORARY TABLE temp_channel_analysis AS
+        SELECT * FROM channel_analysis;
+        SELECT COUNT(*) AS backup_rows FROM temp_channel_analysis;
+        """
+        
+        # SQL запрос для удаления и пересоздания таблицы с нужной структурой
+        recreate_query = """
+        DROP TABLE IF EXISTS channel_analysis;
+        
+        CREATE TABLE channel_analysis (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            user_id BIGINT NOT NULL,
+            channel_name TEXT NOT NULL,
+            themes JSONB DEFAULT '[]'::jsonb,
+            styles JSONB DEFAULT '[]'::jsonb,
+            sample_posts JSONB DEFAULT '[]'::jsonb,
+            best_posting_time TEXT,
+            analyzed_posts_count INTEGER DEFAULT 0,
+            is_sample_data BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(user_id, channel_name)
+        );
+        
+        CREATE INDEX idx_channel_analysis_user_id ON channel_analysis(user_id);
+        CREATE INDEX idx_channel_analysis_channel_name ON channel_analysis(channel_name);
+        CREATE INDEX idx_channel_analysis_updated_at ON channel_analysis(updated_at);
+        
+        NOTIFY pgrst, 'reload schema';
+        SELECT 'Table recreated' AS status;
+        """
+        
+        # SQL запрос для восстановления данных из резервной копии
+        restore_query = """
+        INSERT INTO channel_analysis (
+            id, user_id, channel_name, themes, styles, sample_posts, 
+            best_posting_time, analyzed_posts_count, is_sample_data, created_at
+        )
+        SELECT 
+            id, user_id, channel_name, themes, styles, sample_posts, 
+            best_posting_time, analyzed_posts_count, is_sample_data, created_at
+        FROM temp_channel_analysis
+        ON CONFLICT (user_id, channel_name) DO NOTHING;
+        
+        SELECT COUNT(*) AS restored_rows FROM channel_analysis;
+        DROP TABLE IF EXISTS temp_channel_analysis;
+        """
+        
+        # Выполнение запроса для создания резервной копии данных
+        backup_response = requests.post(url, json={"query": backup_query}, headers=headers)
+        backup_success = backup_response.status_code == 200
+        backup_data = backup_response.json() if backup_success else None
+        
+        # Выполнение запроса для пересоздания таблицы
+        recreate_response = requests.post(url, json={"query": recreate_query}, headers=headers)
+        recreate_success = recreate_response.status_code == 200
+        
+        # Если создание резервной копии успешно, пытаемся восстановить данные
+        restore_data = None
+        restore_success = False
+        if backup_success:
+            restore_response = requests.post(url, json={"query": restore_query}, headers=headers)
+            restore_success = restore_response.status_code == 200
+            restore_data = restore_response.json() if restore_success else None
+        
+        # Финальное обновление кэша схемы
+        cache_query = """
+        NOTIFY pgrst, 'reload schema';
+        SELECT pg_sleep(1);
+        NOTIFY pgrst, 'reload schema';
+        SELECT 'Cache reloaded twice' as status;
+        """
+        cache_response = requests.post(url, json={"query": cache_query}, headers=headers)
+        
+        return {
+            "success": recreate_success,
+            "backup": {
+                "success": backup_success,
+                "data": backup_data
+            },
+            "recreate": {
+                "success": recreate_success,
+                "data": recreate_response.json() if recreate_success else None
+            },
+            "restore": {
+                "success": restore_success,
+                "data": restore_data
+            },
+            "cache_reload": {
+                "success": cache_response.status_code == 200,
+                "data": cache_response.json() if cache_response.status_code == 200 else None
+            }
+        }
+            
+    except Exception as e:
+        logger.error(f"Исключение при пересоздании схемы: {str(e)}")
         return {"success": False, "message": f"Ошибка: {str(e)}"}
