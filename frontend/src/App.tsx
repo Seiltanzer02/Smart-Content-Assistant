@@ -7,8 +7,10 @@ import { Toaster, toast } from 'react-hot-toast';
 import { ClipLoader } from 'react-spinners';
 
 // Определяем базовый URL API
-// Используем переменную окружения REACT_APP_API_URL или значение по умолчанию
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000';
+// Так как фронтенд и API на одном домене, используем пустую строку
+// чтобы axios использовал относительные пути (например, /generate-plan)
+const API_BASE_URL = '';
+// const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000'; // Убираем использование process.env
 
 // Компоненты для отображения загрузки и сообщений
 const Loading = ({ message }: { message: string }) => (
