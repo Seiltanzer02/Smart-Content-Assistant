@@ -263,12 +263,9 @@ class FoundImage(BaseModel):
 # --- Модель ответа для детализации поста --- 
 class PostDetailsResponse(BaseModel):
     generated_text: str = Field(..., description="Сгенерированный текст поста")
-    # Используем новый общий тип
     found_images: List[FoundImage] = Field([], description="Список найденных изображений из разных источников") 
     message: str = Field("", description="Дополнительное сообщение")
-    # Добавляем поле канала
     channel_name: Optional[str] = Field(None, description="Имя канала, к которому относится пост")
-    # НОВОЕ ПОЛЕ: Данные выбранного изображения
     selected_image_data: Optional[PostImage] = Field(None, description="Данные выбранного изображения")
 
 # --- Модель для СОЗДАНИЯ/ОБНОВЛЕНИЯ поста --- 
@@ -277,34 +274,14 @@ class PostData(BaseModel):
     topic_idea: str
     format_style: str
     final_text: str
-    # Сделаем image_url опциональным
-    image_url: Optional[str] = Field(None, description="URL изображения (опционально)")
-    # Добавляем поле для массива изображений
-    images_ids: Optional[List[str]] = Field(None, description="Список ID изображений")
-    # Добавляем поле канала
+    image_url: Optional[str] = Field(None, description="URL изображения (опционально)") # Оставляем для старых версий? Можно удалить позже.
+    images_ids: Optional[List[str]] = Field(None, description="Список ID изображений (устарело)") # Помечаем как устаревшее
     channel_name: Optional[str] = Field(None, description="Имя канала, к которому относится пост")
-    # НОВОЕ ПОЛЕ: Данные выбранного изображения
     selected_image_data: Optional[PostImage] = Field(None, description="Данные выбранного изображения")
-
-# Модель PostImage, дублирующая структуру из фронтенда для ясности
-# (Можно использовать FoundImage, но создадим отдельную для большей точности)
-class PostImage(BaseModel):
-    url: str
-    id: Optional[str] = None
-    preview_url: Optional[str] = None
-    alt: Optional[str] = None
-    author: Optional[str] = None
-    author_url: Optional[str] = None
-    source: Optional[str] = None
 
 # --- Модель для сохраненного поста (для ответа GET /posts) --- 
 class SavedPostResponse(PostData):
     id: str 
-    created_at: str 
-    updated_at: str
-    image_url: Optional[str] = Field(None, description="URL изображения (опционально)")
-    images_ids: Optional[List[str]] = Field(None, description="Список ID изображений")
-    channel_name: Optional[str] = Field(None, description="Имя канала, к которому относится пост")
 
 # --- Функция для получения постов Telegram через HTTP парсинг ---
 async def get_telegram_posts_via_http(username: str) -> List[str]:
