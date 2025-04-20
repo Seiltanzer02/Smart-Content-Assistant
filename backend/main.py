@@ -26,7 +26,7 @@ import uuid # Для генерации уникальных имен файло
 import mimetypes # Для определения типа файла
 from telethon.errors import RPCError
 import getpass # Для получения пароля
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response # Добавляем Response
 from fastapi.staticfiles import StaticFiles
 import time # Добавляем модуль time для работы с временем
 import requests
@@ -40,6 +40,7 @@ import traceback
 # Убираем неиспользуемые импорты psycopg2
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
 # from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
+import shutil # Добавляем импорт shutil
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -2789,3 +2790,138 @@ async def check_db_tables():
     except Exception as e:
         logger.error(f"Ошибка при проверке таблиц: {str(e)}")
         return False
+
+# --- Создаем папку для загрузок, если ее нет ---
+UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "uploads") # Используем относительный путь внутри backend
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+logger.info(f"Папка для загруженных изображений: {os.path.abspath(UPLOADS_DIR)}")
+
+# --- НОВЫЙ ЭНДПОИНТ ДЛЯ ЗАГРУЗКИ ИЗОБРАЖЕНИЙ ---
+@app.post("/upload-image")
+async def upload_image(request: Request, file: UploadFile = File(...)):
+    """Загружает файл изображения в папку uploads."""
+    telegram_user_id = request.headers.get("X-Telegram-User-Id")
+    if not telegram_user_id:
+        logger.warning("Запрос загрузки изображения без идентификации пользователя Telegram")
+        raise HTTPException(status_code=401, detail="Для загрузки изображения необходимо авторизоваться через Telegram")
+
+    try:
+        # Проверка типа файла
+        content_type = file.content_type
+        if not content_type or not content_type.startswith("image/"):
+             logger.warning(f"Попытка загрузить не изображение: {file.filename}, тип: {content_type}")
+             raise HTTPException(status_code=400, detail="Допускаются только файлы изображений (JPEG, PNG, GIF, WEBP)")
+
+        # Генерируем уникальное имя файла, сохраняя расширение
+        _, ext = os.path.splitext(file.filename)
+        # Ограничиваем допустимые расширения
+        allowed_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+        if ext.lower() not in allowed_extensions:
+             logger.warning(f"Попытка загрузить файл с недопустимым расширением: {file.filename}")
+             raise HTTPException(status_code=400, detail=f"Недопустимое расширение файла. Разрешены: {', '.join(allowed_extensions)}")
+
+        filename = f"{uuid.uuid4()}{ext.lower()}" # Приводим расширение к нижнему регистру
+        file_path = os.path.join(UPLOADS_DIR, filename)
+
+        # Сохраняем файл на диск
+        try:
+             with open(file_path, "wb") as buffer:
+                 shutil.copyfileobj(file.file, buffer)
+        except Exception as write_err:
+             logger.error(f"Ошибка при записи файла {filename} на диск: {write_err}")
+             raise HTTPException(status_code=500, detail=f"Ошибка при сохранении файла на сервере.")
+
+        logger.info(f"Пользователь {telegram_user_id} успешно загрузил изображение: {filename}")
+
+        # Возвращаем относительный URL к загруженному файлу
+        return {"url": f"/uploads/{filename}"}
+
+    except HTTPException as http_err: # Перехватываем свои же HTTPException
+        raise http_err
+    except Exception as e:
+        logger.error(f"Непредвиденная ошибка при загрузке файла: {e}", exc_info=True) # Логируем traceback
+        raise HTTPException(status_code=500, detail=f"Не удалось обработать загрузку файла: {str(e)}")
+    finally:
+        # Важно закрыть файл в любом случае
+        if file and hasattr(file, 'close') and callable(file.close):
+            await file.close()
+
+# --- МОНТИРУЕМ ПАПКУ UPLOADS ДЛЯ ОБСЛУЖИВАНИЯ ---
+# Важно монтировать ДО обработчика SPA ("/{rest_of_path:path}")
+try:
+    # Проверяем, существует ли папка
+    if os.path.isdir(UPLOADS_DIR):
+        app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+        logger.info(f"Папка '{UPLOADS_DIR}' успешно смонтирована для обслуживания по пути '/uploads'")
+    else:
+        logger.warning(f"Папка '{UPLOADS_DIR}' не найдена, обслуживание загруженных файлов не настроено.")
+except RuntimeError as mount_error:
+    logger.error(f"Ошибка при монтировании папки uploads: {mount_error}. Возможно, имя 'uploads' уже используется.")
+except Exception as e:
+     logger.error(f"Непредвиденная ошибка при монтировании папки uploads: {e}")
+
+# --- Настройка обслуживания статических файлов (SPA) ---
+# Убедимся, что этот код идет ПОСЛЕ монтирования /uploads
+# Путь к папке сборки фронтенда (предполагаем, что она на два уровня выше и в папке frontend/dist)
+static_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
+
+# ФЛАГ для монтирования статики в конце файла
+SHOULD_MOUNT_STATIC = os.path.exists(static_folder) and os.path.isdir(static_folder)
+
+if SHOULD_MOUNT_STATIC:
+    logger.info(f"Статические файлы SPA будут обслуживаться из папки: {static_folder}")
+    try: # ИСПРАВЛЕНО: Добавлен блок try...except
+        app.mount("/", StaticFiles(directory=static_folder, html=True), name="static-spa") # ИСПРАВЛЕНО: Убраны лишние `\`
+        logger.info(f"Статические файлы SPA успешно смонтированы в корневом пути '/'")
+
+        # Явно добавим обработчик для корневого пути, если StaticFiles не справляется
+        @app.get("/") # ИСПРАВЛЕНО: Убраны лишние `\`
+        async def serve_index():
+            index_path = os.path.join(static_folder, "index.html")
+            if os.path.exists(index_path):
+                 return FileResponse(index_path)
+            else:
+                 logger.error(f"Файл index.html не найден в {static_folder}")
+                 raise HTTPException(status_code=404, detail="Index file not found")
+
+        # Обработчик для всех остальных путей SPA (если StaticFiles(html=True) недостаточно)
+        # Этот обработчик ПЕРЕХВАТИТ все, что не было перехвачено ранее (/api, /uploads, etc.)
+        @app.get("/{rest_of_path:path}") # ИСПРАВЛЕНО: Убраны лишние `\`
+        async def serve_spa_catch_all(request: Request, rest_of_path: str):
+            # Исключаем API пути, чтобы избежать конфликтов (на всякий случай)
+            # Проверяем, не начинается ли путь с /api/, /docs, /openapi.json или /uploads/
+            if rest_of_path.startswith("api/") or \
+               rest_of_path.startswith("docs") or \
+               rest_of_path.startswith("openapi.json") or \
+               rest_of_path.startswith("uploads/"):
+                 # Этот код не должен выполняться, т.к. роуты API/docs/uploads определены выше, но для надежности
+                 # Логируем попытку доступа к API через SPA catch-all
+                 logger.debug(f"Запрос к '{rest_of_path}' перехвачен SPA catch-all, но проигнорирован (API/Docs/Uploads).")
+                 # Важно вернуть 404, чтобы FastAPI мог найти правильный обработчик, если он есть
+                 raise HTTPException(status_code=404, detail="Not Found (SPA Catch-all exclusion)")
+
+
+            index_path = os.path.join(static_folder, "index.html")
+            if os.path.exists(index_path):
+                # Логируем возврат index.html для SPA пути
+                logger.debug(f"Возвращаем index.html для SPA пути: '{rest_of_path}'")
+                return FileResponse(index_path)
+            else:
+                logger.error(f"Файл index.html не найден в {static_folder} для пути {rest_of_path}")
+                raise HTTPException(status_code=404, detail="Index file not found")
+
+        logger.info("Обработчики для SPA настроены.")
+
+    except RuntimeError as mount_error: # ИСПРАВЛЕНО: Добавлен блок except
+        logger.error(f"Ошибка при монтировании статических файлов SPA: {mount_error}. Возможно, имя 'static-spa' уже используется или путь '/' занят.")
+    except Exception as e: # ИСПРАВЛЕНО: Добавлен блок except
+        logger.error(f"Непредвиденная ошибка при монтировании статических файлов SPA: {e}")
+else:
+    logger.warning(f"Папка статических файлов SPA не найдена: {static_folder}")
+    logger.warning("Обслуживание SPA фронтенда не настроено. Только API endpoints доступны.")
+
+# --- Запуск сервера (обычно в конце файла) ---
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))
+    logger.info(f"Запуск сервера на порту {port}")
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
