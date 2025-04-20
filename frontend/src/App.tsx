@@ -402,7 +402,6 @@ function App() {
   // Состояния для календаря и сохраненных постов
   const [savedPosts, setSavedPosts] = useState<SavedPost[]>([]);
   const [loadingSavedPosts, setLoadingSavedPosts] = useState(false);
-  const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
   
   const [isSavingPost, setIsSavingPost] = useState(false);
@@ -469,79 +468,6 @@ function App() {
       }
     }
   }, [isAuthenticated, channelName]);
-  
-  // Формируем дни календаря при изменении месяца или сохраненных постов
-  useEffect(() => {
-    if (currentMonth) {
-      generateCalendarDays();
-    }
-  }, [currentMonth, savedPosts]);
-  
-  // Функция для генерации дней календаря
-  const generateCalendarDays = () => {
-    const year = currentMonth.getFullYear();
-    const month = currentMonth.getMonth();
-    
-    // Первый день месяца
-    const firstDay = new Date(year, month, 1);
-    // Последний день месяца
-    const lastDay = new Date(year, month + 1, 0);
-    
-    // День недели первого дня (0 - воскресенье, 1 - понедельник и т.д.)
-    let firstDayOfWeek = firstDay.getDay();
-    // Преобразуем для начала недели с понедельника (0 - понедельник, 6 - воскресенье)
-    firstDayOfWeek = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
-    
-    // Создаем массив дней для календаря
-    const days: CalendarDay[] = [];
-    
-    // Добавляем дни предыдущего месяца
-    const prevMonthLastDay = new Date(year, month, 0).getDate();
-    for (let i = firstDayOfWeek - 1; i >= 0; i--) {
-      const date = new Date(year, month - 1, prevMonthLastDay - i);
-      days.push({
-        date,
-        posts: savedPosts.filter(post => new Date(post.target_date).toDateString() === date.toDateString()),
-        isCurrentMonth: false,
-        isToday: date.toDateString() === new Date().toDateString()
-      });
-    }
-    
-    // Добавляем дни текущего месяца
-    for (let i = 1; i <= lastDay.getDate(); i++) {
-      const date = new Date(year, month, i);
-      days.push({
-        date,
-        posts: savedPosts.filter(post => new Date(post.target_date).toDateString() === date.toDateString()),
-        isCurrentMonth: true,
-        isToday: date.toDateString() === new Date().toDateString()
-      });
-    }
-    
-    // Добавляем дни следующего месяца
-    const daysToAdd = 42 - days.length; // 6 строк по 7 дней
-    for (let i = 1; i <= daysToAdd; i++) {
-      const date = new Date(year, month + 1, i);
-      days.push({
-        date,
-        posts: savedPosts.filter(post => new Date(post.target_date).toDateString() === date.toDateString()),
-        isCurrentMonth: false,
-        isToday: date.toDateString() === new Date().toDateString()
-      });
-    }
-    
-    setCalendarDays(days);
-  };
-  
-  // Функция для перемещения календаря на предыдущий месяц
-  const goToPrevMonth = () => {
-    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
-  };
-  
-  // Функция для перемещения календаря на следующий месяц
-  const goToNextMonth = () => {
-    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
-  };
   
   // Функция для загрузки сохраненных постов
   const fetchSavedPosts = async () => {
@@ -768,6 +694,25 @@ function App() {
     }
   };
 
+  // --- ДОБАВЛЕНО: Обработчик загрузки своего изображения --- 
+  const handleCustomImageUpload = (imageUrl: string) => {
+    if (!imageUrl) return;
+    // Создаем объект PostImage для загруженного файла
+    const uploadedImage: PostImage = {
+      id: `uploaded-${uuidv4()}`, // Генерируем уникальный ID
+      url: imageUrl,
+      preview_url: imageUrl, // Используем тот же URL для превью
+      alt: 'Загруженное изображение',
+      author: 'Пользователь',
+      source: 'upload' // Указываем источник
+    };
+    setSelectedImage(uploadedImage); // Устанавливаем как выбранное
+    // Опционально: можно добавить в suggestedImages, но лучше держать их раздельно
+    // setSuggestedImages(prev => [uploadedImage, ...prev]); 
+    setSuccess("Изображение успешно загружено и выбрано");
+  };
+  // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
   // Функция для открытия редактирования поста
   const startEditingPost = (post: SavedPost) => {
     setCurrentPostId(post.id);
@@ -801,16 +746,22 @@ function App() {
     setError(null);
     
     try {
-      const response = await axios.post('/save-ideas', {
+      console.log('Отправка идей на сохранение:', suggestedIdeas);
+      const response = await axios.post('/save-suggested-ideas', { 
         ideas: suggestedIdeas,
-          channel_name: channelName 
+        channel_name: channelName
+      }, {
+          headers: { 'x-telegram-user-id': userId }
       });
       
       if (response.data && response.data.message) {
-        setSuccess(response.data.message);
+        setSuccess(response.data.message); 
+        console.log('Ответ от сохранения идей:', response.data);
+      } else {
+        console.warn('Ответ от сохранения идей не содержит сообщения:', response.data);
       }
     } catch (err: any) {
-      console.error('Ошибка при сохранении идей:', err);
+      console.error('Ошибка при сохранении идей:', err.response?.data || err.message);
       setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении идей');
     } finally {
       setIsGeneratingIdeas(false);
@@ -1342,176 +1293,232 @@ function App() {
       </div>
               </div>
               
-              {/* Календарь */}
-              <div className="calendar-container">
-                {/* Заголовок с названием месяца и навигацией */}
-                <div className="calendar-header">
-                  <button 
-                    className="nav-button"
-                    onClick={() => {
-                      const newDate = new Date(currentMonth);
-                      newDate.setMonth(newDate.getMonth() - 1);
-                      setCurrentMonth(newDate);
-                    }}
-                  >
-                    &lt;
-                  </button>
-                  
-                  <h3>{currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}</h3>
-                  
-                  <button 
-                    className="nav-button"
-                    onClick={() => {
-                      const newDate = new Date(currentMonth);
-                      newDate.setMonth(newDate.getMonth() + 1);
-                      setCurrentMonth(newDate);
-                    }}
-                  >
-                    &gt;
-                  </button>
-                </div>
-                
-                {/* Дни недели */}
-                <div className="weekdays">
-                  {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day) => (
-                    <div key={day} className="weekday">{day}</div>
-                  ))}
-                </div>
-                
-                {/* Дни календаря */}
-                <div className="calendar-grid">
-                  {calendarDays.map((day, index) => (
-                    <CalendarDay 
-                      key={index} 
-                      day={day} 
-                      onEditPost={startEditingPost}
-                      onDeletePost={(postId) => {
-                        if (window.confirm('Вы уверены, что хотите удалить этот пост?')) {
-                          deletePost(postId);
-                        }
-                      }}
-                    />
-                  ))}
-                </div>
+              {/* --- НАЧАЛО: Таблица постов --- */}
+              <div className="posts-table-container">
+                 {loadingSavedPosts ? (
+                     <Loading message="Загрузка постов..." />
+                 ) : savedPosts.length > 0 ? (
+                    <table className="posts-table">
+                      <thead>
+                        <tr>
+                          <th>Дата</th>
+                          <th>Канал</th>
+                          <th>Тема/Идея</th>
+                          <th>Действия</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...savedPosts]
+                          .sort((a, b) => new Date(b.target_date).getTime() - new Date(a.target_date).getTime()) // Сортировка по убыванию даты
+                          .map((post) => (
+                            <tr key={post.id}>
+                              <td>{new Date(post.target_date).toLocaleDateString()}</td>
+                              <td>{post.channel_name || 'N/A'}</td>
+                              <td>{post.topic_idea}</td>
+                              <td>
+                                <button 
+                                  className="action-button edit-button small"
+                                  onClick={() => startEditingPost(post)}
+                                  title="Редактировать"
+                                >
+                                  <span>📝</span>
+                                </button>
+                                <button 
+                                  className="action-button delete-button small"
+                                  onClick={() => {
+                                    if (window.confirm('Вы уверены, что хотите удалить этот пост?')) {
+                                      deletePost(post.id);
+                                    }
+                                  }}
+                                  title="Удалить"
+                                >
+                                  <span>🗑️</span>
+                                </button>
+                              </td>
+                            </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                 ) : (
+                    <p>Нет сохраненных постов для выбранных каналов.</p>
+                 )}
               </div>
+              {/* --- КОНЕЦ: Таблица постов --- */}
             </div>
           )}
           
-          {/* Вид редактирования поста */}
-          {currentView === 'edit' && (
+          {/* Вид редактирования/детализации поста */}
+          {(currentView === 'edit' || currentView === 'details') && (
             <div className="view edit-view">
               <h2>{currentPostId ? 'Редактирование поста' : 'Создание нового поста'}</h2>
-              
-              {/* Индикатор загрузки при генерации деталей */}
-              {isGeneratingPostDetails && <Loading message="Генерируем детали поста..." />}
 
-              {/* Поля для редактирования (отображаются всегда, но могут быть пустыми во время загрузки) */}
-              {!isGeneratingPostDetails && (
-                <>
-                  <div className="form-group">
-                    <label>Канал:</label>
-                    <input 
-                      type="text" 
-                      value={channelName} 
-                      onChange={(e) => !currentPostId && setChannelName(e.target.value.replace(/^@/, ''))} 
-                      placeholder="Имя канала (без @)"
-                      readOnly={!!currentPostId}
-                      className={currentPostId ? 'read-only-input' : ''}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Дата публикации:</label>
-                    <input 
-                      type="date" 
-                      value={currentPostDate} 
-                      onChange={(e) => setCurrentPostDate(e.target.value)} 
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Тема/Идея:</label>
-                    <input 
-                      type="text" 
-                      value={currentPostTopic} 
-                      onChange={(e) => setCurrentPostTopic(e.target.value)} 
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Формат/Стиль:</label>
-                    <input 
-                      type="text" 
-                      value={currentPostFormat} 
-                      onChange={(e) => setCurrentPostFormat(e.target.value)} 
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Текст поста:</label>
-                    <textarea 
-                      value={currentPostText} 
-                      onChange={(e) => setCurrentPostText(e.target.value)}
-                      rows={15}
-                      placeholder="Введите или отредактируйте текст поста..."
-                      className="post-text-editor"
-                    />
-                  </div>
+              {/* Индикатор загрузки деталей */}
+              {isGeneratingPostDetails && (
+                 <div className="loading-indicator small">
+                    <div className="loading-spinner small"></div>
+                    <p>Генерация деталей поста...</p>
+                </div>
+              )}
+
+              {/* --- Основные поля поста --- */}
+              <div className="post-fields">
+                <div className="form-group">
+                  <label htmlFor="channelName">Канал:</label>
+                  <input 
+                    type="text" 
+                    id="channelName"
+                    value={channelName || ''}
+                    onChange={(e) => setChannelName(e.target.value)} 
+                    disabled 
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="postDate">Дата публикации:</label>
+                  <input 
+                    type="date" 
+                    id="postDate"
+                    value={currentPostDate}
+                    onChange={(e) => setCurrentPostDate(e.target.value)} 
+                    disabled={isSavingPost}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="postTopic">Тема/Идея:</label>
+                  <input 
+                    type="text" 
+                    id="postTopic"
+                    value={currentPostTopic}
+                    onChange={(e) => setCurrentPostTopic(e.target.value)}
+                    disabled
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="postFormat">Формат/Стиль:</label>
+                  <input 
+                    type="text" 
+                    id="postFormat"
+                    value={currentPostFormat}
+                    onChange={(e) => setCurrentPostFormat(e.target.value)}
+                    disabled
+                  />
+                </div>
+              </div>
+
+              {/* --- Редактор текста поста --- */}
+              <div className="form-group post-text-editor">
+                <label htmlFor="postText">Текст поста:</label>
+                <textarea
+                  id="postText"
+                  value={currentPostText}
+                  onChange={(e) => setCurrentPostText(e.target.value)}
+                  rows={10}
+                  placeholder="Введите или сгенерируйте текст поста..."
+                  disabled={isSavingPost || isGeneratingPostDetails}
+                />
+              </div>
+
+              {/* --- НАЧАЛО: Секция управления изображениями --- */}
+              <div className="image-management-section">
                   
-                  {/* Отображение предложенных изображений */}
+                  {/* --- Предложенные изображения (если есть) --- */}
                   {suggestedImages.length > 0 && (
-                    <div className="suggested-images-section">
-                      <h3>Предложенные изображения (выберите одно):</h3>
-                      <div className="image-gallery suggested">
-                         {suggestedImages.map((image) => (
-                          <div
-                            key={image.id}
-                            className={`image-item ${selectedImage?.id === image.id || selectedImage?.url === image.url ? 'selected' : ''}`}
-                            onClick={() => {
-                              // Передаем весь объект image в обработчик
-                              handleImageSelection(image);
-                            }}
-                          >
-                            <img src={image.preview_url || image.url} alt={image.alt || 'Suggested image'} />
-                            {image.author && (
-                              <span className="image-author">
-                                {image.author_url ? 
-                                    <a href={image.author_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>by {image.author}</a> 
-                                    : `by ${image.author}`
-                                }
-                              </span>
-                            )}
-                            {(selectedImage?.id === image.id || selectedImage?.url === image.url) && <span className="checkmark">✓</span>}
+                      <div className="suggested-images-section">
+                          <h3>Предложенные изображения:</h3>
+                          <div className="image-gallery suggested">
+                              {suggestedImages.map((image, index) => (
+                                  <div 
+                                      key={image.id || `suggested-${index}`} 
+                                      className={`image-item ${selectedImage?.id === image.id || selectedImage?.url === image.url ? 'selected' : ''}`}
+                                      onClick={() => handleImageSelection(image)}
+                                  >
+                                  <img 
+                                      src={image.preview_url || image.url} 
+                                      alt={image.alt || 'Suggested image'} 
+                                      onError={(e) => {
+                                          const target = e.target as HTMLImageElement;
+                                          target.src = 'https://via.placeholder.com/100?text=Ошибка'; 
+                                          console.error('Image load error:', image.preview_url || image.url);
+                                      }}
+                                  />
+                                  {(selectedImage?.id === image.id || selectedImage?.url === image.url) && (
+                                      <div className="checkmark">✔</div> 
+                                  )}
+                                  </div>
+                              ))}
                           </div>
-                         ))}
                       </div>
-                    </div>
-                  )}
-                  
-                  {/* Placeholder or message if no images are suggested or selected */}
-                  {!selectedImage && suggestedImages.length === 0 && (
-                      <p>Нет предложенных изображений. Вы можете сохранить пост без изображения.</p>
                   )}
 
-                  {/* ---- ДОБАВЛЯЕМ КНОПКУ СОХРАНЕНИЯ ---- */}
-                  <button
-                    onClick={handleSaveOrUpdatePost}
-                    className="action-button save-update-button"
-                    // Кнопка неактивна, если идет сохранение/генерация деталей или текст пустой
-                    disabled={isSavingPost || isGeneratingPostDetails || !currentPostText.trim()}
+                  {/* --- Блок для своего изображения: Загрузчик и Превью --- */}
+                  <div className="custom-image-section">
+                     <h4>Свое изображение:</h4>
+                      {/* Показываем загрузчик */} 
+                      <ImageUploader onImageUploaded={handleCustomImageUpload} />
+                      
+                      {/* Показываем превью ВЫБРАННОГО изображения (любого) и кнопку удаления */} 
+                      {selectedImage && (
+                          <div className="selected-image-preview">
+                              <h5>Выбранное изображение:</h5>
+                              <div className="preview-container">
+                                 <img src={selectedImage.preview_url || selectedImage.url} alt={selectedImage.alt || 'Выбрано'} />
+                                 <button 
+                                      className="action-button delete-button small remove-image-btn"
+                                      onClick={() => setSelectedImage(null)} // Сброс выбранного изображения
+                                      title="Удалить выбранное изображение"
+                                  >
+                                      <span>🗑️ Удалить</span>
+                                  </button>
+                              </div>
+                              {selectedImage.author && (
+                                <p className="image-credit">
+                                    Автор: {selectedImage.author_url ? 
+                                           <a href={selectedImage.author_url} target="_blank" rel="noopener noreferrer">{selectedImage.author}</a> 
+                                           : selectedImage.author}
+                                    {selectedImage.source && ` (${selectedImage.source})`}
+                                </p>
+                              )}
+                          </div>
+                      )}
+                  </div>
+              </div>
+              {/* --- КОНЕЦ: Секция управления изображениями --- */}                  
+
+              {/* Кнопки действий */}
+              <div className="form-actions">
+                <button 
+                    onClick={handleSaveOrUpdatePost} 
+                    className="action-button save-button"
+                    disabled={isSavingPost || isGeneratingPostDetails || !currentPostText}
                   >
-                    {isSavingPost ? (
-                      <ClipLoader size={20} color={"#fff"} />
-                    ) : (
-                      currentPostId ? 'Обновить пост' : 'Сохранить пост'
-                    )}
-                  </button>
-                  {/* ---- КОНЕЦ ДОБАВЛЕНИЯ КНОПКИ ---- */}
-                </>
-              )} 
+                    {isSavingPost ? 'Сохранение...' : (currentPostId ? 'Обновить пост' : 'Сохранить пост')}
+                </button>
+                 {/* Добавляем кнопку Отмена */}
+                 <button 
+                    onClick={() => {
+                        setCurrentView('calendar'); // Возвращаемся в календарь
+                        // Сбрасываем состояние редактирования
+                        setCurrentPostId(null);
+                        setCurrentPostDate(new Date().toISOString().split('T')[0]);
+                        setCurrentPostTopic('');
+                        setCurrentPostFormat('');
+                        setCurrentPostText('');
+                        setSelectedImage(null);
+                        setSuggestedImages([]);
+                    }}
+                    className="action-button cancel-button"
+                    disabled={isSavingPost}
+                >
+                    Отмена
+                </button>
+              </div>
+
             </div>
           )}
         </div>
       </main>
 
       <footer className="app-footer">
-        <p>Telegram User ID: {userId}</p>
+        <p>© 2024 Smart Content Assistant</p>
       </footer>
     </div>
   );

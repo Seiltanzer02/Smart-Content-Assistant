@@ -1949,7 +1949,7 @@ h1 {
 .post-image-gallery .loading-spinner.small {
   width: 20px;
   height: 20px;
-  margin-right: 10px;
+  margin: 0 auto 10px;
 }
 
 /* Улучшаем стили для календаря */
@@ -2008,92 +2008,195 @@ h1 {
 /* Стили для предложенных изображений в режиме редактирования */
 .edit-view .suggested-images-section {
   margin-top: 20px;
-  padding-top: 15px;
-  border-top: 1px solid #eee;
+  padding: 15px;
+  background-color: #f9f9f9;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
 }
 
+.edit-view .suggested-images-section h3 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  font-size: 1.1rem;
+  color: #333;
+}
+
+/* Стили для галереи предложенных изображений */
 .edit-view .image-gallery.suggested {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); /* Адаптивная сетка */
-  gap: 15px; /* Отступ между изображениями */
-  margin-top: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); /* Адаптивная сетка */
+  gap: 10px;
 }
 
 .edit-view .image-gallery.suggested .image-item {
-  position: relative; /* Для позиционирования галочки */
-  border: 2px solid transparent; /* Прозрачная рамка для сохранения размера */
-  border-radius: 8px;
-  overflow: hidden; /* Обрезать выходящее за рамки */
+  position: relative;
   cursor: pointer;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  transition: border-color 0.2s ease;
   aspect-ratio: 1 / 1; /* Делаем элементы квадратными */
-  transition: border-color 0.2s ease, transform 0.2s ease;
-  background-color: #f0f0f0; /* Фон для случаев, если изображение не загрузится */
 }
 
 .edit-view .image-gallery.suggested .image-item:hover {
-  transform: scale(1.03);
+  border-color: rgba(26, 115, 232, 0.5);
 }
 
 .edit-view .image-gallery.suggested .image-item.selected {
-  border-color: #1a73e8; /* Синяя рамка для выбранного */
+  border-color: #1a73e8;
 }
 
 .edit-view .image-gallery.suggested .image-item img {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover; /* Масштабируем изображение, сохраняя пропорции и обрезая лишнее */
+  object-fit: cover; /* Масштабируем изображение, чтобы покрыть контейнер */
   object-position: center; /* Центрируем изображение */
-  border-radius: 6px; /* Небольшое скругление внутри рамки */
+  transition: transform 0.2s ease;
 }
 
-/* Стили для галочки на выбранном изображении */
+.edit-view .image-gallery.suggested .image-item:hover img {
+  transform: scale(1.05);
+}
+
+/* Галочка для выбранного */
 .edit-view .image-gallery.suggested .image-item .checkmark {
-    position: absolute;
-    top: 5px;
-    right: 5px;
-    background-color: #1a73e8;
-    color: white;
-    border-radius: 50%;
-    width: 20px;
-    height: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    font-weight: bold;
-    opacity: 0;
-    transition: opacity 0.2s ease;
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  background-color: rgba(26, 115, 232, 0.8);
+  color: white;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: bold;
+  opacity: 0;
+  transition: opacity 0.2s ease;
 }
 
 .edit-view .image-gallery.suggested .image-item.selected .checkmark {
-    opacity: 1;
+  opacity: 1;
 }
 
-/* Стили для автора изображения (если нужно будет добавить) */
+/* Автор изображения (опционально) */
 .edit-view .image-gallery.suggested .image-item .image-author {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background-color: rgba(0, 0, 0, 0.6);
-    color: white;
-    font-size: 10px;
-    padding: 3px 5px;
-    text-align: center;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  color: white;
+  padding: 3px 5px;
+  font-size: 0.7rem;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.edit-view .image-gallery.suggested .image-item:hover .image-author {
+  opacity: 1;
 }
 
 .edit-view .image-gallery.suggested .image-item .image-author a {
-    color: #eee;
-    text-decoration: none;
+  color: #a7d7ff;
+  text-decoration: none;
+}
+.edit-view .image-gallery.suggested .image-item .image-author a:hover {
+  text-decoration: underline;
 }
 
-/* Кнопка сохранения/обновления */
 .edit-view .save-update-button {
+    /* Стили для кнопки сохранения/обновления, если нужны */
+}
+
+/* Стили для таблицы постов в календаре */
+.posts-table-container {
   margin-top: 20px;
-  padding: 12px 25px;
-  font-size: 1rem;
+  overflow-x: auto; /* Добавляем горизонтальную прокрутку, если таблица не помещается */
+}
+
+.posts-table {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.posts-table th,
+.posts-table td {
+  padding: 12px 15px;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.posts-table th {
+  background-color: #f5f5f5;
+  font-weight: 600;
+  color: #555;
+}
+
+.posts-table tbody tr:hover {
+  background-color: #f9f9f9;
+}
+
+.posts-table td {
+  color: #333;
+}
+
+.posts-table .action-button {
+  padding: 4px 8px;
+  margin-right: 5px;
+}
+
+.posts-table .edit-button {
+  background-color: transparent; /* Убираем фон для иконок */
+  border: none;
+}
+
+.posts-table .delete-button {
+  background-color: transparent; /* Убираем фон для иконок */
+  border: none;
+  color: #e53935; /* Красный цвет для кнопки удаления */
+}
+
+.posts-table .edit-button:hover span,
+.posts-table .delete-button:hover span {
+  opacity: 0.8;
+}
+
+.posts-table .action-button span {
+  font-size: 1.1rem; /* Увеличиваем размер иконок */
+}
+
+/* Удаляем старые стили сетки календаря */
+.calendar-grid,
+.calendar-weekdays,
+.calendar-day,
+.calendar-header,
+.calendar-container .nav-button {
+  display: none; /* Скрываем старые элементы */
+}
+
+/* Стили для загрузки и ошибок (оставляем и возможно адаптируем) */
+.post-image-gallery.loading,
+.post-image-gallery.error,
+.post-image-gallery.empty {
+  text-align: center;
+  padding: 20px;
+  color: #666;
+}
+
+.post-image-gallery .loading-spinner.small {
+  width: 20px;
+  height: 20px;
+  margin: 0 auto 10px;
 }
