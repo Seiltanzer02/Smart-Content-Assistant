@@ -1173,45 +1173,66 @@ async def create_post(request: Request, post_data: PostData):
         saved_image_id = None
         if selected_image:
             try:
-                # Проверяем, существует ли изображение с таким ID или URL
+                # Проверяем, существует ли изображение с таким external_id (ID из Unsplash/другого источника)
                 image_check = None
-                if selected_image.id:
-                    image_check_result = supabase.table("saved_images").select("id").eq("id", selected_image.id).limit(1).execute()
+                if selected_image.id and isinstance(selected_image.id, str): # Проверяем, что ID есть и это строка
+                    # --- ИЗМЕНЕНИЕ: Поиск по external_id ---
+                    image_check_result = supabase.table("saved_images").select("id").eq("external_id", selected_image.id).limit(1).execute()
+                    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
                     if hasattr(image_check_result, 'data') and len(image_check_result.data) > 0:
                         image_check = image_check_result.data[0]
                         
-                if not image_check and selected_image.url:
-                    image_check_result = supabase.table("saved_images").select("id").eq("url", selected_image.url).limit(1).execute()
-                    if hasattr(image_check_result, 'data') and len(image_check_result.data) > 0:
-                        image_check = image_check_result.data[0]
+                # --- УДАЛЕНО: Поиск по URL как fallback (менее надежно) ---
+                # if not image_check and selected_image.url:
+                #     image_check_result = supabase.table("saved_images").select("id").eq("url", selected_image.url).limit(1).execute()
+                #     if hasattr(image_check_result, 'data') and len(image_check_result.data) > 0:
+                #         image_check = image_check_result.data[0]
+                # --- КОНЕЦ УДАЛЕНИЯ ---
 
                 if image_check:
-                    # Изображение уже существует, используем его ID
+                    # Изображение уже существует, используем его ID (UUID)
                     saved_image_id = image_check["id"]
-                    logger.info(f"Используем существующее изображение {saved_image_id} для поста")
+                    logger.info(f"Используем существующее изображение {saved_image_id} (external: {selected_image.id}) для поста")
                 else:
                     # Изображение не найдено, сохраняем новое
-                    new_image_id = selected_image.id if selected_image.id else f"img_{uuid.uuid4()}" 
+                    # ГЕНЕРИРУЕМ НОВЫЙ UUID для нашей БД
+                    new_internal_id = str(uuid.uuid4()) 
+                    # Сохраняем внешний ID (например, Unsplash ID) в отдельное поле
+                    # --- ИЗМЕНЕНИЕ: Убедимся, что external_id это строка или None ---
+                    external_id = selected_image.id if selected_image.id and isinstance(selected_image.id, str) else None
+                    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+                    
                     image_data_to_save = {
-                        "id": new_image_id,
+                        "id": new_internal_id, # Используем наш UUID
                         "url": selected_image.url,
                         "preview_url": selected_image.preview_url or selected_image.url,
                         "alt": selected_image.alt or "",
-                        "author_name": selected_image.author or "",
+                        # --- ИЗМЕНЕНИЕ: Используем 'author' в соответствии с БД ---
+                        "author": selected_image.author or "",
+                        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
                         "author_url": selected_image.author_url or "",
                         "source": selected_image.source or "frontend_selection",
                         "user_id": int(telegram_user_id),
-                        "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                        # --- ИЗМЕНЕНИЕ: Убрал created_at, пусть база ставит default ---
+                        # "created_at": time.strftime("%Y-%m-%d %H:%M:%S"), 
+                        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+                        "external_id": external_id # Сохраняем внешний ID
                     }
                     
                     image_result = supabase.table("saved_images").insert(image_data_to_save).execute()
                     if hasattr(image_result, 'data') and len(image_result.data) > 0:
-                        saved_image_id = new_image_id
-                        logger.info(f"Сохранено новое изображение {saved_image_id} для поста")
+                        saved_image_id = new_internal_id # Используем наш ID для связи
+                        logger.info(f"Сохранено новое изображение {saved_image_id} (external: {external_id}) для поста")
                     else:
                         logger.error(f"Ошибка при сохранении нового изображения: {image_result}")
+                        # --- ДОБАВЛЕНО: Выбрасываем исключение, чтобы прервать создание поста ---
+                        raise HTTPException(status_code=500, detail=f"Ошибка при сохранении нового изображения: {getattr(image_result, 'error', 'Unknown error')}")
+                        # --- КОНЕЦ ДОБАВЛЕНИЯ ---
             except Exception as img_err:
                 logger.error(f"Ошибка при обработке/сохранении изображения: {img_err}")
+                # --- ДОБАВЛЕНО: Перевыбрасываем как HTTPException ---
+                raise HTTPException(status_code=500, detail=f"Ошибка при обработке/сохранении изображения: {str(img_err)}")
+                # --- КОНЕЦ ДОБАВЛЕНИЯ ---
         # --- КОНЕЦ: Обработка выбранного изображения --- 
 
         # Удаляем старые поля из данных для сохранения поста
@@ -1232,15 +1253,22 @@ async def create_post(request: Request, post_data: PostData):
         # --- НАЧАЛО: Создание связи поста с изображением --- 
         if saved_image_id:
             try:
-                post_image_data = {
-                    "post_id": post_id,
-                    "image_id": saved_image_id,
-                    "user_id": int(telegram_user_id)
-                }
-                supabase.table("post_images").insert(post_image_data).execute()
-                logger.info(f"Создана связь между постом {post_id} и изображением {saved_image_id}")
+                # Проверяем, есть ли уже такая связь
+                link_check = supabase.table("post_images").select("post_id").eq("post_id", post_id).eq("image_id", saved_image_id).limit(1).execute()
+                
+                if hasattr(link_check, 'data') and len(link_check.data) == 0:
+                    # Связи нет, создаем
+                    post_image_data = {
+                        "post_id": post_id,
+                        "image_id": saved_image_id,
+                        "user_id": int(telegram_user_id)
+                    }
+                    supabase.table("post_images").insert(post_image_data).execute()
+                    logger.info(f"Создана связь между постом {post_id} и изображением {saved_image_id}")
+                else:
+                    logger.info(f"Связь между постом {post_id} и изображением {saved_image_id} уже существует.")
             except Exception as rel_err:
-                logger.warning(f"Ошибка при создании связи post_images: {rel_err}")
+                logger.warning(f"Ошибка при создании/проверке связи post_images: {rel_err}")
         # --- КОНЕЦ: Создание связи поста с изображением --- 
         
         logger.info(f"Пользователь {telegram_user_id} создал пост: {post_data.topic_idea}")
@@ -1252,7 +1280,19 @@ async def create_post(request: Request, post_data: PostData):
             img_url_res = supabase.table("saved_images").select("url").eq("id", saved_image_id).maybe_single().execute()
             if img_url_res.data:
                  response_data.image_url = img_url_res.data.get("url")
-            response_data.images_ids = [saved_image_id]
+            # response_data.images_ids = [saved_image_id] # Возвращаем ID в старом поле для совместимости? Лучше убрать.
+            # Заполняем selected_image_data в ответе
+            img_data_res = supabase.table("saved_images").select("*").eq("id", saved_image_id).maybe_single().execute()
+            if img_data_res.data:
+                 response_data.selected_image_data = PostImage(
+                     id=img_data_res.data.get("id"),
+                     url=img_data_res.data.get("url"),
+                     preview_url=img_data_res.data.get("preview_url"),
+                     alt=img_data_res.data.get("alt"),
+                     author=img_data_res.data.get("author_name"),
+                     author_url=img_data_res.data.get("author_url"),
+                     source=img_data_res.data.get("source")
+                 )
 
         return response_data
         
@@ -1304,40 +1344,58 @@ async def update_post(post_id: str, request: Request, post_data: PostData):
                     logger.info(f"Используем существующее изображение {saved_image_id} для обновления поста {post_id}")
                 else:
                     # Сохраняем новое изображение
-                    new_image_id = selected_image.id if selected_image.id else f"img_{uuid.uuid4()}" 
+                    # --- НАЧАЛО ИЗМЕНЕНИЯ: Генерация UUID и сохранение external_id ---
+                    new_internal_id = str(uuid.uuid4()) # ГЕНЕРИРУЕМ НОВЫЙ UUID для нашей БД
+                    external_id = selected_image.id if selected_image.id and isinstance(selected_image.id, str) else None # Сохраняем внешний ID (например, Unsplash ID), если он строковый
+                    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+                    
                     image_data_to_save = {
-                        "id": new_image_id,
+                        # --- НАЧАЛО ИЗМЕНЕНИЯ: Используем new_internal_id и external_id ---
+                        "id": new_internal_id, # Используем наш UUID
+                        "external_id": external_id, # Сохраняем внешний ID
+                        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
                         "url": selected_image.url,
                         "preview_url": selected_image.preview_url or selected_image.url,
                         "alt": selected_image.alt or "",
-                        "author_name": selected_image.author or "",
+                        # --- ИЗМЕНЕНИЕ: Используем 'author' в соответствии с БД ---
+                        "author": selected_image.author or "",
+                        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
                         "author_url": selected_image.author_url or "",
                         "source": selected_image.source or "frontend_selection",
                         "user_id": int(telegram_user_id),
-                        "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        # "external_id": external_id # Уже добавлено выше
                     }
                     image_result = supabase.table("saved_images").insert(image_data_to_save).execute()
                     if hasattr(image_result, 'data') and len(image_result.data) > 0:
-                        saved_image_id = new_image_id
-                        logger.info(f"Сохранено новое изображение {saved_image_id} для обновления поста {post_id}")
+                        saved_image_id = new_internal_id # Используем наш ID для связи
+                        logger.info(f"Сохранено новое изображение {saved_image_id} (external: {external_id}) для обновления поста {post_id}")
                     else:
                          logger.error(f"Ошибка при сохранении нового изображения при обновлении поста: {image_result}")
+                         # Добавим выбрасывание исключения, чтобы не продолжать обновление без картинки
+                         raise HTTPException(status_code=500, detail=f"Ошибка при сохранении нового изображения: {image_result}")
             except Exception as img_err:
                 logger.error(f"Ошибка при обработке/сохранении изображения при обновлении поста: {img_err}")
+                # Если ошибка при обработке изображения, лучше не продолжать обновление
+                raise HTTPException(status_code=500, detail=f"Ошибка при обработке/сохранении изображения: {str(img_err)}")
         # --- КОНЕЦ: Обработка выбранного изображения --- 
 
         # --- НАЧАЛО: Удаление старых связей с изображениями --- 
         try:
             delete_res = supabase.table("post_images").delete().eq("post_id", post_id).execute()
-            logger.info(f"Удалено {len(delete_res.data)} старых связей для поста {post_id}")
+            logger.info(f"Удалено {len(delete_res.data) if hasattr(delete_res, 'data') else 0} старых связей для поста {post_id}")
         except Exception as del_err:
             logger.error(f"Ошибка при удалении старых связей post_images для поста {post_id}: {del_err}")
-            # Не прерываем обновление поста
+            # Прерываем обновление поста, если не удалось удалить старые связи (во избежание дублей)
+            raise HTTPException(status_code=500, detail=f"Ошибка при удалении старых связей post_images: {del_err}")
         # --- КОНЕЦ: Удаление старых связей с изображениями --- 
 
         # Создаем словарь с основными данными поста для обновления
         # Исключаем объект изображения и старые поля
         post_to_update = post_data.dict(exclude={"selected_image_data", "image_url", "images_ids"})
+        # Добавляем время обновления
+        post_to_update["updated_at"] = datetime.now().isoformat()
+
         
         # Обновление основных данных поста в Supabase
         result = supabase.table("saved_posts").update(post_to_update).eq("id", post_id).execute()
@@ -1352,15 +1410,21 @@ async def update_post(post_id: str, request: Request, post_data: PostData):
         # --- НАЧАЛО: Создание новой связи поста с изображением (если есть) --- 
         if saved_image_id:
             try:
-                post_image_data = {
-                    "post_id": post_id,
-                    "image_id": saved_image_id,
-                    "user_id": int(telegram_user_id)
-                }
-                supabase.table("post_images").insert(post_image_data).execute()
-                logger.info(f"Создана новая связь между постом {post_id} и изображением {saved_image_id}")
+                # Проверяем, что связи еще нет (на всякий случай)
+                link_check = supabase.table("post_images").select("post_id").eq("post_id", post_id).eq("image_id", saved_image_id).limit(1).execute()
+                if hasattr(link_check, 'data') and len(link_check.data) == 0:
+                    post_image_data = {
+                        "post_id": post_id,
+                        "image_id": saved_image_id,
+                        "user_id": int(telegram_user_id)
+                    }
+                    supabase.table("post_images").insert(post_image_data).execute()
+                    logger.info(f"Создана новая связь между постом {post_id} и изображением {saved_image_id}")
+                else:
+                     logger.info(f"Связь между постом {post_id} и изображением {saved_image_id} уже существует (или ошибка проверки).")
             except Exception as rel_err:
                  logger.warning(f"Ошибка при создании новой связи post_images: {rel_err}")
+                 # Не прерываем выполнение, но логируем
         # --- КОНЕЦ: Создание новой связи поста с изображением --- 
 
         logger.info(f"Пользователь {telegram_user_id} обновил пост {post_id}")
@@ -1372,12 +1436,26 @@ async def update_post(post_id: str, request: Request, post_data: PostData):
             # Пытаемся получить URL сохраненного изображения для ответа
             img_url_res = supabase.table("saved_images").select("url").eq("id", saved_image_id).maybe_single().execute()
             if img_url_res.data:
-                response_data.image_url = img_url_res.data.get("url")
-            response_data.images_ids = [saved_image_id] # Возвращаем ID в старом поле для совместимости
+                response_data.image_url = img_url_res.data.get("url") # Оставляем для совместимости?
+            # response_data.images_ids = [saved_image_id] # Возвращаем ID в старом поле для совместимости? Лучше убрать.
+            # Заполняем selected_image_data в ответе
+            img_data_res = supabase.table("saved_images").select("*").eq("id", saved_image_id).maybe_single().execute()
+            if img_data_res.data:
+                 response_data.selected_image_data = PostImage(
+                     id=img_data_res.data.get("id"),
+                     url=img_data_res.data.get("url"),
+                     preview_url=img_data_res.data.get("preview_url"),
+                     alt=img_data_res.data.get("alt"),
+                     author=img_data_res.data.get("author_name"),
+                     author_url=img_data_res.data.get("author_url"),
+                     source=img_data_res.data.get("source")
+                 )
+
         else:
             # Если изображение не выбрано, очищаем поля в ответе
             response_data.image_url = None
-            response_data.images_ids = []
+            # response_data.images_ids = []
+            response_data.selected_image_data = None
         
         return response_data
         

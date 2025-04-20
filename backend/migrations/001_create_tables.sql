@@ -19,8 +19,9 @@ DO $$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'saved_images') THEN
         CREATE TABLE IF NOT EXISTS saved_images (
-            id TEXT PRIMARY KEY,
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id TEXT NOT NULL,
+            external_id TEXT,
             url TEXT NOT NULL,
             preview_url TEXT,
             alt TEXT,
@@ -31,6 +32,11 @@ BEGIN
             description TEXT,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
+    ELSE
+        IF NOT EXISTS (SELECT FROM information_schema.columns 
+                       WHERE table_schema = 'public' AND table_name = 'saved_images' AND column_name = 'external_id') THEN
+            ALTER TABLE saved_images ADD COLUMN external_id TEXT;
+        END IF;
     END IF;
 END $$;
 
@@ -123,7 +129,7 @@ BEGIN
         CREATE TABLE IF NOT EXISTS post_images (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             post_id UUID REFERENCES saved_posts(id) ON DELETE CASCADE,
-            image_id TEXT REFERENCES saved_images(id) ON DELETE SET NULL,
+            image_id UUID REFERENCES saved_images(id) ON DELETE SET NULL,
             user_id TEXT NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
             UNIQUE(post_id, image_id)
