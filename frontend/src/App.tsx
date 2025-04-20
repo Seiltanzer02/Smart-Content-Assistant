@@ -79,7 +79,7 @@ try {
 }
 
 // Определяем типы для данных приложения
-type ViewType = 'analyze' | 'suggestions' | 'plan' | 'details' | 'calendar' | 'edit';
+type ViewType = 'analyze' | 'suggestions' | 'plan' | 'details' | 'calendar' | 'edit' | 'posts';
 
 // Тип для результата анализа
 interface AnalysisResult {
@@ -415,6 +415,10 @@ function App() {
   const [currentPostFormat, setCurrentPostFormat] = useState('');
   const [currentPostText, setCurrentPostText] = useState('');
 
+  // --- ВОССТАНОВЛЕНО: Состояние для текущего месяца календаря --- 
+  const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
+  // --- КОНЕЦ ВОССТАНОВЛЕНИЯ ---
+
   // Быстрая инициализация без localStorage
   useEffect(() => {
     // Восстанавливаем состояние из localStorage
@@ -468,6 +472,71 @@ function App() {
       }
     }
   }, [isAuthenticated, channelName]);
+  
+  // --- ВОССТАНОВЛЕНО: useEffect для генерации дней календаря --- 
+  useEffect(() => {
+    if (currentMonth && currentView === 'calendar') { // Добавляем проверку currentView
+      generateCalendarDays();
+    }
+  }, [currentMonth, savedPosts, currentView]); // Добавляем currentView в зависимости
+  // --- КОНЕЦ ВОССТАНОВЛЕНИЯ ---
+  
+  // --- ВОССТАНОВЛЕНО: Функция для генерации дней календаря --- 
+  const generateCalendarDays = () => {
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+    
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    let firstDayOfWeek = firstDay.getDay();
+    firstDayOfWeek = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
+    
+    const days: CalendarDay[] = [];
+    const prevMonthLastDay = new Date(year, month, 0).getDate();
+    for (let i = firstDayOfWeek - 1; i >= 0; i--) {
+      const date = new Date(year, month - 1, prevMonthLastDay - i);
+      days.push({
+        date,
+        posts: savedPosts.filter(post => new Date(post.target_date).toDateString() === date.toDateString()),
+        isCurrentMonth: false,
+        isToday: date.toDateString() === new Date().toDateString()
+      });
+    }
+    
+    for (let i = 1; i <= lastDay.getDate(); i++) {
+      const date = new Date(year, month, i);
+      days.push({
+        date,
+        posts: savedPosts.filter(post => new Date(post.target_date).toDateString() === date.toDateString()),
+        isCurrentMonth: true,
+        isToday: date.toDateString() === new Date().toDateString()
+      });
+    }
+    
+    const daysToAdd = 42 - days.length; // 6 строк * 7 дней
+    for (let i = 1; i <= daysToAdd; i++) {
+      const date = new Date(year, month + 1, i);
+      days.push({
+        date,
+        posts: savedPosts.filter(post => new Date(post.target_date).toDateString() === date.toDateString()),
+        isCurrentMonth: false,
+        isToday: date.toDateString() === new Date().toDateString()
+      });
+    }
+    
+    setCalendarDays(days);
+  };
+  // --- КОНЕЦ ВОССТАНОВЛЕНИЯ ---
+  
+  // --- ВОССТАНОВЛЕНО: Функции навигации по месяцам --- 
+  const goToPrevMonth = () => {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
+  };
+  
+  const goToNextMonth = () => {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
+  };
+  // --- КОНЕЦ ВОССТАНОВЛЕНИЯ ---
   
   // Функция для загрузки сохраненных постов
   const fetchSavedPosts = async () => {
@@ -1111,6 +1180,15 @@ function App() {
           >
             Календарь
           </button>
+          <button 
+            onClick={() => {
+              setCurrentView('posts');
+              fetchSavedPosts();
+            }} 
+            className={`action-button ${currentView === 'posts' ? 'active' : ''}`}
+          >
+            Посты
+          </button>
     </div>
 
         {/* Выбор канала */}
@@ -1240,12 +1318,12 @@ function App() {
                 </div>
             )}
 
-          {/* Вид календаря */}
+          {/* --- ИЗМЕНЕНИЕ: Вид календаря (восстановлено) --- */}
           {currentView === 'calendar' && (
             <div className="view calendar-view">
               <h2>Календарь публикаций</h2>
               
-              {/* Фильтр по каналам */}
+              {/* Фильтр по каналам (оставляем) */}
               <div className="channels-filter">
                 <h3>Фильтр по каналам:</h3>
                 
@@ -1293,7 +1371,103 @@ function App() {
       </div>
               </div>
               
-              {/* --- НАЧАЛО: Таблица постов --- */}
+              {/* Календарь - ВОССТАНОВЛЕННЫЙ КОД */}
+              <div className="calendar-container">
+                {/* Заголовок с названием месяца и навигацией */}
+                <div className="calendar-header">
+                  <button 
+                    className="nav-button"
+                    onClick={goToPrevMonth} // Используем восстановленную функцию
+                  >
+                    &lt;
+                  </button>
+                  
+                  <h3>{currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}</h3>
+                  
+                  <button 
+                    className="nav-button"
+                    onClick={goToNextMonth} // Используем восстановленную функцию
+                  >
+                    &gt;
+                  </button>
+                </div>
+                
+                {/* Дни недели */}
+                <div className="weekdays">
+                  {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day) => (
+                    <div key={day} className="weekday">{day}</div>
+                  ))}
+                </div>
+                
+                {/* Дни календаря */}
+                <div className="calendar-grid">
+                  {calendarDays.map((day, index) => (
+                    <CalendarDay 
+                      key={index} 
+                      day={day} 
+                      onEditPost={startEditingPost}
+                      onDeletePost={(postId) => {
+                        if (window.confirm('Вы уверены, что хотите удалить этот пост?')) {
+                          deletePost(postId);
+                        }
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+              {/* КОНЕЦ ВОССТАНОВЛЕННОГО КОДА */}
+            </div>
+          )}
+          {/* --- КОНЕЦ ИЗМЕНЕНИЯ --- */}
+          
+          {/* --- НАЧАЛО: НОВЫЙ Вид "Посты" с таблицей --- */}
+          {currentView === 'posts' && (
+            <div className="view posts-view"> {/* Добавляем класс posts-view для возможных специфичных стилей */} 
+              <h2>Список сохраненных постов</h2>
+              
+              {/* Фильтр по каналам (копируем из календаря) */}
+              <div className="channels-filter">
+                 <h3>Фильтр по каналам:</h3>
+                  <div className="channels-actions">
+                     <button 
+                        className="action-button"
+                        onClick={() => {
+                           if (channelName && !selectedChannels.includes(channelName)) {
+                              const updatedSelected = [...selectedChannels, channelName];
+                              setSelectedChannels(updatedSelected);
+                              localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
+                           }
+                        }}
+                     >
+                        + Добавить текущий канал
+                     </button>
+                     <button
+                        className="action-button"
+                        onClick={filterPostsByChannels}
+                     >
+                        Применить фильтр
+                     </button>
+                  </div>
+                  <div className="selected-channels">
+                     {selectedChannels.map((channel) => (
+                        <div key={channel} className="selected-channel">
+                           <span className="channel-name">@{channel}</span>
+                           <button 
+                              className="remove-channel"
+                              onClick={() => {
+                                 const updatedSelected = selectedChannels.filter(c => c !== channel);
+                                 setSelectedChannels(updatedSelected);
+                                 localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
+                              }}
+                           >
+                              ✕
+                           </button>
+                        </div>
+                     ))}
+                  </div>
+              </div>
+              
+              {/* Таблица постов (перемещенный код) */}
               <div className="posts-table-container">
                  {loadingSavedPosts ? (
                      <Loading message="Загрузка постов..." />
@@ -1309,7 +1483,7 @@ function App() {
                       </thead>
                       <tbody>
                         {[...savedPosts]
-                          .sort((a, b) => new Date(b.target_date).getTime() - new Date(a.target_date).getTime()) // Сортировка по убыванию даты
+                          .sort((a, b) => new Date(b.target_date).getTime() - new Date(a.target_date).getTime()) 
                           .map((post) => (
                             <tr key={post.id}>
                               <td>{new Date(post.target_date).toLocaleDateString()}</td>
@@ -1343,10 +1517,10 @@ function App() {
                     <p>Нет сохраненных постов для выбранных каналов.</p>
                  )}
               </div>
-              {/* --- КОНЕЦ: Таблица постов --- */}
             </div>
-          )}
-          
+           )}
+          {/* --- КОНЕЦ НОВОГО ВИДА "Посты" --- */}
+
           {/* Вид редактирования/детализации поста */}
           {(currentView === 'edit' || currentView === 'details') && (
             <div className="view edit-view">

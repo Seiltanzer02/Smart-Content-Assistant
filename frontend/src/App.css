@@ -2183,7 +2183,7 @@ h1 {
 .calendar-day,
 .calendar-header,
 .calendar-container .nav-button {
-  display: none; /* Скрываем старые элементы */
+  /* display: none; */
 }
 
 /* Стили для загрузки и ошибок (оставляем и возможно адаптируем) */

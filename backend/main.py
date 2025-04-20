@@ -1159,6 +1159,20 @@ async def create_post(request: Request, post_data: PostData):
         saved_image_id = None
         if selected_image:
             try:
+                # --- ДОБАВЛЕНО: Проверка наличия колонки external_id --- 
+                column_check_result = await _execute_sql_direct("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_schema = 'public' 
+                      AND table_name = 'saved_images' 
+                      AND column_name = 'external_id';
+                """)
+                if not (column_check_result.get("status_code") in [200, 204] and column_check_result.get("data")):
+                    error_msg = f"Критическая ошибка: колонка external_id НЕ НАЙДЕНА в saved_images перед запросом! Результат проверки: {column_check_result}"
+                    logger.critical(error_msg)
+                    raise HTTPException(status_code=500, detail=error_msg)
+                # --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
                 # Проверяем, существует ли изображение с таким external_id (ID из Unsplash/другого источника)
                 image_check = None
                 if selected_image.id and isinstance(selected_image.id, str): # Проверяем, что ID есть и это строка
@@ -1313,6 +1327,20 @@ async def update_post(post_id: str, request: Request, post_data: PostData):
         saved_image_id = None
         if selected_image:
             try:
+                # --- ДОБАВЛЕНО: Проверка наличия колонки external_id (аналогично create_post) --- 
+                column_check_result = await _execute_sql_direct("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_schema = 'public' 
+                      AND table_name = 'saved_images' 
+                      AND column_name = 'external_id';
+                """)
+                if not (column_check_result.get("status_code") in [200, 204] and column_check_result.get("data")):
+                    error_msg = f"Критическая ошибка: колонка external_id НЕ НАЙДЕНА в saved_images перед запросом! Результат проверки: {column_check_result}"
+                    logger.critical(error_msg)
+                    raise HTTPException(status_code=500, detail=error_msg)
+                # --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
                 # Проверяем, существует ли изображение с таким ID или URL
                 image_check = None
                 if selected_image.id:
@@ -1933,7 +1961,10 @@ async def startup_event():
             logger.info("Обновление кэша схемы PostgREST...")
             refresh_result = await _execute_sql_direct("NOTIFY pgrst, 'reload schema';")
             if refresh_result.get("status_code") in [200, 204]:
-                logger.info("Кэш схемы PostgREST обновлен.")
+                logger.info("Кэш схемы PostgREST обновлен. Добавляем небольшую задержку...")
+                # --- ДОБАВЛЕНО: Задержка для применения изменений --- 
+                await asyncio.sleep(1)
+                # --- КОНЕЦ ДОБАВЛЕНИЯ ---
             else:
                 logger.warning(f"Не удалось обновить кэш схемы PostgREST: {refresh_result}")
         else:
