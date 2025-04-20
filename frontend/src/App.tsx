@@ -388,6 +388,8 @@ function App() {
   // Состояния для функциональности приложения
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [loadingAnalysis, setLoadingAnalysis] = useState(false);
+  const [analysisLoadedFromDB, setAnalysisLoadedFromDB] = useState(false);
   const [isGeneratingIdeas, setIsGeneratingIdeas] = useState(false);
   const [suggestedIdeas, setSuggestedIdeas] = useState<SuggestedIdea[]>([]);
   const [selectedIdea, setSelectedIdea] = useState<SuggestedIdea | null>(null);
@@ -395,7 +397,7 @@ function App() {
   const [suggestedImages, setSuggestedImages] = useState<PostImage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
+  const [selectedImage, setSelectedImage] = useState<PostImage | null>(null);
 
   // Состояния для календаря и сохраненных постов
   const [savedPosts, setSavedPosts] = useState<SavedPost[]>([]);
@@ -460,8 +462,13 @@ function App() {
       
       // Загружаем сохраненные посты
       fetchSavedPosts();
+
+      // Загрузка сохраненного анализа для ТЕКУЩЕГО выбранного канала
+      if (channelName) {
+        fetchSavedAnalysis(channelName);
+      }
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, channelName]);
   
   // Формируем дни календаря при изменении месяца или сохраненных постов
   useEffect(() => {
@@ -660,14 +667,14 @@ function App() {
       format_style: string;
       final_text: string;
       channel_name?: string;
-      images_ids?: string[];
+      selected_image_data?: PostImage | null;
     } = {
       target_date: currentPostDate,
       topic_idea: currentPostTopic,
       format_style: currentPostFormat,
       final_text: currentPostText,
       channel_name: channelName || undefined,
-      images_ids: selectedImageId ? [selectedImageId] : []
+      selected_image_data: selectedImage
     };
 
     try {
@@ -697,7 +704,7 @@ function App() {
         setCurrentPostTopic('');
         setCurrentPostFormat('');
         setCurrentPostText('');
-        setSelectedImageId(null);
+        setSelectedImage(null);
         setSuggestedImages([]);
       }
     } catch (err: any) {
@@ -725,6 +732,42 @@ function App() {
     }
   };
   
+  // Функция для загрузки данных сохраненного изображения и установки его как выбранного
+  const fetchAndSetSavedImage = async (imageId: string) => {
+    if (!imageId) return;
+    try {
+      console.log(`Загрузка данных для сохраненного изображения: ${imageId}`);
+      const response = await axios.get(`${API_BASE_URL}/images/${imageId}`, {
+          headers: { 'x-telegram-user-id': userId }
+      });
+      if (response.data && !response.data.error) {
+          // Преобразуем данные из БД в формат PostImage
+          const imageData = response.data;
+          const imageObject: PostImage = {
+              id: imageData.id,
+              url: imageData.url,
+              preview_url: imageData.preview_url || imageData.url, 
+              alt: imageData.alt || '',
+              author: imageData.author_name || '', // Используем author_name из БД
+              author_url: imageData.author_url || '',
+              source: imageData.source || 'db'
+          };
+          setSelectedImage(imageObject);
+          console.log(`Установлено сохраненное изображение:`, imageObject);
+      } else {
+          console.warn(`Не удалось загрузить данные для изображения ${imageId}.`);
+          setSelectedImage(null); // Сбрасываем, если не удалось загрузить
+      }
+    } catch (err: any) {
+        if (err.response && err.response.status === 404) {
+            console.warn(`Сохраненное изображение ${imageId} не найдено (404).`);
+        } else {
+            console.error(`Ошибка при загрузке сохраненного изображения ${imageId}:`, err);
+        }
+        setSelectedImage(null); // Сбрасываем при любой ошибке
+    }
+  };
+
   // Функция для открытия редактирования поста
   const startEditingPost = (post: SavedPost) => {
     setCurrentPostId(post.id);
@@ -732,14 +775,22 @@ function App() {
     setCurrentPostTopic(post.topic_idea);
     setCurrentPostFormat(post.format_style);
     setCurrentPostText(post.final_text);
-    setSelectedImageId(post.images_ids && post.images_ids.length > 0 ? post.images_ids[0] : null);
+    // setSelectedImage(null); // Убираем старый сброс
     setChannelName(post.channel_name || '');
-    setSuggestedImages([]);
+    setSuggestedImages([]); // Очищаем предложенные
     setIsGeneratingPostDetails(false);
     setError(null);
     setSuccess(null);
-    
     setCurrentView('edit');
+
+    // Пытаемся загрузить сохраненное изображение для поста
+    const savedImageId = post.images_ids && post.images_ids.length > 0 ? post.images_ids[0] : null;
+    if (savedImageId) {
+        fetchAndSetSavedImage(savedImageId);
+    } else {
+        // Если ID изображения нет в данных поста, сбрасываем selectedImage
+        setSelectedImage(null);
+    }
   };
   
   // Функция для сохранения идей в базу данных
@@ -793,6 +844,8 @@ function App() {
     }
 
     setIsAnalyzing(true);
+    // Сбрасываем флаг загрузки из БД перед новым анализом
+    setAnalysisLoadedFromDB(false);
     setError(null);
     setSuccess(null);
     setAnalysisResult(null);
@@ -815,6 +868,8 @@ function App() {
           localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
         }
       }
+      // Устанавливаем флаг, что анализ загружен из БД
+      setAnalysisLoadedFromDB(true);
     } catch (err: any) { 
       setError(err.response?.data?.detail || err.message || 'Ошибка при анализе канала');
       console.error('Ошибка при анализе:', err);
@@ -919,7 +974,7 @@ function App() {
     setCurrentPostFormat(idea.format_style);
     setCurrentPostDate(new Date().toISOString().split('T')[0]);
     setCurrentPostText('');
-    setSelectedImageId(null);
+    setSelectedImage(null);
     setSuggestedImages([]);
     setError(null);
     setSuccess(null);
@@ -928,11 +983,13 @@ function App() {
   };
 
   // Function to handle selecting/deselecting a suggested image
-  const handleImageSelection = (imageId: string | undefined) => {
-    if (imageId !== undefined) {
-      setSelectedImageId(prevId => (prevId === imageId ? null : imageId));
+  const handleImageSelection = (image: PostImage | undefined) => {
+    if (image) {
+      // Если кликнутое изображение уже выбрано (сравниваем по ID или URL), снимаем выбор
+      // Иначе, выбираем кликнутое изображение
+      setSelectedImage(prevSelected => (prevSelected?.id === image.id || prevSelected?.url === image.url) ? null : image);
     } else {
-      console.error("Attempted to select an image with an undefined ID.");
+      console.error("Attempted to select an image with undefined data.");
     }
   };
 
@@ -946,7 +1003,7 @@ function App() {
         setError(null);
         setSuccess(null);
         setSuggestedImages([]); // Clear any potentially stale images
-        setSelectedImageId(null); // Ensure no image is pre-selected
+        setSelectedImage(null); // Ensure no image is pre-selected
 
         try {
           const response = await axios.post(`${API_BASE_URL}/generate-post-details`, {
@@ -962,8 +1019,8 @@ function App() {
 
           if (response.data) {
             console.log("Received post details:", response.data);
-            // Update the post text state
-            setCurrentPostText(response.data.post_text || '');
+            // Update the post text state - Используем generated_text!
+            setCurrentPostText(response.data.generated_text || ''); 
 
             // Process and update suggested images
             const fetchedImages = response.data.images || response.data.found_images || []; // Check multiple possible fields
@@ -977,14 +1034,20 @@ function App() {
               source: img.links?.html || 'API' // Link to image source if possible
             }));
             setSuggestedImages(formattedImages);
-            setSuccess('Детали поста и изображения загружены.'); // Inform user
+            if (!response.data.generated_text) {
+                console.warn("Received post details, but generated_text is empty.");
+                // Устанавливаем более логичную ошибку
+                setError('Не удалось сгенерировать текст для выбранной идеи. Возможно, возникла временная проблема с AI или тема/формат оказались сложными. Пожалуйста, попробуйте повторить попытку позже или выберите другую идею.');
+            }
           } else {
              console.warn('Received empty response when fetching post details.');
              setError('Не удалось получить детали поста (пустой ответ).');
           }
         } catch (err: any) {
-          setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке деталей поста');
-          console.error('Ошибка при загрузке деталей поста:', err);
+          // Улучшаем логирование и отображение ошибки
+          const errorMsg = err.response?.data?.detail || err.message || 'Ошибка при загрузке деталей поста';
+          setError(errorMsg); 
+          console.error('Ошибка при загрузке деталей поста:', errorMsg, err.response?.data || err);
         } finally {
           setIsGeneratingPostDetails(false);
         }
@@ -996,6 +1059,50 @@ function App() {
   // and when the selectedIdea that triggers the view change is set.
   // Also include userId and API_BASE_URL as they are used in the fetch.
   }, [currentView, currentPostId, selectedIdea, userId, API_BASE_URL]);
+
+  // Функция для загрузки сохраненного анализа канала
+  const fetchSavedAnalysis = async (channel: string) => {
+    if (!channel) return;
+    setLoadingAnalysis(true);
+    // Сбрасываем текущий результат, чтобы не показывать старые данные во время загрузки
+    setAnalysisResult(null);
+    // Сбрасываем флаг загрузки из БД
+    setAnalysisLoadedFromDB(false);
+    try {
+      console.log(`Загрузка сохраненного анализа для канала: ${channel}`);
+      const response = await axios.get(`${API_BASE_URL}/channel-analysis`, {
+        params: { channel_name: channel },
+        headers: { 'x-telegram-user-id': userId }
+      });
+      
+      // Проверяем, что ответ содержит данные и не является объектом ошибки
+      if (response.data && !response.data.error) {
+        console.log('Сохраненный анализ найден:', response.data);
+        setAnalysisResult(response.data); 
+        setSuccess(`Загружен сохраненный анализ для @${channel}`);
+        // Устанавливаем флаг, что анализ загружен из БД
+        setAnalysisLoadedFromDB(true);
+      } else {
+        console.log(`Сохраненный анализ для @${channel} не найден.`);
+        // Если анализ не найден (или пришла ошибка), оставляем analysisResult null
+        setAnalysisResult(null); 
+        // Можно очистить сообщение об успехе или установить сообщение о том, что анализ не найден
+        // setSuccess(null);
+      }
+    } catch (err: any) {
+      // Обрабатываем ошибку 404 (Не найдено) отдельно, чтобы не показывать как ошибку
+      if (err.response && err.response.status === 404) {
+         console.log(`Сохраненный анализ для @${channel} не найден (404).`);
+         setAnalysisResult(null);
+      } else {
+        console.error('Ошибка при загрузке сохраненного анализа:', err);
+        setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке сохраненного анализа');
+        setAnalysisResult(null); // Сбрасываем результат при ошибке
+      }
+    } finally {
+      setLoadingAnalysis(false);
+    }
+  };
 
   // Компонент загрузки
   if (loading) {
@@ -1094,16 +1201,28 @@ function App() {
         </button>
       </div>
 
-              {isAnalyzing && (
-                <div className="loading-indicator">
-                  <div className="loading-spinner"></div>
-                  <p>Анализируем канал...</p>
-                </div>
+              {/* Добавляем индикатор загрузки сохраненного анализа */}
+              {loadingAnalysis && (
+                  <div className="loading-indicator small">
+                      <div className="loading-spinner small"></div>
+                      <p>Загрузка сохраненного анализа...</p>
+                  </div>
               )}
+
+      {isAnalyzing && (
+        <div className="loading-indicator">
+          <div className="loading-spinner"></div>
+          <p>Анализируем канал...</p>
+        </div>
+      )}
 
       {analysisResult && (
           <div className="results-container">
               <h3>Результаты анализа:</h3>
+              {/* Показываем сообщение, если анализ был загружен из БД */}
+              {analysisLoadedFromDB && !isAnalyzing && (
+                <p className="info-message small"><em>Результаты загружены из сохраненных данных.</em></p>
+              )}
               <p><strong>Темы:</strong> {analysisResult.themes.join(', ')}</p>
               <p><strong>Стили:</strong> {analysisResult.styles.join(', ')}</p>
                   <p><strong>Лучшее время для постинга:</strong> {analysisResult.best_posting_time}</p>
@@ -1112,7 +1231,7 @@ function App() {
               <button 
                     onClick={generateIdeas} 
                     className="action-button generate-button"
-                    disabled={isGeneratingIdeas}
+                    disabled={isGeneratingIdeas || !analysisResult} 
                   >
                     {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать идеи'}
               </button>
@@ -1161,7 +1280,9 @@ function App() {
                 <p>
                   {analysisResult 
                     ? 'Нажмите "Сгенерировать идеи" на вкладке Анализ, чтобы создать новые идеи для контента.' 
-                    : 'Сначала выполните анализ канала на вкладке "Анализ".'
+                    : loadingAnalysis 
+                        ? 'Загрузка сохраненного анализа...' 
+                        : 'Сначала выполните анализ канала на вкладке "Анализ" или выберите канал с сохраненным анализом.'
                   }
                 </p>
               ) : null}
@@ -1341,10 +1462,10 @@ function App() {
                          {suggestedImages.map((image) => (
                           <div
                             key={image.id}
-                            className={`image-item ${selectedImageId === image.id ? 'selected' : ''}`}
+                            className={`image-item ${selectedImage?.id === image.id || selectedImage?.url === image.url ? 'selected' : ''}`}
                             onClick={() => {
-                              // Use the handler function
-                              handleImageSelection(image.id);
+                              // Передаем весь объект image в обработчик
+                              handleImageSelection(image);
                             }}
                           >
                             <img src={image.preview_url || image.url} alt={image.alt || 'Suggested image'} />
@@ -1356,7 +1477,7 @@ function App() {
                                 }
                               </span>
                             )}
-                            {selectedImageId === image.id && <span className="checkmark">✓</span>}
+                            {(selectedImage?.id === image.id || selectedImage?.url === image.url) && <span className="checkmark">✓</span>}
                           </div>
                          ))}
                       </div>
@@ -1364,10 +1485,24 @@ function App() {
                   )}
                   
                   {/* Placeholder or message if no images are suggested or selected */}
-                  {!selectedImageId && suggestedImages.length === 0 && (
+                  {!selectedImage && suggestedImages.length === 0 && (
                       <p>Нет предложенных изображений. Вы можете сохранить пост без изображения.</p>
                   )}
 
+                  {/* ---- ДОБАВЛЯЕМ КНОПКУ СОХРАНЕНИЯ ---- */}
+                  <button
+                    onClick={handleSaveOrUpdatePost}
+                    className="action-button save-update-button"
+                    // Кнопка неактивна, если идет сохранение/генерация деталей или текст пустой
+                    disabled={isSavingPost || isGeneratingPostDetails || !currentPostText.trim()}
+                  >
+                    {isSavingPost ? (
+                      <ClipLoader size={20} color={"#fff"} />
+                    ) : (
+                      currentPostId ? 'Обновить пост' : 'Сохранить пост'
+                    )}
+                  </button>
+                  {/* ---- КОНЕЦ ДОБАВЛЕНИЯ КНОПКИ ---- */}
                 </>
               )} 
             </div>
