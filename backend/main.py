@@ -260,12 +260,23 @@ class FoundImage(BaseModel):
     author_name: Optional[str] = None
     author_url: Optional[str] = None
 
+# --- Определение PostImage ПЕРЕД его использованием --- 
+class PostImage(BaseModel):
+    url: str
+    id: Optional[str] = None
+    preview_url: Optional[str] = None
+    alt: Optional[str] = None
+    author: Optional[str] = None # Соответствует author_name в БД
+    author_url: Optional[str] = None
+    source: Optional[str] = None
+
 # --- Модель ответа для детализации поста --- 
 class PostDetailsResponse(BaseModel):
     generated_text: str = Field(..., description="Сгенерированный текст поста")
     found_images: List[FoundImage] = Field([], description="Список найденных изображений из разных источников") 
     message: str = Field("", description="Дополнительное сообщение")
     channel_name: Optional[str] = Field(None, description="Имя канала, к которому относится пост")
+    # Теперь PostImage определен выше
     selected_image_data: Optional[PostImage] = Field(None, description="Данные выбранного изображения")
 
 # --- Модель для СОЗДАНИЯ/ОБНОВЛЕНИЯ поста --- 
@@ -277,11 +288,21 @@ class PostData(BaseModel):
     image_url: Optional[str] = Field(None, description="URL изображения (опционально)") # Оставляем для старых версий? Можно удалить позже.
     images_ids: Optional[List[str]] = Field(None, description="Список ID изображений (устарело)") # Помечаем как устаревшее
     channel_name: Optional[str] = Field(None, description="Имя канала, к которому относится пост")
+    # PostImage определен выше
     selected_image_data: Optional[PostImage] = Field(None, description="Данные выбранного изображения")
 
 # --- Модель для сохраненного поста (для ответа GET /posts) --- 
 class SavedPostResponse(PostData):
     id: str 
+    # Убираем дублирующие поля из PostData
+    # created_at: str 
+    # updated_at: str
+    # image_url: Optional[str] = Field(None, description="URL изображения (опционально)")
+    # images_ids: Optional[List[str]] = Field(None, description="Список ID изображений")
+    # channel_name: Optional[str] = Field(None, description="Имя канала, к которому относится пост")
+    # Добавляем поля, специфичные для ответа
+    created_at: str = Field(..., description="Время создания поста")
+    updated_at: str = Field(..., description="Время последнего обновления поста")
 
 # --- Функция для получения постов Telegram через HTTP парсинг ---
 async def get_telegram_posts_via_http(username: str) -> List[str]:
