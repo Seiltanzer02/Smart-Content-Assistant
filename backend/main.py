@@ -973,94 +973,77 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
         
         # Анализ ответа для извлечения плана
         plan_items = []
-        
-        # Пробуем извлечь идеи из текста
-        # Паттерн: число (день), затем тема и стиль
         lines = plan_text.split('\n')
         current_day = None
         current_topic = ""
         current_style = ""
-        
+
+        # --- НАЧАЛО: Улучшенная логика парсинга --- 
+        idea_pattern = re.compile(r"""
+            ^\s*
+            (?:\d+|[\*\-\•])\.?\s*                       # Маркер списка (число, *, -, •) - опционально
+            (?:(?:День|Day)\s*(\d+)\s*[:\.\-\|]?\s*)?    # Опциональная группа "День X:"
+            (?P<topic>.*?)
+            (?:\s*[:\-\(\[\|/]\s*(?:Стиль|Формат|Style|Format)[:\s]+(?P<style1>.+)| # Явный разделитель со словом Стиль/Формат
+               (?:\s*[-–—]\s*(?![\d\s]|$) # Дефис, если за ним не число/пробел (избегаем дат/диапазонов)
+                 (?P<style2>[^\n\r\(\[]+) # Стиль после дефиса до конца строки или скобки
+               )
+             )?
+            \s*$                                            # До конца строки
+            """, re.VERBOSE | re.IGNORECASE)
+
+        day_counter = 1
         for line in lines:
             line = line.strip()
-            if not line:
+            if not line or len(line) < 5: # Игнорируем короткие строки
                 continue
+
+            # Игнорируем строки, которые явно являются заголовками
+            if re.match(r'^(план|идеи|публикации|контент|posts|список|вот|here|day|your|content|\*\*|##).*$', line.lower()):
+                continue
+
+            match = idea_pattern.match(line)
+            if match:
+                day_from_line = match.group(1)
+                topic = match.group('topic').strip(' :-.')
+                style = match.group('style1') or match.group('style2')
                 
-            # Пробуем найти упоминание дня
-            day_match = re.search(r'(?:день|день)\s*(\d+)[:\.]', line.lower())
-            if day_match:
-                # Если у нас есть текущий день, сохраняем предыдущую идею
-                if current_day is not None and current_topic:
-                    plan_items.append(PlanItem(
-                        day=current_day,
-                        topic_idea=clean_text_formatting(current_topic.strip()),
-                        format_style=clean_text_formatting(current_style.strip()) if current_style else "Без указания стиля"
-                    ))
-                
-                # Начинаем новую идею
-                current_day = int(day_match.group(1))
-                # Извлекаем тему из оставшейся части строки
-                rest_of_line = line[day_match.end():].strip(' -:.')
-                if rest_of_line:
-                    current_topic = rest_of_line
-                    current_style = ""
-            elif "стиль:" in line.lower() or "формат:" in line.lower():
-                # Извлекаем стиль
-                style_parts = re.split(r'(?:стиль|формат)[:\s]+', line, flags=re.IGNORECASE, maxsplit=1)
-                if len(style_parts) > 1:
-                    current_style = style_parts[1].strip()
-            elif current_day is not None:
-                # Если нет явного указания на день или стиль, добавляем текст к текущей теме
-                if not current_topic:
-                    current_topic = line
-                elif not current_style and ("стиль" in line.lower() or "формат" in line.lower()):
-                    current_style = line
+                # Определяем день
+                current_day_num = None
+                if day_from_line:
+                    current_day_num = int(day_from_line)
+                elif current_day is not None:
+                     current_day_num = current_day + 1 # Инкрементируем предыдущий
                 else:
-                    current_topic += " " + line
-        
-        # Добавляем последнюю идею, если она есть
-        if current_day is not None and current_topic:
-            plan_items.append(PlanItem(
-                day=current_day,
-                topic_idea=clean_text_formatting(current_topic.strip()),
-                format_style=clean_text_formatting(current_style.strip()) if current_style else "Без указания стиля"
-            ))
-            
-        # Если не удалось извлечь идеи через регулярные выражения, используем более простой подход
-        if not plan_items:
-            day_counter = 1
-            for line in lines:
-                line = line.strip()
-                if not line or len(line) < 10:  # Игнорируем короткие строки
+                     current_day_num = day_counter # Используем счетчик строк
+
+                # Очищаем тему и стиль
+                cleaned_topic = clean_text_formatting(topic)
+                cleaned_style = clean_text_formatting(style.strip()) if style else "Без указания стиля"
+                
+                # Если стиль пустой, но был в списке запроса, выбираем случайный
+                if cleaned_style == "Без указания стиля" and styles:
+                     cleaned_style = random.choice(styles) # Берем из запроса, если не найден
+                
+                # Пропускаем, если тема пустая после очистки
+                if not cleaned_topic:
                     continue
-                
-                # Проверяем, не заголовок ли это
-                if re.match(r'^(план|идеи|публикации|контент|posts|список).*$', line.lower()):
-                    continue
-                
-                # Пытаемся найти стиль в строке
-                style_match = re.search(r'(?:стиль|формат)[:\s]+(.*?)$', line, re.IGNORECASE)
-                if style_match:
-                    format_style = cleanup_idea_title(style_match.group(1).strip())
-                    topic_idea = cleanup_idea_title(line[:style_match.start()].strip())
-                else:
-                    # Если явно не указан стиль, берем случайный из списка
-                    format_style = random.choice(styles)
-                    topic_idea = cleanup_idea_title(line)
-                
+
                 plan_items.append(PlanItem(
-                    day=day_counter,
-                    topic_idea=topic_idea,
-                    format_style=format_style
+                    day=current_day_num,
+                    topic_idea=cleaned_topic,
+                    format_style=cleaned_style
                 ))
-                day_counter += 1
-                
-                # Ограничиваем количество дней
-                if day_counter > period_days:
-                        break
-                    
+                current_day = current_day_num # Запоминаем последний найденный день
+                day_counter = current_day_num + 1 # Обновляем счетчик строк
+            else:
+                 logger.warning(f"Не удалось распарсить строку плана: {line}")
+                 # Можно добавить резервную логику или просто пропустить строку
+        # --- КОНЕЦ: Улучшенная логика парсинга ---
+
         # Если и сейчас нет идей, генерируем вручную
         if not plan_items:
+            logger.warning("Не удалось извлечь идеи из ответа LLM, генерируем базовый план.")
             for day in range(1, period_days + 1):
                 random_theme = random.choice(themes)
                 random_style = random.choice(styles)
@@ -1079,15 +1062,18 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
         # Если план получился короче запрошенного периода, дополняем
         if len(plan_items) < period_days:
             existing_days = set(item.day for item in plan_items)
-            for day in range(1, period_days + 1):
-                if day not in existing_days:
-                    random_theme = random.choice(themes)
-                    random_style = random.choice(styles)
-                    plan_items.append(PlanItem(
-                        day=day,
-                        topic_idea=f"Пост о {random_theme}",
-                        format_style=random_style
-                    ))
+            needed_days = period_days - len(plan_items)
+            logger.warning(f"План короче запрошенного ({len(plan_items)}/{period_days}), дополняем {needed_days} идеями.")
+            last_day = max(existing_days) if existing_days else 0
+            for i in range(needed_days):
+                 current_day = last_day + 1 + i
+                 random_theme = random.choice(themes)
+                 random_style = random.choice(styles)
+                 plan_items.append(PlanItem(
+                     day=current_day,
+                     topic_idea=f"(Дополнено) Пост о {random_theme}",
+                     format_style=random_style
+                 ))
         
         # Сортируем по дням еще раз
         plan_items.sort(key=lambda x: x.day)
@@ -1929,7 +1915,35 @@ async def startup_event():
     """Запуск обслуживающих процессов при старте приложения."""
     logger.info("Запуск обслуживающих процессов...")
     
-    # Проверка и добавление недостающих столбцов
+    # --- ДОБАВЛЕНО: Явная проверка и добавление external_id и обновление кэша ---
+    try:
+        if supabase:
+            logger.info("Проверка наличия колонки external_id в saved_images...")
+            # Проверяем и добавляем external_id
+            add_external_id_result = await _execute_sql_direct("""
+                ALTER TABLE saved_images 
+                ADD COLUMN IF NOT EXISTS external_id TEXT;
+            """)
+            if add_external_id_result.get("status_code") in [200, 204]:
+                 logger.info("Колонка external_id проверена/добавлена.")
+            else:
+                 logger.warning(f"Ошибка при проверке/добавлении колонки external_id: {add_external_id_result}")
+
+            # Принудительно обновляем кэш схемы PostgREST
+            logger.info("Обновление кэша схемы PostgREST...")
+            refresh_result = await _execute_sql_direct("NOTIFY pgrst, 'reload schema';")
+            if refresh_result.get("status_code") in [200, 204]:
+                logger.info("Кэш схемы PostgREST обновлен.")
+            else:
+                logger.warning(f"Не удалось обновить кэш схемы PostgREST: {refresh_result}")
+        else:
+            logger.warning("Клиент Supabase не инициализирован, проверка external_id пропущена.")
+            
+    except Exception as schema_err:
+        logger.error(f"Ошибка во время проверки/обновления схемы при старте: {schema_err}")
+    # --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
+    # Проверка и добавление недостающих столбцов (оставляем существующую логику)
     if not await check_db_tables():
         logger.error("Ошибка при проверке таблиц в базе данных!")
         # Продолжаем работу приложения даже при ошибке
@@ -2574,3 +2588,173 @@ async def recreate_schema():
     except Exception as e:
         logger.error(f"Исключение при пересоздании схемы: {str(e)}")
         return {"success": False, "message": f"Ошибка: {str(e)}"}
+
+# --- НОВЫЙ ЭНДПОИНТ для сохранения НЕСКОЛЬКИХ идей --- 
+class SaveIdeasRequest(BaseModel):
+    ideas: List[Dict[str, Any]]
+    channel_name: Optional[str] = None # Можно передать имя канала один раз
+
+@app.post("/save-suggested-ideas", response_model=Dict[str, Any])
+async def save_suggested_ideas_batch(payload: SaveIdeasRequest, request: Request):
+    """Сохраняет список предложенных идей в базу данных."""
+    telegram_user_id = request.headers.get("x-telegram-user-id")
+    if not telegram_user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if not supabase:
+        logger.error("Supabase client not initialized")
+        raise HTTPException(status_code=500, detail="Database not initialized")
+
+    saved_count = 0
+    errors = []
+    saved_ids = []
+
+    ideas_to_save = payload.ideas
+    channel_name = payload.channel_name
+    logger.info(f"Получен запрос на сохранение {len(ideas_to_save)} идей для канала {channel_name}")
+
+    # --- НАЧАЛО: Удаление старых идей для этого канала перед сохранением новых --- 
+    if channel_name:
+        try:
+            delete_result = supabase.table("suggested_ideas")\
+                .delete()\
+                .eq("user_id", int(telegram_user_id))\
+                .eq("channel_name", channel_name)\
+                .execute()
+            logger.info(f"Удалено {len(delete_result.data)} старых идей для канала {channel_name}")
+        except Exception as del_err:
+            logger.error(f"Ошибка при удалении старых идей для канала {channel_name}: {del_err}")
+            # Не прерываем выполнение, но логируем ошибку
+            errors.append(f"Ошибка удаления старых идей: {str(del_err)}")
+    # --- КОНЕЦ: Удаление старых идей --- 
+
+    records_to_insert = []
+    for idea_data in ideas_to_save:
+        try:
+            # Очищаем форматирование текста перед сохранением
+            topic_idea = clean_text_formatting(idea_data.get("topic_idea", ""))
+            format_style = clean_text_formatting(idea_data.get("format_style", ""))
+
+            if not topic_idea: # Пропускаем идеи без темы
+                continue
+
+            # Генерируем уникальный ID для идеи (используем UUID)
+            idea_id = str(uuid.uuid4())
+            record = {
+                "id": idea_id,
+                "user_id": int(telegram_user_id),
+                "channel_name": idea_data.get("channel_name") or channel_name, # Используем из идеи или общий
+                "topic_idea": topic_idea,
+                "format_style": format_style,
+                "relative_day": idea_data.get("day"),
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                # Добавляем другие поля, если они есть
+                "is_detailed": idea_data.get("is_detailed", False),
+                "status": idea_data.get("status", "new"),
+                # cleaned_title можно генерировать здесь или оставить пустым
+            }
+            records_to_insert.append(record)
+            saved_ids.append(idea_id)
+
+        except Exception as e:
+            errors.append(f"Ошибка подготовки идеи {idea_data.get('topic_idea')}: {str(e)}")
+            logger.error(f"Ошибка подготовки идеи {idea_data.get('topic_idea')}: {str(e)}")
+
+    if not records_to_insert:
+        logger.warning("Нет идей для сохранения после обработки.")
+        return {"message": "Нет корректных идей для сохранения.", "saved_count": 0, "errors": errors}
+
+    try:
+        # Сохраняем все подготовленные записи одним запросом
+        result = supabase.table("suggested_ideas").insert(records_to_insert).execute()
+
+        if hasattr(result, 'data') and result.data:
+            saved_count = len(result.data)
+            logger.info(f"Успешно сохранено {saved_count} идей батчем.")
+            return {"message": f"Успешно сохранено {saved_count} идей.", "saved_count": saved_count, "saved_ids": saved_ids, "errors": errors}
+        else:
+            error_detail = getattr(result, 'error', 'Unknown error')
+            logger.error(f"Ошибка при батч-сохранении идей: {error_detail}")
+            errors.append(f"Ошибка при батч-сохранении: {error_detail}")
+            # Пытаемся сохранить по одной, если батч не удался
+            logger.warning("Попытка сохранить идеи по одной...")
+            saved_count_single = 0
+            saved_ids_single = []
+            for record in records_to_insert:
+                 try:
+                     single_result = supabase.table("suggested_ideas").insert(record).execute()
+                     if hasattr(single_result, 'data') and single_result.data:
+                         saved_count_single += 1
+                         saved_ids_single.append(record['id'])
+                     else:
+                         single_error = getattr(single_result, 'error', 'Unknown error')
+                         errors.append(f"Ошибка сохранения идеи {record.get('topic_idea')}: {single_error}")
+                         logger.error(f"Ошибка сохранения идеи {record.get('topic_idea')}: {single_error}")
+                 except Exception as single_e:
+                     errors.append(f"Исключение при сохранении идеи {record.get('topic_idea')}: {str(single_e)}")
+                     logger.error(f"Исключение при сохранении идеи {record.get('topic_idea')}: {str(single_e)}")
+                     
+            logger.info(f"Сохранено {saved_count_single} идей по одной.")
+            return {
+                 "message": f"Сохранено {saved_count_single} идей (остальные с ошибкой).", 
+                 "saved_count": saved_count_single, 
+                 "saved_ids": saved_ids_single, 
+                 "errors": errors
+            }
+
+    except Exception as e:
+        logger.error(f"Исключение при батч-сохранении идей: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Исключение при батч-сохранении: {str(e)}")
+
+async def check_db_tables():
+    """Проверка наличия необходимых таблиц в базе данных."""
+    try:
+        # Проверка наличия таблицы suggested_ideas
+        result = supabase.table("suggested_ideas").select("id").limit(1).execute()
+        logger.info("Таблица suggested_ideas существует и доступна.")
+        
+        # Автоматическое добавление недостающих столбцов
+        try:
+            move_temp_files.add_missing_columns()
+            logger.info("Проверка и добавление недостающих столбцов выполнены.")
+            
+            # Явное добавление столбца updated_at в таблицу channel_analysis и обновление кэша схемы
+            try:
+                # Получение URL и ключа Supabase
+                supabase_url = os.getenv('SUPABASE_URL')
+                supabase_key = os.getenv('SUPABASE_ANON_KEY')
+                
+                if supabase_url and supabase_key:
+                    # Прямой запрос через API
+                    url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
+                    headers = {
+                        "apikey": supabase_key,
+                        "Authorization": f"Bearer {supabase_key}",
+                        "Content-Type": "application/json"
+                    }
+                    
+                    # SQL-команда для добавления столбца и обновления кэша
+                    sql_query = """
+                    ALTER TABLE channel_analysis 
+                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+                    
+                    NOTIFY pgrst, 'reload schema';
+                    """
+                    
+                    response = requests.post(url, json={"query": sql_query}, headers=headers)
+                    
+                    if response.status_code in [200, 204]:
+                        logger.info("Столбец updated_at успешно добавлен и кэш схемы обновлен")
+                    else:
+                        logger.warning(f"Ошибка при добавлении столбца updated_at: {response.status_code} - {response.text}")
+            except Exception as column_e:
+                logger.warning(f"Ошибка при явном добавлении столбца updated_at: {str(column_e)}")
+            
+        except Exception as e:
+            logger.warning(f"Ошибка при добавлении недостающих столбцов: {str(e)}")
+            
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка при проверке таблиц: {str(e)}")
+        return False
