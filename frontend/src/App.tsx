@@ -313,11 +313,6 @@ const PostImageGallery = ({
                 target.src = 'https://via.placeholder.com/100?text=Ошибка';
               }}
             />
-            {image.author && (
-              <div className="image-author">
-                {image.author}
-              </div>
-            )}
           </div>
         ))}
       </div>
@@ -766,13 +761,23 @@ function App() {
   // --- ДОБАВЛЕНО: Обработчик загрузки своего изображения --- 
   const handleCustomImageUpload = (imageUrl: string) => {
     if (!imageUrl) return;
+    // --- ИЗМЕНЕНИЕ: Преобразуем относительный URL в абсолютный ---
+    // Предполагаем, что бэкенд запущен на том же хосте, порт 8000
+    const backendBaseUrl = `${window.location.protocol}//${window.location.hostname}:8000`;
+    const absoluteImageUrl = imageUrl.startsWith('http') ? imageUrl : `${backendBaseUrl}${imageUrl}`;
+    // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
     // Создаем объект PostImage для загруженного файла
     const uploadedImage: PostImage = {
       id: `uploaded-${uuidv4()}`, // Генерируем уникальный ID
-      url: imageUrl,
-      preview_url: imageUrl, // Используем тот же URL для превью
+      // --- ИЗМЕНЕНИЕ: Используем абсолютный URL ---
+      url: absoluteImageUrl,
+      preview_url: absoluteImageUrl, // Используем тот же URL для превью
+      // --- КОНЕЦ ИЗМЕНЕНИЯ ---
       alt: 'Загруженное изображение',
-      author: 'Пользователь',
+      // --- ИЗМЕНЕНИЕ: Добавим отметку об источнике в автора для ясности ---
+      author: 'Пользователь (upload)', 
+      // --- КОНЕЦ ИЗМЕНЕНИЯ ---
       source: 'upload' // Указываем источник
     };
     setSelectedImage(uploadedImage); // Устанавливаем как выбранное
@@ -1643,14 +1648,6 @@ function App() {
                                       <span>🗑️ Удалить</span>
                                   </button>
                               </div>
-                              {selectedImage.author && (
-                                <p className="image-credit">
-                                    Автор: {selectedImage.author_url ? 
-                                           <a href={selectedImage.author_url} target="_blank" rel="noopener noreferrer">{selectedImage.author}</a> 
-                                           : selectedImage.author}
-                                    {selectedImage.source && ` (${selectedImage.source})`}
-                                </p>
-                              )}
                           </div>
                       )}
                   </div>
