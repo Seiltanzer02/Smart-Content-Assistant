@@ -6,8 +6,9 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: var(--tg-theme-bg-color, #f4f4f4); /* Цвет фона Telegram */
-  color: var(--tg-theme-text-color, #333); /* Цвет текста Telegram */
+  /* Используем переменные из Telegram */
+  background-color: var(--tg-theme-bg-color, #ffffff); /* Запасной: белый */
+  color: var(--tg-theme-text-color, #000000); /* Запасной: черный */
 }
 
 #root {
@@ -38,7 +39,7 @@ body {
   color: var(--tg-theme-button-text-color, white); /* Цвет текста на кнопках */
   padding: 10px 15px; /* Уменьшаем padding */
   text-align: center;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .app-header h1 {
@@ -53,6 +54,7 @@ body {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  width: 100%; /* Убедимся, что занимает всю ширину */
 }
 
 .app-footer {
@@ -172,6 +174,8 @@ body {
   padding: 15px; /* Уменьшаем padding */
   box-shadow: 0 1px 5px rgba(0, 0, 0, 0.05);
   flex: 1;
+  width: 100%; /* Занимает всю ширину */
+  box-sizing: border-box;
 }
 
 .view {
@@ -499,54 +503,220 @@ h1 {
 
 /* Календарь */
 .calendar-container {
-  margin-top: 25px;
-  display: flex;
-  justify-content: center; /* Центрируем календарь */
-}
-
-.react-calendar {
+  width: 100%;
+  margin-top: 20px;
+  background-color: var(--tg-theme-secondary-bg-color, #ffffff); /* Используем вторичный фон */
   border-radius: 8px;
-  border: 1px solid #ddd;
-  box-shadow: 0 1px 5px rgba(0,0,0,0.08);
-  max-width: 100%; /* Чтобы не вылезал на маленьких экранах */
+  padding: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  box-sizing: border-box;
 }
 
-.react-calendar__tile--active {
-  background: #3498db !important; /* Переопределяем цвет активной даты */
-  color: white !important;
+.calendar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0 15px 0;
+  color: var(--tg-theme-text-color, #333);
 }
 
-.react-calendar__tile--now {
-  background: #ecf0f1 !important; /* Цвет сегодняшней даты */
+.calendar-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
 }
 
-/* Подсветка запланированных (НЕ сохраненных) дней из плана */
-.plan-highlight {
-  height: 5px;
-  width: 5px;
-  background-color: #e74c3c; /* Красная точка */
-  border-radius: 50%;
-  margin: 3px auto 0; 
+.nav-button {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: var(--tg-theme-link-color, #1a73e8);
+  padding: 0 10px;
 }
 
-/* НОВЫЙ стиль: Подсветка СОХРАНЕННЫХ дней */
-.saved-post-highlight {
-  height: 6px; /* Чуть больше */
-  width: 6px;
-  background-color: #2ecc71; /* Зеленый цвет */
-  border-radius: 50%;
-  margin: 3px auto 0; 
+.nav-button:hover {
+  filter: brightness(90%);
 }
 
-/* Кликабельный элемент плана */
-.plan-list-item-clickable {
-    cursor: pointer;
-    transition: background-color 0.2s ease;
+/* Сетка для дней недели и дней месяца */
+.weekdays,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr); /* 7 колонок */
+  width: 100%;
+  box-sizing: border-box;
 }
 
-.plan-list-item-clickable:hover {
-    background-color: #f0f0f0; /* Легкое выделение при наведении */
+.weekdays {
+  text-align: center;
+  font-weight: 500;
+  color: var(--tg-theme-hint-color, #888);
+  font-size: 0.75rem;
+  padding-bottom: 8px;
+  margin-bottom: 5px;
+  border-bottom: 1px solid var(--tg-theme-hint-color, #eee); /* Добавим границу под днями недели */
 }
+
+.weekday {
+  padding: 5px 0;
+}
+
+.calendar-grid {
+  gap: 3px; /* Немного увеличим зазор */
+  /* Убираем общую границу сетки, т.к. ячейки сами имеют границу */
+}
+
+.calendar-day {
+  min-height: 90px; /* Увеличим мин. высоту */
+  height: auto; /* Автоматическая высота */
+  padding: 5px;
+  border: 1px solid var(--tg-theme-hint-color, #eee);
+  border-radius: 4px;
+  background-color: var(--tg-theme-bg-color, #ffffff);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  transition: background-color 0.2s ease;
+  box-sizing: border-box;
+  overflow: hidden; /* Предотвращаем вылезание контента */
+}
+
+.calendar-day.other-month {
+  opacity: 0.6;
+  background-color: var(--tg-theme-secondary-bg-color, #f9f9f9);
+}
+
+.calendar-day.today {
+  border: 1px solid var(--tg-theme-link-color, #1a73e8);
+  background-color: rgba(var(--tg-theme-link-color-rgb, 26, 115, 232), 0.05);
+}
+
+.calendar-day .day-number {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--tg-theme-text-color, #333);
+  margin-bottom: 5px;
+  text-align: left;
+}
+
+.calendar-day.today .day-number {
+  color: var(--tg-theme-link-color, #1a73e8);
+  font-weight: bold;
+}
+
+.day-posts {
+  flex-grow: 1;
+  overflow-y: auto;
+  max-height: 100px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--tg-theme-hint-color, #ccc) transparent;
+}
+
+.day-posts::-webkit-scrollbar {
+  width: 4px;
+}
+.day-posts::-webkit-scrollbar-thumb {
+  background-color: var(--tg-theme-hint-color, #ccc);
+  border-radius: 2px;
+}
+
+.calendar-day .post-item {
+  background-color: var(--tg-theme-secondary-bg-color, #f0f8ff); /* Используем вторичный фон */
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin-bottom: 3px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  overflow: hidden; /* Обрезаем текст, если не влезает */
+}
+
+.calendar-day .post-item:hover {
+  filter: brightness(95%);
+  background-color: var(--tg-theme-hint-color, #e0e0e0); /* Цвет подсказки при наведении */
+}
+
+.calendar-day .post-title {
+  color: var(--tg-theme-text-color, #333);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: 5px;
+  flex-grow: 1;
+}
+
+.calendar-day .post-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  /* --- ИЗМЕНЕНИЕ: Кнопки всегда видны для мобильных --- */
+  /* opacity: 0; */ /* Убираем скрытие по умолчанию */
+  /* transition: opacity 0.2s; */
+}
+
+/* --- ИЗМЕНЕНИЕ: Убираем показ кнопок только при наведении --- */
+/* .calendar-day .post-item:hover .post-actions {
+  opacity: 1;
+} */
+
+.calendar-day .post-actions .action-button {
+  padding: 2px 4px;
+  font-size: 0.8rem;
+  background: none;
+  border: none;
+  color: var(--tg-theme-hint-color, #777);
+  cursor: pointer;
+}
+
+.calendar-day .post-actions .action-button span {
+    font-size: 0.9em;
+}
+
+.calendar-day .post-actions .action-button:hover {
+  color: var(--tg-theme-link-color, #1a73e8);
+}
+
+.calendar-day .post-actions .edit-button:hover {
+  color: #ff9800;
+}
+
+.calendar-day .post-actions .delete-button:hover {
+  color: #f44336;
+}
+
+/* Адаптивность календаря */
+@media (max-width: 600px) {
+  .calendar-grid {
+    gap: 1px;
+  }
+  .calendar-day {
+    min-height: 70px; /* Чуть меньше */
+    padding: 3px;
+  }
+  .weekday {
+    font-size: 0.65rem;
+  }
+  .calendar-day .day-number {
+    font-size: 0.7rem;
+  }
+  .calendar-day .post-item {
+    font-size: 0.65rem;
+    padding: 3px 4px;
+  }
+  .calendar-header h3 {
+      font-size: 1rem;
+  }
+  .nav-button {
+      font-size: 1.3rem;
+  }
+  .calendar-day .post-actions {
+      /* Если нужно, можно еще уменьшить кнопки на совсем маленьких экранах */
+  }
+}
+/* --- КОНЕЦ: ПОВТОРНОЕ ИСПРАВЛЕНИЕ СТИЛЕЙ КАЛЕНДАРЯ --- */
 
 /* Стили для вида Пост */
 .post-view-container {
@@ -1353,8 +1523,8 @@ h1 {
 
 /* Стили для календаря */
 .calendar-view {
-  display: flex;
-  flex-direction: column;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .channels-filter {
@@ -1621,7 +1791,8 @@ h1 {
 
 /* Адаптация для Telegram Mini App */
 :root {
-    --tg-color-scheme: light; /* Или dark */
+    /* Определяем базовые цвета, если Telegram не предоставит свои */
+    --tg-color-scheme: light;
     --tg-theme-text-color: #000000;
     --tg-theme-bg-color: #ffffff;
     --tg-theme-link-color: #2481cc;
@@ -1630,30 +1801,122 @@ h1 {
     --tg-theme-secondary-bg-color: #f1f1f1;
     --tg-theme-hint-color: #aaaaaa;
 
-    /* Добавляем RGB версии для rgba() */
+    /* RGB версии для rgba() */
     --tg-theme-link-color-rgb: 36, 129, 204;
     --tg-theme-button-color-rgb: 82, 136, 193;
+    --tg-theme-secondary-bg-color-rgb: 241, 241, 241;
+    --tg-theme-bg-color-rgb: 255, 255, 255;
+    --tg-theme-hint-color-rgb: 170, 170, 170;
 }
 
-/* Обновляем переменные, если Telegram Web App доступен */
-/* Скрипт для этого должен быть в App.tsx */
+/* Стили для темной темы (если Telegram ее передаст) */
+html[data-tg-color-scheme="dark"] body {
+    --tg-theme-text-color: #ffffff;
+    --tg-theme-bg-color: #18222d; /* Пример темного фона */
+    --tg-theme-link-color: #6ab3f3;
+    --tg-theme-button-color: #2e71a4;
+    --tg-theme-button-text-color: #ffffff;
+    --tg-theme-secondary-bg-color: #232e3a; /* Пример темного вторичного фона */
+    --tg-theme-hint-color: #8a9ba8;
 
-/* Делаем скроллбар тоньше и менее заметным */
-::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    --tg-theme-link-color-rgb: 106, 179, 243;
+    --tg-theme-button-color-rgb: 46, 113, 164;
+    --tg-theme-secondary-bg-color-rgb: 35, 46, 58;
+    --tg-theme-bg-color-rgb: 24, 34, 45;
+    --tg-theme-hint-color-rgb: 138, 155, 168;
 }
 
-::-webkit-scrollbar-track {
-    background: transparent; /* Прозрачный фон трека */
+/* Применяем цвета ко всем элементам для лучшей поддержки тем */
+body,
+.app-container,
+.view-container,
+.input-container input,
+.results-container,
+.idea-item,
+.posts-table td,
+.form-group input,
+.form-group textarea,
+.calendar-container,
+.calendar-day,
+.channels-filter,
+.channel-checkbox {
+    background-color: var(--tg-theme-bg-color);
+    color: var(--tg-theme-text-color);
 }
 
-::-webkit-scrollbar-thumb {
-    background-color: var(--tg-theme-hint-color, rgba(0, 0, 0, 0.2)); /* Полупрозрачный ползунок */
-    border-radius: 3px;
-    border: 1px solid var(--tg-theme-bg-color, #fff); /* Обводка в цвет фона */
+.results-container,
+.idea-item,
+.posts-table th,
+.posts-table tr:nth-child(even),
+.form-group input:disabled,
+.form-group textarea:disabled,
+.calendar-container,
+.calendar-day.other-month,
+.calendar-day .post-item,
+.channels-filter,
+.form-actions .cancel-button {
+    background-color: var(--tg-theme-secondary-bg-color);
+    color: var(--tg-theme-text-color); /* Текст на вторичном фоне */
 }
 
-::-webkit-scrollbar-thumb:hover {
-    background-color: var(--tg-theme-hint-color, rgba(0, 0, 0, 0.4));
+.channel-input::placeholder {
+    color: var(--tg-theme-hint-color);
 }
+
+/* Границы */
+.app-footer,
+.channel-input,
+.results-container,
+.idea-item,
+.posts-table th,
+.posts-table td,
+.form-group input,
+.form-group textarea,
+.weekdays,
+.calendar-day,
+.form-actions,
+.image-management-section,
+.channels-filter,
+.channel-checkbox,
+.remove-image-btn {
+    border-color: var(--tg-theme-hint-color);
+}
+
+/* Цвет ссылок */
+a,
+.nav-button,
+.action-button:hover:not(:disabled),
+.calendar-day.today .day-number,
+.calendar-day .post-actions .action-button:hover {
+    color: var(--tg-theme-link-color);
+}
+
+/* Цвет кнопок */
+.input-container .action-button,
+.action-button.active,
+.action-button.generate-button,
+.form-actions .save-button,
+.image-item .checkmark,
+.upload-button-label .action-button,
+.apply-filter-button {
+    background-color: var(--tg-theme-button-color);
+    color: var(--tg-theme-button-text-color);
+}
+.image-item.selected {
+     border-color: var(--tg-theme-button-color);
+}
+
+/* Цвет текста подсказок */
+.app-footer,
+.action-button,
+.idea-style,
+.idea-day,
+.weekday,
+.form-group label,
+.info-message.small,
+.remove-channel,
+.calendar-day .post-actions .action-button {
+    color: var(--tg-theme-hint-color);
+}
+
+/* ... конец файла ... */
