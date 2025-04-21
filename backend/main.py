@@ -1218,27 +1218,6 @@ async def create_post(request: Request, post_data: PostData):
         created_post = result.data[0]
         post_id = created_post["id"]
         
-        # --- НАЧАЛО: Создание связи поста с изображением --- 
-        if saved_image_id:
-            try:
-                # Проверяем, есть ли уже такая связь
-                link_check = supabase.table("post_images").select("post_id").eq("post_id", post_id).eq("image_id", saved_image_id).limit(1).execute()
-                
-                if hasattr(link_check, 'data') and len(link_check.data) == 0:
-                    # Связи нет, создаем
-                    post_image_data = {
-                        "post_id": post_id,
-                        "image_id": saved_image_id,
-                        "user_id": int(telegram_user_id)
-                    }
-                    supabase.table("post_images").insert(post_image_data).execute()
-                    logger.info(f"Создана связь между постом {post_id} и изображением {saved_image_id}")
-                else:
-                    logger.info(f"Связь между постом {post_id} и изображением {saved_image_id} уже существует.")
-            except Exception as rel_err:
-                logger.warning(f"Ошибка при создании/проверке связи post_images: {rel_err}")
-        # --- КОНЕЦ: Создание связи поста с изображением --- 
-        
         logger.info(f"Пользователь {telegram_user_id} создал пост: {post_data.topic_idea}")
         
         # Возвращаем данные созданного поста, обогащенные данными изображения
@@ -1354,25 +1333,6 @@ async def update_post(post_id: str, request: Request, post_data: PostData):
              raise HTTPException(status_code=500, detail="Ошибка при обновлении поста")
             
         updated_post = result.data[0]
-
-        # --- НАЧАЛО: Создание новой связи поста с изображением (если есть) --- 
-        if saved_image_id:
-            try:
-                # Проверяем, что связи еще нет
-                link_check = supabase.table("post_images").select("post_id").eq("post_id", post_id).eq("image_id", saved_image_id).limit(1).execute()
-                if hasattr(link_check, 'data') and len(link_check.data) == 0:
-                    post_image_data = {
-                        "post_id": post_id,
-                        "image_id": saved_image_id,
-                        "user_id": int(telegram_user_id)
-                    }
-                    supabase.table("post_images").insert(post_image_data).execute()
-                    logger.info(f"Создана новая связь между постом {post_id} и изображением {saved_image_id}")
-                else:
-                     logger.info(f"Связь между постом {post_id} и изображением {saved_image_id} уже существует (или ошибка проверки).")
-            except Exception as rel_err:
-                 logger.warning(f"Ошибка при создании новой связи post_images: {rel_err}")
-        # --- КОНЕЦ: Создание новой связи поста с изображением --- 
 
         logger.info(f"Пользователь {telegram_user_id} обновил пост {post_id}")
         
