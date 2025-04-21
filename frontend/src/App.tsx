@@ -533,44 +533,75 @@ function App() {
   };
   // --- КОНЕЦ ВОССТАНОВЛЕНИЯ ---
   
+  // --- ИЗМЕНЕНИЕ: useEffect для загрузки данных при смене канала --- 
+  useEffect(() => {
+    if (isAuthenticated && channelName) {
+      // Загрузка сохраненного анализа для выбранного канала
+      fetchSavedAnalysis(channelName);
+      // Загрузка сохраненных идей для выбранного канала
+      fetchSavedIdeas();
+      // Загрузка сохраненных постов для выбранного канала (или всех, если фильтр пуст)
+      fetchSavedPosts(); 
+    } else if (isAuthenticated) {
+      // Если канал не выбран, очищаем специфичные для канала данные
+      setAnalysisResult(null);
+      setSuggestedIdeas([]);
+      // Возможно, загрузить все посты, если канал не выбран?
+      // fetchSavedPosts(); // Пока оставим загрузку постов по фильтру
+    }
+    // Сбрасываем выбранную идею при смене канала
+    setSelectedIdea(null); 
+  }, [isAuthenticated, channelName]);
+  // --- КОНЕЦ ИЗМЕНЕНИЯ --- 
+
   // Функция для загрузки сохраненных постов
   const fetchSavedPosts = async () => {
     setLoadingSavedPosts(true);
     setError(null);
     
     try {
-      // Если выбранных каналов нет, загружаем все посты
-      if (selectedChannels.length === 0) {
-        const response = await axios.get('/posts');
-        
-        if (response.data && Array.isArray(response.data)) {
-          setSavedPosts(response.data);
-          
-          // Собираем уникальные каналы из постов
-          updateChannelsFromPosts(response.data);
-      }
-    } else {
-        // Если есть выбранные каналы - используем фильтр
-        const allPosts: SavedPost[] = [];
-        
-        // Загружаем посты для каждого выбранного канала
+      // --- ИЗМЕНЕНИЕ: Фильтруем посты по выбранному channelName, ЕСЛИ нет активного фильтра каналов --- 
+      let postsToSet: SavedPost[] = [];
+      const useChannelFilter = selectedChannels.length > 0;
+      
+      if (useChannelFilter) {
+        // Используем фильтр selectedChannels
+        const allFilteredPosts: SavedPost[] = [];
         for (const channel of selectedChannels) {
           try {
             const response = await axios.get('/posts', {
-              params: { channel_name: channel }
+              params: { channel_name: channel } // Фильтруем по каждому каналу из фильтра
             });
-            
             if (response.data && Array.isArray(response.data)) {
-              allPosts.push(...response.data);
+              allFilteredPosts.push(...response.data);
             }
           } catch (err) {
             console.error(`Ошибка при загрузке постов для канала ${channel}:`, err);
-            // Продолжаем с другими каналами
           }
         }
-        
-        setSavedPosts(allPosts);
+        postsToSet = allFilteredPosts;
+        updateChannelsFromPosts(postsToSet); // Обновляем список всех каналов
+      } else if (channelName) {
+        // Если фильтр не активен, но выбран канал вверху, грузим посты для него
+        const response = await axios.get('/posts', {
+          params: { channel_name: channelName } // Фильтруем по текущему выбранному каналу
+        });
+        if (response.data && Array.isArray(response.data)) {
+          postsToSet = response.data;
+          updateChannelsFromPosts(postsToSet); // Обновляем список всех каналов
+        }
+      } else {
+        // Если ни фильтр, ни канал не выбраны, грузим все посты пользователя
+        const response = await axios.get('/posts');
+        if (response.data && Array.isArray(response.data)) {
+          postsToSet = response.data;
+          updateChannelsFromPosts(postsToSet); // Обновляем список всех каналов
+        }
       }
+      
+      setSavedPosts(postsToSet);
+      // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+      
     } catch (err: any) {
       console.error('Ошибка при загрузке сохраненных постов:', err);
       setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке сохраненных постов');
@@ -813,32 +844,40 @@ function App() {
   };
   
   // Функция для сохранения идей в базу данных
-  const saveIdeasToDatabase = async () => {
-    if (suggestedIdeas.length === 0) return;
+  const saveIdeasToDatabase = async (ideasToSave: SuggestedIdea[]) => { // Принимаем идеи как аргумент
+    if (ideasToSave.length === 0) return;
     
-    setIsGeneratingIdeas(true);
-    setError(null);
+    // Не устанавливаем флаг загрузки здесь, чтобы не блокировать интерфейс
+    // setIsGeneratingIdeas(true); 
+    // setError(null);
     
     try {
-      console.log('Отправка идей на сохранение:', suggestedIdeas);
+      // logger.info('Отправка идей на сохранение:', ideasToSave); // Заменяем на console.log
+      console.log('Отправка идей на сохранение:', ideasToSave);
       const response = await axios.post('/save-suggested-ideas', { 
-        ideas: suggestedIdeas,
-        channel_name: channelName
+        ideas: ideasToSave, // Используем переданные идеи
+          channel_name: channelName 
       }, {
           headers: { 'x-telegram-user-id': userId }
       });
       
       if (response.data && response.data.message) {
-        setSuccess(response.data.message); 
+        // Можно показать короткое уведомление об успехе, если нужно
+        // toast.success('Идеи сохранены'); 
+        // logger.info('Ответ от сохранения идей:', response.data); // Заменяем на console.log
         console.log('Ответ от сохранения идей:', response.data);
       } else {
+        // logger.warn('Ответ от сохранения идей не содержит сообщения:', response.data); // Заменяем на console.warn
         console.warn('Ответ от сохранения идей не содержит сообщения:', response.data);
       }
     } catch (err: any) {
+      // logger.error('Ошибка при сохранении идей:', err.response?.data || err.message); // Заменяем на console.error
       console.error('Ошибка при сохранении идей:', err.response?.data || err.message);
-      setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении идей');
+      // Не показываем ошибку пользователю, т.к. это фоновый процесс
+      // setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении идей');
     } finally {
-      setIsGeneratingIdeas(false);
+      // Не сбрасываем флаг загрузки здесь
+      // setIsGeneratingIdeas(false);
     }
   };
   
@@ -950,15 +989,17 @@ function App() {
           topic_idea: idea.topic_idea || idea.title,
           format_style: idea.format_style || idea.format,
           day: idea.day,
-          channel_name: channelName,
-          isNew: true,
+          channel_name: channelName, // Привязываем к текущему каналу
+          isNew: true, // Помечаем как новые
         }));
 
         setSuggestedIdeas(formattedIdeas);
         setSuccess('Идеи успешно сгенерированы');
         
-        // Сохраняем сгенерированные идеи
-        saveIdeasToDatabase();
+        // --- УБЕДИМСЯ, ЧТО СОХРАНЕНИЕ ВЫЗЫВАЕТСЯ --- 
+        // Сохраняем сгенерированные идеи В ФОНЕ (не ждем завершения)
+        saveIdeasToDatabase(formattedIdeas); // Передаем новые идеи в функцию сохранения
+        // --- КОНЕЦ ПРОВЕРКИ --- 
       }
     } catch (err: any) { 
       setError(err.response?.data?.detail || err.message || 'Ошибка при генерации идей');
@@ -971,20 +1012,35 @@ function App() {
 
   // Функция для загрузки сохраненных идей
   const fetchSavedIdeas = async () => {
-    if (!channelName) return;
+    // --- ИЗМЕНЕНИЕ: Всегда загружаем для текущего channelName --- 
+    if (!channelName) {
+      setSuggestedIdeas([]); // Очищаем идеи, если канал не выбран
+      return;
+    }
+    // --- КОНЕЦ ИЗМЕНЕНИЯ ---
     
-    setIsGeneratingIdeas(true);
+    setIsGeneratingIdeas(true); // Используем тот же флаг загрузки
     setError(null);
     
     try {
       const response = await axios.get('/ideas', {
-        params: { channel_name: channelName }
+        params: { channel_name: channelName } // Всегда фильтруем по текущему каналу
       });
       if (response.data && Array.isArray(response.data.ideas)) {
-        setSuggestedIdeas(response.data.ideas);
+        // --- ИЗМЕНЕНИЕ: Убедимся, что ID есть и он строковый --- 
+        const validIdeas = response.data.ideas.map((idea: any) => ({
+          ...idea,
+          id: String(idea.id) // Приводим ID к строке на всякий случай
+        }));
+        setSuggestedIdeas(validIdeas);
+        // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+      } else {
+        setSuggestedIdeas([]); // Очищаем, если от сервера пришел некорректный ответ
       }
     } catch (err: any) {
       console.error('Ошибка при загрузке идей:', err);
+      setError('Не удалось загрузить сохраненные идеи');
+      setSuggestedIdeas([]); // Очищаем при ошибке
     } finally {
       setIsGeneratingIdeas(false);
     }
@@ -1214,7 +1270,7 @@ function App() {
         {/* Контент */}
         <div className="view-container">
           {/* Вид анализа */}
-          {currentView === 'analyze' && (
+          {currentView === 'analyze' && channelName && (
             <div className="view analyze-view">
       <h2>Анализ Telegram-канала</h2>
       <div className="input-container">
@@ -1279,9 +1335,9 @@ function App() {
           )}
 
           {/* Вид идей */}
-          {currentView === 'suggestions' && (
+          {currentView === 'suggestions' && channelName && (
             <div className="view suggestions-view">
-              <h2>Идеи контента</h2>
+              <h2>Идеи контента для @{channelName}</h2>
               
               {isGeneratingIdeas && (
                 <div className="loading-indicator">
@@ -1320,10 +1376,24 @@ function App() {
                   }
                 </p>
               ) : null}
+                {/* --- ДОБАВЛЕНО: Кнопка для повторной генерации идей --- */} 
+                <button 
+                    onClick={generateIdeas} 
+                    className="action-button generate-button"
+                    disabled={isGeneratingIdeas || !analysisResult} 
+                    style={{marginTop: '20px'}} // Добавим отступ
+                  >
+                    {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать новые идеи'}
+                 </button>
+                 {/* --- КОНЕЦ ДОБАВЛЕНИЯ --- */}
                 </div>
             )}
+            {/* Сообщение, если канал не выбран для идей */} 
+            {currentView === 'suggestions' && !channelName && (
+                <p>Пожалуйста, выберите канал для просмотра или генерации идей.</p>
+            )}
 
-          {/* --- ИЗМЕНЕНИЕ: Вид календаря (восстановлено) --- */}
+          {/* Календарь и Посты показываем всегда, но данные фильтруются по channelName/selectedChannels */} 
           {currentView === 'calendar' && (
             <div className="view calendar-view">
               <h2>Календарь публикаций</h2>
@@ -1428,7 +1498,14 @@ function App() {
           {/* --- НАЧАЛО: НОВЫЙ Вид "Посты" с таблицей --- */}
           {currentView === 'posts' && (
             <div className="view posts-view"> {/* Добавляем класс posts-view для возможных специфичных стилей */} 
-              <h2>Список сохраненных постов</h2>
+              <h2>
+                Список сохраненных постов 
+                {selectedChannels.length > 0 
+                  ? `(Каналы: ${selectedChannels.join(', ')})` 
+                  : channelName 
+                    ? `(Канал: @${channelName})` 
+                    : '(Все каналы)'}
+              </h2>
               
               {/* Фильтр по каналам (копируем из календаря) */}
               <div className="channels-filter">

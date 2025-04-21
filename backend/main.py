@@ -1312,14 +1312,22 @@ async def update_post(post_id: str, request: Request, post_data: PostData):
             logger.info(f"Изображение не выбрано для обновления поста {post_id}. Старые связи будут удалены.")
         # --- КОНЕЦ: Обработка выбранного изображения --- 
 
-        # --- НАЧАЛО: Удаление старых связей с изображениями --- 
+        # --- НАЧАЛО ИЗМЕНЕНИЯ: Удаление старых связей с изображениями --- 
         try:
-            delete_res = supabase.table("post_images").delete().eq("post_id", post_id).execute()
-            logger.info(f"Удалено {len(delete_res.data) if hasattr(delete_res, 'data') else 0} старых связей для поста {post_id}")
+            # Этот код уже должен быть закомментирован или удален ранее.
+            # Если он раскомментирован, это ошибка.
+            # delete_res = supabase.table("post_images").delete().eq("post_id", post_id).execute()
+            # logger.info(f"Удалено {len(delete_res.data) if hasattr(delete_res, 'data') else 0} старых связей для поста {post_id}")
+            pass # Ничего не делаем, т.к. таблицы нет
         except Exception as del_err:
-            logger.error(f"Ошибка при удалении старых связей post_images для поста {post_id}: {del_err}")
-            raise HTTPException(status_code=500, detail=f"Ошибка при удалении старых связей post_images: {del_err}")
-        # --- КОНЕЦ: Удаление старых связей с изображениями --- 
+            # --- ИЗМЕНЕНИЕ: Логируем как WARNING и НЕ прерываем выполнение --- 
+            if "relation \"public.post_images\" does not exist" in str(del_err):
+                 logger.warning(f"Таблица post_images не существует (ожидаемо), пропускаем удаление связей для поста {post_id}.")
+            else:
+                # Если ошибка другая, логируем как ошибку, но все равно НЕ прерываем
+                logger.error(f"Неожиданная ошибка при попытке удаления связей post_images для поста {post_id}: {del_err}")
+            # raise HTTPException(status_code=500, detail=f"Ошибка при удалении старых связей post_images: {del_err}") # УДАЛЕНО ПРЕРЫВАНИЕ
+        # --- КОНЕЦ ИЗМЕНЕНИЯ: Удаление/изменение обработки ошибки post_images --- 
 
         # Создаем словарь с основными данными поста для обновления
         post_to_update = post_data.dict(exclude={"selected_image_data", "image_url", "images_ids"})
