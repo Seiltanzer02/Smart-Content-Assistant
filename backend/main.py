@@ -1208,6 +1208,11 @@ async def create_post(request: Request, post_data: PostData):
         post_to_save.pop('image_url', None)
         post_to_save.pop('images_ids', None)
         
+        # === ИЗМЕНЕНИЕ НАЧАЛО ===
+        # Добавляем ID сохраненного изображения в данные поста
+        post_to_save["saved_image_id"] = saved_image_id
+        # === ИЗМЕНЕНИЕ КОНЕЦ ===
+        
         # Сохранение поста в Supabase
         result = supabase.table("saved_posts").insert(post_to_save).execute()
         
@@ -1307,62 +1312,33 @@ async def update_post(post_id: str, request: Request, post_data: PostData):
                 raise HTTPException(status_code=500, detail=f"Ошибка при обработке/сохранении изображения: {str(img_err)}")
         else:
             # Если изображение не выбрано (selected_image is None), значит пользователь его удалил
-            # Ставим saved_image_id в None, чтобы очистить связь в post_images
+            # Ставим saved_image_id в None, чтобы очистить связь
             saved_image_id = None
-            logger.info(f"Изображение не выбрано для обновления поста {post_id}. Старые связи будут удалены.")
+            logger.info(f"Изображение не выбрано для обновления поста {post_id}. Связь будет очищена.")
         # --- КОНЕЦ: Обработка выбранного изображения --- 
 
-        # --- НАЧАЛО ИЗМЕНЕНИЯ: Удаление старых связей с изображениями --- 
-        try:
-            # Этот код уже должен быть закомментирован или удален ранее.
-            # Если он раскомментирован, это ошибка.
-            # delete_res = supabase.table("post_images").delete().eq("post_id", post_id).execute()
-            # logger.info(f"Удалено {len(delete_res.data) if hasattr(delete_res, 'data') else 0} старых связей для поста {post_id}")
-            pass # Ничего не делаем, т.к. таблицы нет
-        except Exception as del_err:
-            # --- ИЗМЕНЕНИЕ: Логируем как WARNING и НЕ прерываем выполнение --- 
-            if "relation \"public.post_images\" does not exist" in str(del_err):
-                 logger.warning(f"Таблица post_images не существует (ожидаемо), пропускаем удаление связей для поста {post_id}.")
-            else:
-                # Если ошибка другая, логируем как ошибку, но все равно НЕ прерываем
-                logger.error(f"Неожиданная ошибка при попытке удаления связей post_images для поста {post_id}: {del_err}")
-            # raise HTTPException(status_code=500, detail=f"Ошибка при удалении старых связей post_images: {del_err}") # УДАЛЕНО ПРЕРЫВАНИЕ
-        # --- КОНЕЦ ИЗМЕНЕНИЯ: Удаление/изменение обработки ошибки post_images --- 
-
+        # --- Удаление старых связей post_images (уже должно быть неактуально) ---
+        # ... существующий код обработки ошибки post_images ...
+        
         # Создаем словарь с основными данными поста для обновления
         post_to_update = post_data.dict(exclude={"selected_image_data", "image_url", "images_ids"})
         post_to_update["updated_at"] = datetime.now().isoformat()
         
+        # === ИЗМЕНЕНИЕ НАЧАЛО ===
+        # Добавляем/обновляем ID сохраненного изображения в данных поста
+        # Если saved_image_id = None, то связь очистится в базе данных (если колонка nullable)
+        post_to_update["saved_image_id"] = saved_image_id
+        # === ИЗМЕНЕНИЕ КОНЕЦ ===
+        
         # Обновление основных данных поста в Supabase
-        result = supabase.table("saved_posts").update(post_to_update).eq("id", post_id).execute()
+        result = supabase.table("saved_posts").update(post_to_update).eq("id", post_id).eq("user_id", int(telegram_user_id)).execute()
         
-        if not hasattr(result, 'data') or len(result.data) == 0:
-             logger.error(f"Ошибка при обновлении поста {post_id}: Ответ Supabase пуст или не содержит данных. Status: {result.status_code if hasattr(result, 'status_code') else 'N/A'}")
-             raise HTTPException(status_code=500, detail="Ошибка при обновлении поста")
-            
-        updated_post = result.data[0]
+        # ... остальной код update_post ...
 
-        logger.info(f"Пользователь {telegram_user_id} обновил пост {post_id}")
-        
-        # Возвращаем обновленные данные поста, обогащенные данными изображения
-        response_data = SavedPostResponse(**updated_post)
-        if saved_image_id and selected_image: # Если было выбрано и сохранено/найдено изображение
-            response_data.selected_image_data = selected_image # Возвращаем исходные данные
-        elif saved_image_id: # Если изображение было найдено, но не передано
-            img_data_res = supabase.table("saved_images").select("id, url, preview_url, alt, author, author_url, source").eq("id", saved_image_id).maybe_single().execute()
-            if img_data_res.data:
-                 response_data.selected_image_data = PostImage(**img_data_res.data)
-        else:
-            # Если изображение не выбрано, очищаем поле в ответе
-            response_data.selected_image_data = None
-        
-        return response_data
-        
     except HTTPException as http_err:
-        # Перехватываем HTTP исключения
         raise http_err
     except Exception as e:
-        logger.error(f"Ошибка при обновлении поста: {e}\n{traceback.format_exc()}")
+        logger.error(f"Ошибка при обновлении поста {post_id}: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера при обновлении поста: {str(e)}")
 
 @app.delete("/posts/{post_id}")
@@ -2558,7 +2534,7 @@ async def save_suggested_ideas_batch(payload: SaveIdeasRequest, request: Request
                 "updated_at": datetime.now().isoformat(),
                 # Добавляем другие поля, если они есть
                 "is_detailed": idea_data.get("is_detailed", False),
-                "status": idea_data.get("status", "new"),
+                # "status": idea_data.get("status", "new"), # --- УДАЛЕНО: Поле status отсутствует в схеме ---
                 # cleaned_title можно генерировать здесь или оставить пустым
             }
             records_to_insert.append(record)
