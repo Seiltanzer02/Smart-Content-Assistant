@@ -911,39 +911,31 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
                 message="План сгенерирован с базовыми идеями (API недоступен)"
             )
             
-        # Формируем системный промпт
-        system_prompt = """Ты - опытный контент-маркетолог и эксперт по планированию публикаций. 
-Твоя задача - сгенерировать план публикаций для Telegram-канала на основе указанных тем и стилей/форматов.
+        # --- ИЗМЕНЕНИЕ НАЧАЛО: Уточненные промпты ---
+        system_prompt = f"""Ты - опытный контент-маркетолог. Твоя задача - сгенерировать план публикаций для Telegram-канала на {period_days} дней.
+Используй только следующие темы: {', '.join(themes)}.
+Используй **ТОЛЬКО** стили из этого списка: {', '.join(styles)}.
 
-Для каждого дня периода предложи идею поста, которая сочетает одну из указанных тем с одним из указанных стилей/форматов.
-План должен быть разнообразным - старайся использовать разные комбинации тем и стилей.
+Для каждого дня предложи ОДНУ идею поста (конкретный заголовок/концепцию) и выбери ОДИН стиль из списка выше.
+Формат КАЖДОЙ строки ответа ДОЛЖЕН БЫТЬ ТОЧНО таким:
+День <номер_дня>:: <Идея поста>:: <Стиль из списка>
 
-Каждая идея должна включать:
-1. День периода (число от 1 до заданного количества дней)
-2. Конкретную идею поста по выбранной теме (в формате понятного заголовка/концепции, не абстрактно)
-3. Формат/стиль поста (из списка указанных стилей)
+Пример:
+День 1:: Как начать инвестировать с нуля:: Рекомендации и советы
+День 2:: Обзор нового гаджета X:: Аналитический разбор сделок
 
-ОЧЕНЬ ВАЖНО:
-- НЕ ИСПОЛЬЗУЙ markdown-форматирование (**, ##, *, _) в идеях и названиях форматов
-- НЕ НАЧИНАЙ названия идей с "День X:" или подобных конструкций
-- Идеи должны быть короткими заголовками, а не длинными текстами
-- Используй простые понятные формулировки без специальных символов
+ВАЖНО:
+- Используй разделитель '::' между днем, идеей и стилем.
+- НЕ ИСПОЛЬЗУЙ markdown (**, ##, *, _).
+- НЕ добавляй никаких пояснений или лишнего текста. Только строки в указанном формате."""
 
-Ответ должен быть в формате: план публикаций из нескольких идей постов."""
+        user_prompt = f"""Сгенерируй план контента для Telegram-канала "{channel_name}" на {period_days} дней.
+Темы: {', '.join(themes)}
+Стили (используй ТОЛЬКО их): {', '.join(styles)}
 
-        # Формируем запрос к пользователю
-        user_prompt = f"""Сгенерируй план контента для Telegram-канала "@{channel_name}" на {period_days} дней.
-
-Темы канала:
-{", ".join(themes)}
-
-Стили/форматы постов:
-{", ".join(styles)}
-
-Создай план из {period_days} публикаций (по одной на каждый день), используя указанные темы и стили. 
-Для каждого поста укажи день, конкретную идею (не общую тему, а конкретный заголовок или концепцию поста) и стиль/формат.
-
-ВАЖНО: Не используй никакого markdown-форматирования в тексте идей и форматов. Названия идей должны быть чистыми текстовыми строками без *, **, #, ##, ### и т.д."""
+Выдай ровно {period_days} строк в формате:
+День <номер_дня>:: <Идея поста>:: <Стиль из списка>"""
+        # --- ИЗМЕНЕНИЕ КОНЕЦ ---
 
         # Настройка клиента OpenAI для использования OpenRouter
         client = AsyncOpenAI(
@@ -952,138 +944,112 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
         )
         
         # Запрос к API
-        logger.info(f"Отправка запроса на генерацию плана контента для канала @{channel_name}")
+        logger.info(f"Отправка запроса на генерацию плана контента для канала @{channel_name} с уточненным промптом")
         response = await client.chat.completions.create(
-            model="deepseek/deepseek-chat",
+            model="deepseek/deepseek-chat", # Или другая подходящая модель
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
+                # {"role": "system", "content": system_prompt}, # Системный промпт может конфликтовать с некоторыми моделями, тестируем без него или с ним
+                {"role": "user", "content": user_prompt} # Помещаем все инструкции в user_prompt
             ],
-            temperature=0.8,  # Более высокая температура для разнообразия
-            max_tokens=2000,
+            temperature=0.7, # Немного снижаем температуру для строгости формата
+            max_tokens=150 * period_days, # Примерно 150 токенов на идею
             timeout=120,
             extra_headers={
                 "HTTP-Referer": "https://content-manager.onrender.com",
                 "X-Title": "Smart Content Assistant"
             }
         )
-        
-        # Извлечение ответа
+
         plan_text = response.choices[0].message.content.strip()
-        logger.info(f"Получен ответ с планом публикаций: {plan_text[:100]}...")
-        
-        # Анализ ответа для извлечения плана
+        logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
+
         plan_items = []
-        lines = plan_text.split('\n')
-        current_day = None
-        current_topic = ""
-        current_style = ""
+        lines = plan_text.split('\\n')
 
-        # --- НАЧАЛО: Улучшенная логика парсинга --- 
-        idea_pattern = re.compile(r"""
-            ^\s*
-            (?:\d+|[\*\-\•])\.?\s*                       # Маркер списка (число, *, -, •) - опционально
-            (?:(?:День|Day)\s*(\d+)\s*[:\.\-\|]?\s*)?    # Опциональная группа "День X:"
-            (?P<topic>.*?)
-            (?:\s*[:\-\(\[\|/]\s*(?:Стиль|Формат|Style|Format)[:\s]+(?P<style1>.+)| # Явный разделитель со словом Стиль/Формат
-               (?:\s*[-–—]\s*(?![\d\s]|$) # Дефис, если за ним не число/пробел (избегаем дат/диапазонов)
-                 (?P<style2>[^\n\r\(\[]+) # Стиль после дефиса до конца строки или скобки
-               )
-             )?
-            \s*$                                            # До конца строки
-            """, re.VERBOSE | re.IGNORECASE)
+        # --- ИЗМЕНЕНИЕ НАЧАЛО: Улучшенный парсинг с новым разделителем ---
+        expected_style_set = set(s.lower() for s in styles) # Для быстрой проверки
 
-        day_counter = 1
         for line in lines:
             line = line.strip()
-            if not line or len(line) < 5: # Игнорируем короткие строки
+            if not line:
                 continue
 
-            # Игнорируем строки, которые явно являются заголовками
-            if re.match(r'^(план|идеи|публикации|контент|posts|список|вот|here|day|your|content|\*\*|##).*$', line.lower()):
-                continue
+            parts = line.split('::')
+            if len(parts) == 3:
+                try:
+                    day_part = parts[0].lower().replace('день', '').strip()
+                    day = int(day_part)
+                    topic_idea = clean_text_formatting(parts[1].strip())
+                    format_style = clean_text_formatting(parts[2].strip())
 
-            match = idea_pattern.match(line)
-            if match:
-                day_from_line = match.group(1)
-                topic = match.group('topic').strip(' :-.')
-                style = match.group('style1') or match.group('style2')
-                
-                # Определяем день
-                current_day_num = None
-                if day_from_line:
-                    current_day_num = int(day_from_line)
-                elif current_day is not None:
-                     current_day_num = current_day + 1 # Инкрементируем предыдущий
-                else:
-                     current_day_num = day_counter # Используем счетчик строк
+                    # Проверяем, входит ли стиль в запрошенный список (без учета регистра)
+                    if format_style.lower() not in expected_style_set:
+                        logger.warning(f"Стиль '{format_style}' из ответа LLM не найден в запрошенных стилях. Выбираем случайный.")
+                        format_style = random.choice(styles) if styles else "Без указания стиля"
 
-                # Очищаем тему и стиль
-                cleaned_topic = clean_text_formatting(topic)
-                cleaned_style = clean_text_formatting(style.strip()) if style else "Без указания стиля"
-                
-                # Если стиль пустой, но был в списке запроса, выбираем случайный
-                if cleaned_style == "Без указания стиля" and styles:
-                     cleaned_style = random.choice(styles) # Берем из запроса, если не найден
-                
-                # Пропускаем, если тема пустая после очистки
-                if not cleaned_topic:
-                    continue
+                    if topic_idea: # Пропускаем, если тема пустая
+                         plan_items.append(PlanItem(
+                            day=day,
+                            topic_idea=topic_idea,
+                            format_style=format_style
+                         ))
+                    else:
+                        logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
 
-                plan_items.append(PlanItem(
-                    day=current_day_num,
-                    topic_idea=cleaned_topic,
-                    format_style=cleaned_style
-                ))
-                current_day = current_day_num # Запоминаем последний найденный день
-                day_counter = current_day_num + 1 # Обновляем счетчик строк
+                except ValueError:
+                    logger.warning(f"Не удалось извлечь номер дня из строки плана: {line}")
+                except Exception as parse_err:
+                    logger.warning(f"Ошибка парсинга строки плана '{line}': {parse_err}")
             else:
-                 logger.warning(f"Не удалось распарсить строку плана: {line}")
-                 # Можно добавить резервную логику или просто пропустить строку
-        # --- КОНЕЦ: Улучшенная логика парсинга ---
+                logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
+        # --- ИЗМЕНЕНИЕ КОНЕЦ ---
 
-        # Если и сейчас нет идей, генерируем вручную
+        # ... (остальная логика обработки plan_items: сортировка, дополнение, проверка пустого плана) ...
+         # Если и сейчас нет идей, генерируем вручную
         if not plan_items:
-            logger.warning("Не удалось извлечь идеи из ответа LLM, генерируем базовый план.")
+            logger.warning("Не удалось извлечь идеи из ответа LLM или все строки были некорректными, генерируем базовый план.")
             for day in range(1, period_days + 1):
-                random_theme = random.choice(themes)
-                random_style = random.choice(styles)
+                random_theme = random.choice(themes) if themes else "Общая тема"
+                random_style = random.choice(styles) if styles else "Общий стиль"
                 plan_items.append(PlanItem(
                     day=day,
                     topic_idea=f"Пост о {random_theme}",
                     format_style=random_style
                 ))
-                
+
         # Сортируем по дням
         plan_items.sort(key=lambda x: x.day)
-        
-        # Обрезаем до запрошенного количества дней
+
+        # Обрезаем до запрошенного количества дней (на случай, если LLM выдал больше)
         plan_items = plan_items[:period_days]
-        
-        # Если план получился короче запрошенного периода, дополняем
+
+        # Если план получился короче запрошенного периода, дополняем (возможно, из-за ошибок парсинга)
         if len(plan_items) < period_days:
-            existing_days = set(item.day for item in plan_items)
+            existing_days = {item.day for item in plan_items}
             needed_days = period_days - len(plan_items)
             logger.warning(f"План короче запрошенного ({len(plan_items)}/{period_days}), дополняем {needed_days} идеями.")
-            last_day = max(existing_days) if existing_days else 0
+            # Находим максимальный существующий день или начинаем с 1
+            start_day = max(existing_days) + 1 if existing_days else 1
             for i in range(needed_days):
-                 current_day = last_day + 1 + i
-                 random_theme = random.choice(themes)
-                 random_style = random.choice(styles)
-                 plan_items.append(PlanItem(
+                 current_day = start_day + i
+                 # Проверяем, что такого дня еще нет (на всякий случай)
+                 if current_day not in existing_days:
+                    random_theme = random.choice(themes) if themes else "Дополнительная тема"
+                    random_style = random.choice(styles) if styles else "Дополнительный стиль"
+                    plan_items.append(PlanItem(
                      day=current_day,
                      topic_idea=f"(Дополнено) Пост о {random_theme}",
-                     format_style=random_style
-                 ))
-        
-        # Сортируем по дням еще раз
+                        format_style=random_style
+                    ))
+
+        # Сортируем по дням еще раз после возможного дополнения
         plan_items.sort(key=lambda x: x.day)
-        
-        logger.info(f"Сгенерирован план из {len(plan_items)} идей для канала @{channel_name}")
+
+        logger.info(f"Сгенерирован и обработан план из {len(plan_items)} идей для канала @{channel_name}")
         return PlanGenerationResponse(plan=plan_items)
-                
+
     except Exception as e:
-        logger.error(f"Ошибка при генерации плана: {e}")
+        logger.error(f"Ошибка при генерации плана: {e}\\n{traceback.format_exc()}") # Добавляем traceback
         return PlanGenerationResponse(
             message=f"Ошибка при генерации плана: {str(e)}",
             plan=[]
