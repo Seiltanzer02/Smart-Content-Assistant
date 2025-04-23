@@ -2215,12 +2215,7 @@ async def fix_schema():
                 "name": "add_external_id_to_saved_images",
                 "query": "ALTER TABLE saved_images ADD COLUMN IF NOT EXISTS external_id TEXT;"
             },
-            # === ИЗМЕНЕНИЕ: Добавление updated_at в suggested_ideas ===
-            {
-                "name": "add_updated_at_to_suggested_ideas",
-                "query": "ALTER TABLE suggested_ideas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();"
-            },
-            # === ИЗМЕНЕНИЕ: Добавление saved_image_id в saved_posts (с внешним ключом) ===
+            # Добавление saved_image_id в saved_posts
             {
                 "name": "add_saved_image_id_to_saved_posts",
                 "query": "ALTER TABLE saved_posts ADD COLUMN IF NOT EXISTS saved_image_id UUID REFERENCES saved_images(id) ON DELETE SET NULL;"
@@ -2571,11 +2566,7 @@ async def save_suggested_ideas_batch(payload: SaveIdeasRequest, request: Request
                 "format_style": format_style,
                 "relative_day": idea_data.get("day"),
                 "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
-                # Добавляем другие поля, если они есть
                 "is_detailed": idea_data.get("is_detailed", False),
-                # "status": idea_data.get("status", "new"), # --- УДАЛЕНО: Поле status отсутствует в схеме ---
-                # cleaned_title можно генерировать здесь или оставить пустым
             }
             records_to_insert.append(record)
             saved_ids.append(idea_id)
