@@ -964,7 +964,7 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
         logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
 
         plan_items = []
-        lines = plan_text.split('\\n')
+        lines = plan_text.split('\n')
 
         # --- ИЗМЕНЕНИЕ НАЧАЛО: Улучшенный парсинг с новым разделителем ---
         expected_style_set = set(s.lower() for s in styles) # Для быстрой проверки
@@ -1802,6 +1802,18 @@ async def startup_event():
     
     logger.info("Обслуживающие процессы запущены успешно")
 
+    # --- ДОБАВЛЕНО: Вызов fix_schema при старте --- 
+    try:
+        fix_result = await fix_schema()
+        logger.info(f"Результат проверки/исправления схемы при старте: {fix_result}")
+        if not fix_result.get("success"):
+            logger.error("Ошибка при проверке/исправлении схемы БД при запуске!")
+            # Решите, следует ли прерывать запуск или нет.
+            # Пока продолжаем работу.
+    except Exception as schema_fix_error:
+        logger.error(f"Исключение при вызове fix_schema во время старта: {schema_fix_error}", exc_info=True)
+    # --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
 # --- Функция для исправления форматирования в существующих постах ---
 async def fix_existing_posts_formatting():
     """Исправляет форматирование в существующих постах."""
@@ -2173,61 +2185,108 @@ async def fix_formatting_in_json_fields():
 @app.get("/fix-schema")
 async def fix_schema():
     """Исправление схемы базы данных: добавление недостающих колонок и обновление кэша схемы."""
+    logger.info("Запуск исправления схемы БД...")
+    results = {
+        "success": False,
+        "message": "Не инициализирован",
+        "response_code": 500,
+        "operations": []
+    }
     try:
         if not supabase:
             logger.error("Клиент Supabase не инициализирован")
-            return {
-                "success": False,
-                "message": "Ошибка: не удалось подключиться к базе данных",
-                "response_code": 500
-            }
-        
-        # Прямой SQL-запрос для добавления preview_url в таблицу saved_images
-        preview_url_result = await _execute_sql_direct("""
-            ALTER TABLE saved_images 
-            ADD COLUMN IF NOT EXISTS preview_url TEXT;
-        """)
-        
-        # Прямой SQL-запрос для добавления updated_at в таблицу channel_analysis
-        updated_at_result = await _execute_sql_direct("""
-            ALTER TABLE channel_analysis 
-            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
-        """)
-        
-        # Прямой SQL-запрос для добавления external_id в таблицу saved_images (если отсутствует)
-        external_id_result = await _execute_sql_direct("""
-            ALTER TABLE saved_images 
-            ADD COLUMN IF NOT EXISTS external_id TEXT;
-        """)
+            results["message"] = "Ошибка: не удалось подключиться к базе данных"
+            return results
 
-        # Принудительно обновляем кэш схемы
-        refresh_result = await _execute_sql_direct("""
-            NOTIFY pgrst, 'reload schema';
-        """)
-        
-        refresh_status = 200 if refresh_result.get("status_code") == 200 else 500
-        
-        if refresh_status == 200:
-            logger.info("Колонки добавлены (если отсутствовали) и кэш схемы обновлен")
+        # Список команд для выполнения
+        sql_commands = [
+            # Добавление preview_url в saved_images
+            {
+                "name": "add_preview_url_to_saved_images",
+                "query": "ALTER TABLE saved_images ADD COLUMN IF NOT EXISTS preview_url TEXT;"
+            },
+            # Добавление updated_at в channel_analysis
+            {
+                "name": "add_updated_at_to_channel_analysis",
+                "query": "ALTER TABLE channel_analysis ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();"
+            },
+            # Добавление external_id в saved_images
+            {
+                "name": "add_external_id_to_saved_images",
+                "query": "ALTER TABLE saved_images ADD COLUMN IF NOT EXISTS external_id TEXT;"
+            },
+            # === ИЗМЕНЕНИЕ: Добавление updated_at в suggested_ideas ===
+            {
+                "name": "add_updated_at_to_suggested_ideas",
+                "query": "ALTER TABLE suggested_ideas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();"
+            },
+            # === ИЗМЕНЕНИЕ: Добавление saved_image_id в saved_posts (с внешним ключом) ===
+            {
+                "name": "add_saved_image_id_to_saved_posts",
+                "query": "ALTER TABLE saved_posts ADD COLUMN IF NOT EXISTS saved_image_id UUID REFERENCES saved_images(id) ON DELETE SET NULL;"
+            }
+        ]
+
+        all_commands_successful = True
+
+        for command in sql_commands:
+            logger.info(f"Выполнение команды SQL: {command['name']}")
+            result = await _execute_sql_direct(command['query'])
+            status_code = result.get("status_code")
+            op_result = {
+                "name": command['name'],
+                "status_code": status_code,
+                "error": result.get("error")
+            }
+            results["operations"] .append(op_result)
+
+            if status_code not in [200, 204]:
+                logger.warning(f"Ошибка при выполнении {command['name']}: {status_code} - {result.get('error')}")
+                all_commands_successful = False
+            else:
+                logger.info(f"Команда {command['name']} выполнена успешно (или колонка уже существовала).")
+
+        # Принудительно обновляем кэш схемы ПОСЛЕ всех изменений
+        logger.info("Принудительное обновление кэша схемы PostgREST...")
+        # === ИЗМЕНЕНИЕ: Усиленное обновление кэша ===
+        notify_successful = True
+        for i in range(3): # Попробуем несколько раз с задержкой
+            refresh_result = await _execute_sql_direct("NOTIFY pgrst, 'reload schema';")
+            status_code = refresh_result.get("status_code")
+            results["operations"] .append({
+                 "name": f"notify_pgrst_attempt_{i+1}",
+                 "status_code": status_code,
+                 "error": refresh_result.get("error")
+            })
+            if status_code not in [200, 204]:
+                 logger.warning(f"Попытка {i+1} обновления кэша не удалась: {status_code} - {refresh_result.get('error')}")
+                 notify_successful = False
+            else:
+                 logger.info(f"Попытка {i+1} обновления кэша успешна.")
+                 notify_successful = True # Достаточно одной успешной попытки
+                 break # Выходим из цикла, если успешно
+            await asyncio.sleep(0.5) # Небольшая пауза между попытками
+        # === КОНЕЦ ИЗМЕНЕНИЯ ===
+
+        if all_commands_successful and notify_successful:
+            results["success"] = True
+            results["message"] = "Схема проверена/исправлена, кэш обновлен."
+            results["response_code"] = 200
+            logger.info("Исправление схемы и обновление кэша завершено успешно.")
         else:
-            logger.error(f"Не удалось обновить кэш схемы: {refresh_result}")
-        
-        return {
-            "success": True,
-            "message": "Схема обновлена, необходимые колонки добавлены (если отсутствовали) и кэш обновлен",
-            "response_code": 200,
-            "preview_url_result_code": preview_url_result.get("status_code"),
-            "updated_at_result_code": updated_at_result.get("status_code"),
-            "external_id_result_code": external_id_result.get("status_code"),
-            "refresh_response_code": refresh_status
-        }
+            results["success"] = False
+            results["message"] = "Во время исправления схемы или обновления кэша возникли ошибки."
+            results["response_code"] = 500
+            logger.error(f"Ошибки во время исправления схемы или обновления кэша. Детали: {results['operations']}")
+
+        return results
+
     except Exception as e:
-        logger.error(f"Ошибка при исправлении схемы БД: {e}")
-        return {
-            "success": False,
-            "message": f"Ошибка при исправлении схемы: {e}",
-            "response_code": 500
-        }
+        logger.error(f"Критическая ошибка при исправлении схемы БД: {e}", exc_info=True)
+        results["success"] = False
+        results["message"] = f"Ошибка при исправлении схемы: {e}"
+        results["response_code"] = 500
+        return results
 
 @app.get("/check-schema")
 async def check_schema():
