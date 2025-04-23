@@ -807,29 +807,30 @@ async def get_saved_ideas(request: Request, channel_name: Optional[str] = None):
                 ideas=[]
             )
             
-        # Преобразуем данные
+        # === ИЗМЕНЕНИЕ: Корректное формирование ответа ===
         ideas = []
         for item in result.data:
-            try:
-                # Пробуем распарсить JSON-строки
-                themes = json.loads(item.get("themes_json", "[]")) if "themes_json" in item else []
-                styles = json.loads(item.get("styles_json", "[]")) if "styles_json" in item else []
-                
-                # Создаем словарь с данными
-                idea = {
-                    "id": item.get("id"),
-                    "channel_name": item.get("channel_name"),
-                    "themes": themes,
-                    "styles": styles,
-                    "created_at": item.get("created_at")
-                }
-                ideas.append(idea)
-            except Exception as e:
-                logger.error(f"Ошибка при обработке идеи {item.get('id')}: {e}")
-                
+            # Просто берем нужные поля напрямую из ответа БД
+            idea = {
+                "id": item.get("id"),
+                "channel_name": item.get("channel_name"),
+                "topic_idea": item.get("topic_idea"), # Берем напрямую
+                "format_style": item.get("format_style"), # Берем напрямую
+                "relative_day": item.get("relative_day"),
+                "is_detailed": item.get("is_detailed"),
+                "created_at": item.get("created_at")
+                # Убрана ненужная обработка themes_json/styles_json
+            }
+            # Добавляем только если есть тема
+            if idea["topic_idea"]:
+                 ideas.append(idea)
+            else:
+                 logger.warning(f"Пропущена идея без topic_idea: ID={idea['id']}")
+        # === КОНЕЦ ИЗМЕНЕНИЯ ===
+
         logger.info(f"Получено {len(ideas)} идей для пользователя {telegram_user_id}")
         return SuggestedIdeasResponse(ideas=ideas)
-        
+
     except Exception as e:
         logger.error(f"Ошибка при получении идей: {e}")
         return SuggestedIdeasResponse(
