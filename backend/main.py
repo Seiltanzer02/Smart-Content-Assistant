@@ -2536,6 +2536,21 @@ async def save_suggested_ideas_batch(payload: SaveIdeasRequest, request: Request
             errors.append(f"Ошибка удаления старых идей: {str(del_err)}")
     # --- КОНЕЦ: Удаление старых идей --- 
 
+    # --- ДОБАВЛЕНО: Вызов fix_schema перед вставкой --- 
+    try:
+        logger.info("Вызов fix_schema непосредственно перед сохранением идей...")
+        fix_result = await fix_schema()
+        if not fix_result.get("success"):
+            logger.warning(f"Не удалось обновить/проверить схему перед сохранением идей: {fix_result}")
+            # Не прерываем, но логируем. Ошибка, скорее всего, повторится при вставке.
+            errors.append("Предупреждение: не удалось проверить/обновить схему перед сохранением.")
+        else:
+            logger.info("Проверка/обновление схемы перед сохранением идей завершена успешно.")
+    except Exception as pre_save_fix_err:
+        logger.error(f"Ошибка при вызове fix_schema перед сохранением идей: {pre_save_fix_err}", exc_info=True)
+        errors.append(f"Ошибка проверки схемы перед сохранением: {str(pre_save_fix_err)}")
+    # --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
     records_to_insert = []
     for idea_data in ideas_to_save:
         try:
