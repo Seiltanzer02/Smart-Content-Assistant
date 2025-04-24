@@ -1142,6 +1142,19 @@ async def create_post(request: Request, post_data: PostData):
         post_to_save["user_id"] = int(telegram_user_id)
         post_to_save["id"] = str(uuid.uuid4()) # Генерируем ID для нового поста
         
+        # === ДОБАВЛЕНО: Обработка target_date ===
+        if not post_to_save.get("target_date"):
+            logger.warning(f"Получена пустая target_date для нового поста {post_to_save['id']}, устанавливаем в NULL.")
+            post_to_save["target_date"] = None
+        else:
+            # Дополнительно можно добавить валидацию формата YYYY-MM-DD, если нужно
+            try:
+                datetime.strptime(post_to_save["target_date"], '%Y-%m-%d')
+            except ValueError:
+                logger.error(f"Некорректный формат target_date: {post_to_save['target_date']} для поста {post_to_save['id']}. Устанавливаем в NULL.")
+                post_to_save["target_date"] = None
+        # === КОНЕЦ ДОБАВЛЕНИЯ ===
+        
         # --- НАЧАЛО: Обработка выбранного изображения --- 
         saved_image_id = None
         if selected_image:
@@ -1345,6 +1358,20 @@ async def update_post(post_id: str, request: Request, post_data: PostData):
         # Создаем словарь с основными данными поста для обновления
         post_to_update = post_data.dict(exclude={"selected_image_data", "image_url", "images_ids"})
         post_to_update["updated_at"] = datetime.now().isoformat()
+        
+        # === ДОБАВЛЕНО: Обработка target_date ===
+        if "target_date" in post_to_update and not post_to_update.get("target_date"):
+            logger.warning(f"Получена пустая target_date при обновлении поста {post_id}, устанавливаем в NULL.")
+            post_to_update["target_date"] = None
+        elif post_to_update.get("target_date"):
+            # Дополнительно можно добавить валидацию формата YYYY-MM-DD, если нужно
+            try:
+                datetime.strptime(post_to_update["target_date"], '%Y-%m-%d')
+            except ValueError:
+                logger.error(f"Некорректный формат target_date: {post_to_update['target_date']} при обновлении поста {post_id}. Устанавливаем в NULL.")
+                post_to_update["target_date"] = None
+        # Если target_date не передана в запросе на обновление, она не изменяется
+        # === КОНЕЦ ДОБАВЛЕНИЯ ===
         
         # === ИЗМЕНЕНИЕ НАЧАЛО ===
         # Добавляем/обновляем ID сохраненного изображения в данных поста
