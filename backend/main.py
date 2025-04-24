@@ -1651,7 +1651,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
     # === ИЗМЕНЕНО: Инициализация found_images в начале ===
     found_images = [] 
     channel_name = req.channel_name if hasattr(req, 'channel_name') else ""
-    # === КОНЕЦ ИЗМЕНЕНИЯ ===
+    api_error_message = None # Добавляем переменную для хранения ошибки API
     try:
         # Получение telegram_user_id из заголовков
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
@@ -1740,7 +1740,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.75,
-                max_tokens=2000,
+                max_tokens=1000, # <--- УМЕНЬШЕНО ЗНАЧЕНИЕ
                 timeout=120,
                 extra_headers={
                     "HTTP-Referer": "https://content-manager.onrender.com",
@@ -1752,14 +1752,25 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
             if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
                 post_text = response.choices[0].message.content.strip()
                 logger.info(f"Получен текст поста ({len(post_text)} символов)")
+            # === ДОБАВЛЕНО: Явная проверка на ошибку в ответе ===
+            elif response and hasattr(response, 'error') and response.error:
+                err_details = response.error
+                # Пытаемся получить сообщение об ошибке
+                api_error_message = getattr(err_details, 'message', str(err_details)) 
+                logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
+                post_text = "[Текст не сгенерирован из-за ошибки API]"
+            # === КОНЕЦ ДОБАВЛЕНИЯ ===
             else:
+                # Общий случай некорректного ответа
+                api_error_message = "API вернул некорректный или пустой ответ"
                 logger.error(f"Некорректный или пустой ответ от OpenRouter API. Ответ: {response}")
-                post_text = f"(Ошибка: Не удалось сгенерировать текст поста - API вернул некорректный ответ)"
-                # Не прерываем выполнение, позволяем искать изображения
+                post_text = "[Текст не сгенерирован из-за ошибки API]"
+                
         except Exception as api_error:
+            # Ловим ошибки HTTP запроса или другие исключения
+            api_error_message = f"Ошибка соединения с API: {str(api_error)}"
             logger.error(f"Ошибка при запросе к OpenRouter API: {api_error}", exc_info=True)
-            post_text = f"(Ошибка: Не удалось сгенерировать текст поста - {str(api_error)})"
-            # Не прерываем выполнение, позволяем искать изображения
+            post_text = "[Текст не сгенерирован из-за ошибки API]"
         # === КОНЕЦ ИЗМЕНЕНИЯ ===
 
         # Генерируем ключевые слова для поиска изображений на основе темы и текста
@@ -1815,10 +1826,16 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
         # Просто возвращаем найденные изображения без сохранения
         logger.info(f"Подготовлено {len(found_images)} предложенных изображений")
         
+        # === ИЗМЕНЕНО: Передача сообщения об ошибке в ответе ===
+        response_message = f"Сгенерирован пост с {len(found_images[:IMAGE_RESULTS_COUNT])} предложенными изображениями"
+        if api_error_message:
+            # Если была ошибка API, добавляем ее в сообщение ответа
+            response_message = f"Ошибка генерации текста: {api_error_message}. Изображений найдено: {len(found_images[:IMAGE_RESULTS_COUNT])}"
+            
         return PostDetailsResponse(
-            generated_text=post_text,
-            found_images=found_images[:IMAGE_RESULTS_COUNT],  # Используем константу для ограничения
-            message=f"Сгенерирован пост с {len(found_images[:IMAGE_RESULTS_COUNT])} предложенными изображениями",
+            generated_text=post_text, # Будет пустым или '[...]' при ошибке
+            found_images=found_images[:IMAGE_RESULTS_COUNT],
+            message=response_message, # <--- Сообщение включает ошибку API
             channel_name=channel_name,
             selected_image_data=PostImage(
                 url=found_images[0].regular_url if found_images else "",
@@ -1829,6 +1846,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
                 author_url=found_images[0].author_url if found_images else ""
             ) if found_images else None
         )
+        # === КОНЕЦ ИЗМЕНЕНИЯ ===
                 
     except HTTPException as http_err:
         # Перехватываем HTTPException, чтобы они не попадали в общий Exception
