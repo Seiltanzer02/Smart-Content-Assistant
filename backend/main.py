@@ -1119,6 +1119,11 @@ async def create_post(request: Request, post_data: PostData):
             # Продолжаем, но логируем ошибку
         # === КОНЕЦ ДОБАВЛЕНИЯ ===
 
+        # === ДОБАВЛЕНО: Пауза после обновления схемы ===
+        logger.info("Небольшая пауза после fix_schema, чтобы дать PostgREST время...")
+        await asyncio.sleep(0.7) # Пауза 0.7 секунды
+        # === КОНЕЦ ДОБАВЛЕНИЯ ===
+
         # Получение telegram_user_id из заголовков
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
         if not telegram_user_id:
@@ -1194,12 +1199,39 @@ async def create_post(request: Request, post_data: PostData):
         post_to_save["saved_image_id"] = saved_image_id
         # === ИЗМЕНЕНИЕ КОНЕЦ ===
         
-        # Сохранение поста в Supabase
-        result = supabase.table("saved_posts").insert(post_to_save).execute()
+        # === ИЗМЕНЕНИЕ НАЧАЛО: Попытка сохранения поста с ретраем при PGRST204 ===
+        result = None
+        max_attempts = 2
+        for attempt in range(max_attempts):
+            try:
+                logger.info(f"Попытка {attempt + 1}/{max_attempts} сохранения поста {post_to_save['id']}...")
+                result = supabase.table("saved_posts").insert(post_to_save).execute()
+                # Если успешно, выходим из цикла
+                logger.info(f"Пост {post_to_save['id']} успешно сохранен (попытка {attempt + 1}).")
+                break
+            except APIError as e:
+                logger.warning(f"Ошибка APIError при сохранении поста (попытка {attempt + 1}): {e}")
+                # Проверяем код ошибки
+                if e.code == 'PGRST204' and attempt < max_attempts - 1:
+                    logger.warning(f"Ошибка PGRST204 (кэш схемы?), ждем и пробуем еще раз...")
+                    await asyncio.sleep(1.0) # Ждем 1 секунду перед повторной попыткой
+                else:
+                    # Если это не PGRST204 или последняя попытка, пробрасываем ошибку
+                    logger.error(f"Не удалось сохранить пост {post_to_save['id']} после {attempt + 1} попыток.")
+                    raise e # Пробрасываем исходную ошибку APIError
+            except Exception as general_e:
+                # Ловим другие возможные ошибки и пробрасываем
+                logger.error(f"Непредвиденная ошибка при сохранении поста (попытка {attempt + 1}): {general_e}")
+                raise general_e
         
-        if not hasattr(result, 'data') or len(result.data) == 0:
-            logger.error(f"Ошибка при сохранении поста: Ответ Supabase пуст или не содержит данных. Status: {result.status_code if hasattr(result, 'status_code') else 'N/A'}")
-            raise HTTPException(status_code=500, detail="Ошибка при сохранении поста")
+        # Проверяем результат ПОСЛЕ цикла попыток
+        if not result or not hasattr(result, 'data') or len(result.data) == 0:
+            # Если result все еще None или пустой после всех попыток
+            logger.error(f"Ошибка при сохранении поста {post_to_save['id']} после {max_attempts} попыток: Ответ Supabase пуст или не содержит данных.")
+            # Используем последнее известное исключение, если оно было, или генерируем новое
+            last_error_details = f"Status: {result.status_code if hasattr(result, 'status_code') else 'N/A'}" if result else "Result is None"
+            raise HTTPException(status_code=500, detail=f"Не удалось сохранить пост после {max_attempts} попыток. {last_error_details}")
+        # === ИЗМЕНЕНИЕ КОНЕЦ ===
             
         created_post = result.data[0]
         post_id = created_post["id"]
@@ -1241,6 +1273,11 @@ async def update_post(post_id: str, request: Request, post_data: PostData):
         except Exception as pre_update_fix_err:
             logger.error(f"Ошибка при вызове fix_schema перед обновлением поста {post_id}: {pre_update_fix_err}", exc_info=True)
             # Продолжаем, но логируем ошибку
+        # === КОНЕЦ ДОБАВЛЕНИЯ ===
+
+        # === ДОБАВЛЕНО: Пауза после обновления схемы ===
+        logger.info(f"Небольшая пауза после fix_schema для поста {post_id}, чтобы дать PostgREST время...")
+        await asyncio.sleep(0.7) # Пауза 0.7 секунды
         # === КОНЕЦ ДОБАВЛЕНИЯ ===
 
         # Получение telegram_user_id из заголовков
@@ -1325,16 +1362,59 @@ async def update_post(post_id: str, request: Request, post_data: PostData):
         post_to_update["saved_image_id"] = saved_image_id
         # === ИЗМЕНЕНИЕ КОНЕЦ ===
         
-        # Обновление основных данных поста в Supabase
-        result = supabase.table("saved_posts").update(post_to_update).eq("id", post_id).eq("user_id", int(telegram_user_id)).execute()
+        # === ИЗМЕНЕНИЕ НАЧАЛО: Попытка обновления поста с ретраем при PGRST204 ===
+        result = None
+        max_attempts = 2
+        for attempt in range(max_attempts):
+            try:
+                logger.info(f"Попытка {attempt + 1}/{max_attempts} обновления поста {post_id}...")
+                result = supabase.table("saved_posts").update(post_to_update).eq("id", post_id).eq("user_id", int(telegram_user_id)).execute()
+                # Если успешно, выходим из цикла
+                logger.info(f"Пост {post_id} успешно обновлен (попытка {attempt + 1}).")
+                break
+            except APIError as e:
+                logger.warning(f"Ошибка APIError при обновлении поста {post_id} (попытка {attempt + 1}): {e}")
+                # Проверяем код ошибки
+                if e.code == 'PGRST204' and attempt < max_attempts - 1:
+                    logger.warning(f"Ошибка PGRST204 (кэш схемы?), ждем и пробуем еще раз...")
+                    await asyncio.sleep(1.0) # Ждем 1 секунду перед повторной попыткой
+                else:
+                    # Если это не PGRST204 или последняя попытка, пробрасываем ошибку
+                    logger.error(f"Не удалось обновить пост {post_id} после {attempt + 1} попыток.")
+                    raise e # Пробрасываем исходную ошибку APIError
+            except Exception as general_e:
+                 # Ловим другие возможные ошибки и пробрасываем
+                 logger.error(f"Непредвиденная ошибка при обновлении поста {post_id} (попытка {attempt + 1}): {general_e}")
+                 raise general_e
         
-        # ... остальной код update_post ...
+        # Проверяем результат ПОСЛЕ цикла попыток
+        if not result or not hasattr(result, 'data') or len(result.data) == 0:
+            # Если result все еще None или пустой после всех попыток
+            logger.error(f"Ошибка при обновлении поста {post_id} после {max_attempts} попыток: Ответ Supabase пуст или не содержит данных.")
+            last_error_details = f"Status: {result.status_code if hasattr(result, 'status_code') else 'N/A'}" if result else "Result is None"
+            raise HTTPException(status_code=500, detail=f"Не удалось обновить пост после {max_attempts} попыток. {last_error_details}")
+        # === ИЗМЕНЕНИЕ КОНЕЦ ===
+        
+        # ... остальной код update_post ... (включая обработку результата и возврат ответа)
+        updated_post = result.data[0] # Теперь берем данные из успешного result
+        
+        logger.info(f"Пользователь {telegram_user_id} обновил пост: {post_id}")
+        
+        # Возвращаем данные обновленного поста, обогащенные данными изображения
+        response_data = SavedPostResponse(**updated_post)
+        if saved_image_id and selected_image: # Если было выбрано и сохранено/найдено изображение
+            response_data.selected_image_data = selected_image # Возвращаем исходные данные изображения
+        elif saved_image_id: # Если изображение было найдено/сохранено, но не передано
+            # Пытаемся получить данные изображения из БД
+            img_data_res = supabase.table("saved_images").select("id, url, preview_url, alt, author, author_url, source").eq("id", saved_image_id).maybe_single().execute()
+            if img_data_res.data:
+                 response_data.selected_image_data = PostImage(**img_data_res.data)
+        # Если saved_image_id равно None (изображение удалено), selected_image_data останется None
+
+        return response_data
 
     except HTTPException as http_err:
         raise http_err
-    except Exception as e:
-        logger.error(f"Ошибка при обновлении поста {post_id}: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера при обновлении поста: {str(e)}")
 
 @app.delete("/posts/{post_id}")
 async def delete_post(post_id: str, request: Request):
