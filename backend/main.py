@@ -1199,40 +1199,30 @@ async def create_post(request: Request, post_data: PostData):
         post_to_save["saved_image_id"] = saved_image_id
         # === ИЗМЕНЕНИЕ КОНЕЦ ===
         
-        # === ИЗМЕНЕНИЕ НАЧАЛО: Попытка сохранения поста с ретраем при PGRST204 ===
-        result = None
-        max_attempts = 2
-        for attempt in range(max_attempts):
-            try:
-                logger.info(f"Попытка {attempt + 1}/{max_attempts} сохранения поста {post_to_save['id']}...")
-                result = supabase.table("saved_posts").insert(post_to_save).execute()
-                # Если успешно, выходим из цикла
-                logger.info(f"Пост {post_to_save['id']} успешно сохранен (попытка {attempt + 1}).")
-                break
-            except APIError as e:
-                logger.warning(f"Ошибка APIError при сохранении поста (попытка {attempt + 1}): {e}")
-                # Проверяем код ошибки
-                if e.code == 'PGRST204' and attempt < max_attempts - 1:
-                    logger.warning(f"Ошибка PGRST204 (кэш схемы?), ждем и пробуем еще раз...")
-                    await asyncio.sleep(1.0) # Ждем 1 секунду перед повторной попыткой
-                else:
-                    # Если это не PGRST204 или последняя попытка, пробрасываем ошибку
-                    logger.error(f"Не удалось сохранить пост {post_to_save['id']} после {attempt + 1} попыток.")
-                    raise e # Пробрасываем исходную ошибку APIError
-            except Exception as general_e:
-                # Ловим другие возможные ошибки и пробрасываем
-                logger.error(f"Непредвиденная ошибка при сохранении поста (попытка {attempt + 1}): {general_e}")
-                raise general_e
-        
-        # Проверяем результат ПОСЛЕ цикла попыток
-        if not result or not hasattr(result, 'data') or len(result.data) == 0:
-            # Если result все еще None или пустой после всех попыток
-            logger.error(f"Ошибка при сохранении поста {post_to_save['id']} после {max_attempts} попыток: Ответ Supabase пуст или не содержит данных.")
-            # Используем последнее известное исключение, если оно было, или генерируем новое
-            last_error_details = f"Status: {result.status_code if hasattr(result, 'status_code') else 'N/A'}" if result else "Result is None"
-            raise HTTPException(status_code=500, detail=f"Не удалось сохранить пост после {max_attempts} попыток. {last_error_details}")
-        # === ИЗМЕНЕНИЕ КОНЕЦ ===
-            
+        # === ИЗМЕНЕНИЕ НАЧАЛО: Логирование данных перед сохранением ===
+        logger.info(f"Подготовлены данные для сохранения в saved_posts: {post_to_save}")
+        # === КОНЕЦ ДОБАВЛЕНИЯ ===
+
+        # === ИЗМЕНЕНО: Убран механизм ретрая ===
+        try:
+            logger.info(f"Выполняем insert в saved_posts для ID {post_to_save['id']}...")
+            result = supabase.table("saved_posts").insert(post_to_save).execute()
+            logger.info(f"Insert выполнен. Status: {result.status_code if hasattr(result, 'status_code') else 'N/A'}")
+        except APIError as e:
+            logger.error(f"Ошибка APIError при insert в saved_posts: {e}")
+            # Перехватываем и логируем, чтобы увидеть детали перед 500 ошибкой
+            raise HTTPException(status_code=500, detail=f"Ошибка БД при создании поста: {e.message}")
+        except Exception as general_e:
+            logger.error(f"Непредвиденная ошибка при insert в saved_posts: {general_e}")
+            raise HTTPException(status_code=500, detail=f"Непредвиденная ошибка БД при создании поста: {str(general_e)}")
+
+        # Проверка результата
+        if not hasattr(result, 'data') or len(result.data) == 0:
+            logger.error(f"Ошибка при сохранении поста {post_to_save['id']}: Ответ Supabase пуст или не содержит данных.")
+            last_error_details = f"Status: {result.status_code if hasattr(result, 'status_code') else 'N/A'}"
+            raise HTTPException(status_code=500, detail=f"Не удалось сохранить пост. {last_error_details}")
+        # === КОНЕЦ ИЗМЕНЕНИЯ ===
+
         created_post = result.data[0]
         post_id = created_post["id"]
         
@@ -1362,38 +1352,28 @@ async def update_post(post_id: str, request: Request, post_data: PostData):
         post_to_update["saved_image_id"] = saved_image_id
         # === ИЗМЕНЕНИЕ КОНЕЦ ===
         
-        # === ИЗМЕНЕНИЕ НАЧАЛО: Попытка обновления поста с ретраем при PGRST204 ===
-        result = None
-        max_attempts = 2
-        for attempt in range(max_attempts):
-            try:
-                logger.info(f"Попытка {attempt + 1}/{max_attempts} обновления поста {post_id}...")
-                result = supabase.table("saved_posts").update(post_to_update).eq("id", post_id).eq("user_id", int(telegram_user_id)).execute()
-                # Если успешно, выходим из цикла
-                logger.info(f"Пост {post_id} успешно обновлен (попытка {attempt + 1}).")
-                break
-            except APIError as e:
-                logger.warning(f"Ошибка APIError при обновлении поста {post_id} (попытка {attempt + 1}): {e}")
-                # Проверяем код ошибки
-                if e.code == 'PGRST204' and attempt < max_attempts - 1:
-                    logger.warning(f"Ошибка PGRST204 (кэш схемы?), ждем и пробуем еще раз...")
-                    await asyncio.sleep(1.0) # Ждем 1 секунду перед повторной попыткой
-                else:
-                    # Если это не PGRST204 или последняя попытка, пробрасываем ошибку
-                    logger.error(f"Не удалось обновить пост {post_id} после {attempt + 1} попыток.")
-                    raise e # Пробрасываем исходную ошибку APIError
-            except Exception as general_e:
-                 # Ловим другие возможные ошибки и пробрасываем
-                 logger.error(f"Непредвиденная ошибка при обновлении поста {post_id} (попытка {attempt + 1}): {general_e}")
-                 raise general_e
-        
-        # Проверяем результат ПОСЛЕ цикла попыток
-        if not result or not hasattr(result, 'data') or len(result.data) == 0:
-            # Если result все еще None или пустой после всех попыток
-            logger.error(f"Ошибка при обновлении поста {post_id} после {max_attempts} попыток: Ответ Supabase пуст или не содержит данных.")
-            last_error_details = f"Status: {result.status_code if hasattr(result, 'status_code') else 'N/A'}" if result else "Result is None"
-            raise HTTPException(status_code=500, detail=f"Не удалось обновить пост после {max_attempts} попыток. {last_error_details}")
-        # === ИЗМЕНЕНИЕ КОНЕЦ ===
+        # === ИЗМЕНЕНИЕ НАЧАЛО: Логирование данных перед сохранением ===
+        logger.info(f"Подготовлены данные для обновления в saved_posts: {post_to_update}")
+        # === КОНЕЦ ДОБАВЛЕНИЯ ===
+
+        # === ИЗМЕНЕНО: Убран механизм ретрая ===
+        try:
+            logger.info(f"Выполняем update в saved_posts для ID {post_id}...")
+            result = supabase.table("saved_posts").update(post_to_update).eq("id", post_id).eq("user_id", int(telegram_user_id)).execute()
+            logger.info(f"Update выполнен. Status: {result.status_code if hasattr(result, 'status_code') else 'N/A'}")
+        except APIError as e:
+            logger.error(f"Ошибка APIError при update в saved_posts для ID {post_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Ошибка БД при обновлении поста: {e.message}")
+        except Exception as general_e:
+            logger.error(f"Непредвиденная ошибка при update в saved_posts для ID {post_id}: {general_e}")
+            raise HTTPException(status_code=500, detail=f"Непредвиденная ошибка БД при обновлении поста: {str(general_e)}")
+
+        # Проверка результата
+        if not hasattr(result, 'data') or len(result.data) == 0:
+            logger.error(f"Ошибка при обновлении поста {post_id}: Ответ Supabase пуст или не содержит данных.")
+            last_error_details = f"Status: {result.status_code if hasattr(result, 'status_code') else 'N/A'}"
+            raise HTTPException(status_code=500, detail=f"Не удалось обновить пост. {last_error_details}")
+        # === КОНЕЦ ИЗМЕНЕНИЯ ===
         
         # ... остальной код update_post ... (включая обработку результата и возврат ответа)
         updated_post = result.data[0] # Теперь берем данные из успешного result
@@ -2332,6 +2312,7 @@ async def fix_schema():
         ]
 
         all_commands_successful = True
+        saved_image_id_column_verified = False # Флаг для проверки колонки
 
         for command in sql_commands:
             logger.info(f"Выполнение команды SQL: {command['name']}")
@@ -2349,6 +2330,29 @@ async def fix_schema():
                 all_commands_successful = False
             else:
                 logger.info(f"Команда {command['name']} выполнена успешно (или колонка уже существовала).")
+
+            # === ДОБАВЛЕНО: Проверка существования колонки saved_image_id ===
+            if command['name'] == 'add_saved_image_id_to_saved_posts' and status_code in [200, 204]:
+                logger.info("Проверка фактического наличия колонки 'saved_image_id' в 'saved_posts'...")
+                verification_query = "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'saved_posts' AND column_name = 'saved_image_id';"
+                verify_result = await _execute_sql_direct(verification_query)
+                verify_status = verify_result.get("status_code")
+                op_result_verify = {
+                    "name": "verify_saved_image_id_column",
+                    "status_code": verify_status,
+                    "data": verify_result.get("data"),
+                    "error": verify_result.get("error")
+                }
+                results["operations"].append(op_result_verify)
+
+                if verify_status == 200 and verify_result.get("data") and len(verify_result["data"]) > 0:
+                    logger.info("ПРОВЕРКА УСПЕШНА: Колонка 'saved_image_id' найдена в 'saved_posts'.")
+                    saved_image_id_column_verified = True
+                else:
+                    logger.error("ПРОВЕРКА НЕУДАЧНА: Колонка 'saved_image_id' НЕ найдена в 'saved_posts' после команды ALTER TABLE!")
+                    logger.error(f"Результат проверки: {op_result_verify}")
+                    all_commands_successful = False # Считаем операцию неуспешной, если колонка не создалась
+            # === КОНЕЦ ДОБАВЛЕНИЯ ===
 
         # Принудительно обновляем кэш схемы ПОСЛЕ всех изменений
         logger.info("Принудительное обновление кэша схемы PostgREST...")
@@ -2372,11 +2376,16 @@ async def fix_schema():
             await asyncio.sleep(0.5) # Небольшая пауза между попытками
         # === КОНЕЦ ИЗМЕНЕНИЯ ===
 
-        if all_commands_successful and notify_successful:
+        if all_commands_successful and saved_image_id_column_verified and notify_successful:
             results["success"] = True
-            results["message"] = "Схема проверена/исправлена, кэш обновлен."
+            results["message"] = "Схема проверена/исправлена, колонка 'saved_image_id' подтверждена, кэш обновлен."
             results["response_code"] = 200
-            logger.info("Исправление схемы и обновление кэша завершено успешно.")
+            logger.info("Исправление схемы, проверка колонки и обновление кэша завершено успешно.")
+        elif not saved_image_id_column_verified:
+             results["success"] = False
+             results["message"] = "Ошибка: не удалось добавить/подтвердить колонку 'saved_image_id' в таблице 'saved_posts'."
+             results["response_code"] = 500
+             logger.error(f"Ошибка при проверке/добавлении колонки saved_image_id. Детали: {results['operations']}")
         else:
             results["success"] = False
             results["message"] = "Во время исправления схемы или обновления кэша возникли ошибки."
