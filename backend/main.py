@@ -1105,6 +1105,20 @@ async def get_posts(request: Request, channel_name: Optional[str] = None):
 async def create_post(request: Request, post_data: PostData):
     """Создание нового поста."""
     try:
+        # === ДОБАВЛЕНО: Принудительное обновление схемы перед операцией ===
+        try:
+            logger.info("Вызов fix_schema перед созданием поста...")
+            fix_result = await fix_schema()
+            if not fix_result.get("success"):
+                logger.warning(f"Не удалось обновить/проверить схему перед созданием поста: {fix_result}")
+                # Можно решить, прерывать ли операцию или нет. Пока продолжаем.
+            else:
+                logger.info("Проверка/обновление схемы перед созданием поста завершена успешно.")
+        except Exception as pre_save_fix_err:
+            logger.error(f"Ошибка при вызове fix_schema перед созданием поста: {pre_save_fix_err}", exc_info=True)
+            # Продолжаем, но логируем ошибку
+        # === КОНЕЦ ДОБАВЛЕНИЯ ===
+
         # Получение telegram_user_id из заголовков
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
         if not telegram_user_id:
@@ -1215,6 +1229,20 @@ async def create_post(request: Request, post_data: PostData):
 async def update_post(post_id: str, request: Request, post_data: PostData):
     """Обновление существующего поста."""
     try:
+        # === ДОБАВЛЕНО: Принудительное обновление схемы перед операцией ===
+        try:
+            logger.info(f"Вызов fix_schema перед обновлением поста {post_id}...")
+            fix_result = await fix_schema()
+            if not fix_result.get("success"):
+                logger.warning(f"Не удалось обновить/проверить схему перед обновлением поста {post_id}: {fix_result}")
+                # Можно решить, прерывать ли операцию или нет. Пока продолжаем.
+            else:
+                logger.info(f"Проверка/обновление схемы перед обновлением поста {post_id} завершена успешно.")
+        except Exception as pre_update_fix_err:
+            logger.error(f"Ошибка при вызове fix_schema перед обновлением поста {post_id}: {pre_update_fix_err}", exc_info=True)
+            # Продолжаем, но логируем ошибку
+        # === КОНЕЦ ДОБАВЛЕНИЯ ===
+
         # Получение telegram_user_id из заголовков
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
         if not telegram_user_id:
