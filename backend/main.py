@@ -1648,28 +1648,31 @@ async def search_unsplash_images(query: str, count: int = 5, topic: str = "", fo
 @app.post("/generate-post-details", response_model=PostDetailsResponse)
 async def generate_post_details(request: Request, req: GeneratePostDetailsRequest):
     """Генерация детального поста на основе идеи, с текстом и релевантными изображениями."""
+    # === ИЗМЕНЕНО: Инициализация found_images в начале ===
+    found_images = [] 
+    channel_name = req.channel_name if hasattr(req, 'channel_name') else ""
+    # === КОНЕЦ ИЗМЕНЕНИЯ ===
     try:
         # Получение telegram_user_id из заголовков
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
         if not telegram_user_id:
             logger.warning("Запрос генерации поста без идентификации пользователя Telegram")
-            return PostDetailsResponse(
-                generated_text="Для генерации постов необходимо авторизоваться через Telegram",
-                found_images=[],
-                message="Ошибка аутентификации"
+            # Используем HTTPException для корректного ответа
+            raise HTTPException(
+                status_code=401, 
+                detail="Для генерации постов необходимо авторизоваться через Telegram"
             )
             
         topic_idea = req.topic_idea
         format_style = req.format_style
-        channel_name = req.channel_name if hasattr(req, 'channel_name') else ""
+        # channel_name уже определен выше
         
         # Проверка наличия API ключа
         if not OPENROUTER_API_KEY:
             logger.warning("Генерация деталей поста невозможна: отсутствует OPENROUTER_API_KEY")
-            return PostDetailsResponse(
-                generated_text=f"Не удалось сгенерировать пост по идее: {topic_idea}. API недоступен.",
-                found_images=[],
-                message="API для генерации текста недоступен"
+            raise HTTPException(
+                status_code=503, # Service Unavailable
+                detail="API для генерации текста недоступен"
             )
             
         # Проверка наличия имени канала для получения примеров постов
@@ -1725,33 +1728,46 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
             api_key=OPENROUTER_API_KEY
         )
         
-        # Запрос к API
-        logger.info(f"Отправка запроса на генерацию поста по идее: {topic_idea}")
-        response = await client.chat.completions.create(
-            model="deepseek/deepseek-chat",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.75,
-            max_tokens=2000,
-            timeout=120,
-            extra_headers={
-                "HTTP-Referer": "https://content-manager.onrender.com",
-                "X-Title": "Smart Content Assistant"
-            }
-        )
-        
-        # Извлечение текста
-        post_text = response.choices[0].message.content.strip()
-        logger.info(f"Получен текст поста ({len(post_text)} символов)")
+        # === ИЗМЕНЕНО: Добавлена обработка ошибок API ===
+        post_text = ""
+        try:
+            # Запрос к API
+            logger.info(f"Отправка запроса на генерацию поста по идее: {topic_idea}")
+            response = await client.chat.completions.create(
+                model="deepseek/deepseek-chat",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.75,
+                max_tokens=2000,
+                timeout=120,
+                extra_headers={
+                    "HTTP-Referer": "https://content-manager.onrender.com",
+                    "X-Title": "Smart Content Assistant"
+                }
+            )
+            
+            # Проверка ответа и извлечение текста
+            if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+                post_text = response.choices[0].message.content.strip()
+                logger.info(f"Получен текст поста ({len(post_text)} символов)")
+            else:
+                logger.error(f"Некорректный или пустой ответ от OpenRouter API. Ответ: {response}")
+                post_text = f"(Ошибка: Не удалось сгенерировать текст поста - API вернул некорректный ответ)"
+                # Не прерываем выполнение, позволяем искать изображения
+        except Exception as api_error:
+            logger.error(f"Ошибка при запросе к OpenRouter API: {api_error}", exc_info=True)
+            post_text = f"(Ошибка: Не удалось сгенерировать текст поста - {str(api_error)})"
+            # Не прерываем выполнение, позволяем искать изображения
+        # === КОНЕЦ ИЗМЕНЕНИЯ ===
 
         # Генерируем ключевые слова для поиска изображений на основе темы и текста
         image_keywords = await generate_image_keywords(post_text, topic_idea, format_style)
         logger.info(f"Сгенерированы ключевые слова для поиска изображений: {image_keywords}")
         
         # Поиск изображений по ключевым словам
-        found_images = []
+        # found_images инициализирован в начале
         for keyword in image_keywords[:3]:  # Ограничиваем до 3 ключевых слов для поиска
             try:
                 # Получаем не более 5 изображений
@@ -1814,23 +1830,18 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
             ) if found_images else None
         )
                 
+    except HTTPException as http_err:
+        # Перехватываем HTTPException, чтобы они не попадали в общий Exception
+        raise http_err
     except Exception as e:
         logger.error(f"Ошибка при генерации деталей поста: {e}")
-        traceback.print_exc()
-        return PostDetailsResponse(
-            generated_text=f"Произошла ошибка при генерации поста: {str(e)}",
-            found_images=[],
-            message=f"Ошибка: {str(e)}",
-            channel_name=channel_name,
-            selected_image_data=PostImage(
-                url="",
-                id=None,
-                preview_url="",
-                alt="",
-                author="",
-                author_url=""
-            ) if found_images else None
+        traceback.print_exc() # Печатаем traceback для диагностики
+        # === ИЗМЕНЕНО: Используем HTTPException для ответа ===
+        raise HTTPException(
+            status_code=500,
+            detail=f"Внутренняя ошибка сервера при генерации деталей поста: {str(e)}"
         )
+        # === КОНЕЦ ИЗМЕНЕНИЯ ===
 
 # --- Функция для исправления форматирования в существующих идеях ---
 async def fix_existing_ideas_formatting():
