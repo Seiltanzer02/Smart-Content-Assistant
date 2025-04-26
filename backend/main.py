@@ -2494,14 +2494,32 @@ async def fix_schema():
                 }
                 results["operations"].append(op_result_verify)
 
-                if verify_status == 200 and verify_result.get("data") and len(verify_result["data"]) > 0:
-                    logger.info("ПРОВЕРКА УСПЕШНА: Колонка 'saved_image_id' найдена в 'saved_posts'.")
+                # === НАЧАЛО ИЗМЕНЕНИЯ: Более надежная проверка ===
+                column_found = False
+                verification_data = verify_result.get("data")
+                if verify_status == 200 and isinstance(verification_data, list) and len(verification_data) > 0:
+                    first_item = verification_data[0]
+                    if isinstance(first_item, dict) and first_item.get("column_name") == "saved_image_id":
+                        column_found = True
+                
+                if column_found:
+                    logger.info("ПРОВЕРКА УСПЕШНА (новая логика): Колонка 'saved_image_id' найдена в 'saved_posts'.")
                     saved_image_id_column_verified = True
-        else:
-                    logger.error("ПРОВЕРКА НЕУДАЧНА: Колонка 'saved_image_id' НЕ найдена в 'saved_posts' после команды ALTER TABLE!")
-                    logger.error(f"Результат проверки: {op_result_verify}")
-                    all_commands_successful = False # Считаем операцию неуспешной, если колонка не создалась
-            # === КОНЕЦ ДОБАВЛЕНИЯ ===
+                else:
+                    # Этот блок теперь должен выполняться только если колонка ДЕЙСТВИТЕЛЬНО не найдена или произошла ошибка запроса
+                    logger.error("ПРОВЕРКА НЕУДАЧНА (новая логика): Колонка 'saved_image_id' НЕ найдена в 'saved_posts' или ошибка в данных.")
+                    logger.error(f"Результат проверки (для отладки): status={verify_status}, data={verification_data}, error={verify_result.get('error')}")
+                    # Мы все еще должны считать это ошибкой, если колонка должна быть
+                    all_commands_successful = False 
+                # === КОНЕЦ ИЗМЕНЕНИЯ ===
+        else: # Этот else относится к if command['name'] == 'add_saved_image_id_to_saved_posts' ...
+             # Он будет выполнен, если команда добавления колонки НЕ УДАЛАСЬ (status_code != 200/204)
+             # Или если это была не команда добавления saved_image_id
+             pass # Ничего не делаем здесь, ошибка уже залогирована выше
+
+            # === КОНЕЦ ДОБАВЛЕНИЯ === # Это комментарий из оригинального кода, не имеет отношения к моим изменениям
+
+        # --- End of loop ---
 
         # Принудительно обновляем кэш схемы ПОСЛЕ всех изменений
         logger.info("Принудительное обновление кэша схемы PostgREST...")
