@@ -119,34 +119,6 @@ def execute_sql_query_direct(supabase: Client, sql_query: str) -> List[Dict[str,
             "Prefer": "return=representation"
         }
         
-        # Если функция exec_sql_array_json не существует, создаем её
-        try:
-            # Проверяем наличие функции exec_sql_array_json
-            create_query = """
-            CREATE OR REPLACE FUNCTION exec_sql_array_json(query text)
-            RETURNS json
-            LANGUAGE plpgsql
-            SECURITY DEFINER
-            AS $$
-            DECLARE
-                result json;
-            BEGIN
-                EXECUTE 'SELECT json_agg(t) FROM (' || query || ') t' INTO result;
-                RETURN COALESCE(result, '[]'::json);
-            EXCEPTION WHEN OTHERS THEN
-                RETURN json_build_object(
-                    'error', true,
-                    'message', SQLERRM,
-                    'detail', SQLSTATE
-                );
-            END;
-            $$;
-            """
-            create_response = supabase.rpc("exec_sql_array_json", {"query": create_query}).execute()
-            logger.info("Функция exec_sql_array_json создана/обновлена")
-        except Exception as e:
-            logger.warning(f"Ошибка при создании функции exec_sql_array_json: {str(e)}")
-        
         # Пробуем выполнить запрос через RPC
         try:
             response = requests.post(url, json={"query": sql_query}, headers=headers)
@@ -273,32 +245,26 @@ def execute_sql_individually(sql_content: str) -> bool:
         return False
 
 def get_executed_migrations(supabase: Client) -> list:
-    """
-    Получение списка уже выполненных миграций из таблицы _migrations
-    
-    Args:
-        supabase (Client): Клиент Supabase
-        
-    Returns:
-        list: Список имен выполненных миграций или пустой список в случае ошибки
-    """
+    """Получение списка имен выполненных миграций из таблицы _migrations."""
     try:
-        result = execute_sql_query_direct(
-            supabase,
-            "SELECT name FROM _migrations ORDER BY created_at ASC"
-        )
+        sql = "SELECT name FROM _migrations ORDER BY executed_at ASC"
         
-        if not result or 'data' not in result:
+        result = execute_sql_query_direct(supabase, sql)
+        
+        if not result:
             logger.warning("Не удалось получить список выполненных миграций")
             return []
-        
-        # Извлекаем имена миграций из результатов запроса
-        migrations = [item['name'] for item in result['data']]
+            
+        if isinstance(result, dict) and result.get("error"):
+            logger.warning(f"Ошибка при получении списка миграций: {result}")
+            return []
+            
+        migrations = [row['name'] for row in result if isinstance(row, dict) and 'name' in row]
         logger.info(f"Найдено {len(migrations)} выполненных миграций")
         return migrations
         
     except Exception as e:
-        logger.error(f"Ошибка при получении списка миграций: {str(e)}")
+        logger.error(f"Ошибка при получении выполненных миграций: {str(e)}")
         return []
 
 def run_migrations(supabase: Client) -> bool:
@@ -859,45 +825,26 @@ def main():
     
     # Проверка доступа к базе данных
     logger.info("Проверка доступа к базе данных...")
+    db_accessible = False # Инициализируем как False
     try:
         tables_result = supabase.table("suggested_ideas").select("id").limit(1).execute()
         logger.info(f"Успешное подключение к базе данных через Supabase клиент")
         db_accessible = True
     except Exception as e:
         logger.warning(f"Ошибка при проверке доступа к базе данных: {str(e)}")
-        db_accessible = False
-    
-    # Проверяем наличие функции exec_sql_array_json и создаем её, если необходимо
-    has_exec_sql = check_exec_sql_function(supabase)
-    
-    if not has_exec_sql:
-        logger.warning("Функция exec_sql_array_json не найдена, попытка создать её")
-        if create_exec_sql_function(supabase):
-            logger.info("Функция exec_sql_array_json успешно создана")
-            has_exec_sql = True  # Обновляем статус
-        else:
-            logger.warning("Не удалось создать функцию exec_sql_array_json, продолжаем без неё")
+        # db_accessible остается False
     
     # Создаем таблицу миграций, если она не существует
-    if has_exec_sql:
+    if db_accessible: 
         logger.info("Проверка наличия таблицы _migrations...")
         if check_migrations_table(supabase):
             logger.info("Таблица _migrations существует или успешно создана")
+            # Запускаем миграции ТОЛЬКО если есть доступ к БД и таблица миграций проверена/создана
+            run_migrations(supabase)
         else:
-            logger.warning("Не удалось проверить/создать таблицу _migrations")
-            
-    # Если у нас есть доступ к таблицам и функция exec_sql_array_json создана, запускаем миграции
-    if db_accessible and has_exec_sql:
-        run_migrations(supabase)
-    # Если есть доступ к таблицам, но нет функции exec_sql_array_json, скипаем миграции
-    elif db_accessible and not has_exec_sql:
-        logger.info("Таблицы доступны, но функция exec_sql_array_json недоступна. Пропускаем миграции.")
-        skip_migrations()
-    # Если нет доступа к таблицам, пробуем создать их напрямую
-    elif not db_accessible and has_exec_sql:
-        create_base_tables_directly()
-    else:
-        logger.warning("Нет доступа к таблицам и функция exec_sql_array_json недоступна. Миграции не будут применены.")
+            logger.error("КРИТИЧЕСКАЯ ОШИБКА: Не удалось проверить/создать таблицу _migrations! Миграции не могут быть выполнены.")
+            # Можно завершить скрипт с ошибкой sys.exit(1) или просто не выполнять миграции
+    # === КОНЕЦ ИЗМЕНЕНИЯ ===
     
     logger.info("Процесс миграции завершен.")
 
