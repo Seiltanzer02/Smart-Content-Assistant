@@ -914,30 +914,35 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
                 message="План сгенерирован с базовыми идеями (API недоступен)"
             )
             
-        # --- ИЗМЕНЕНИЕ НАЧАЛО: Уточненные промпты ---
+        # --- ИЗМЕНЕНИЕ НАЧАЛО: Уточненные промпты --> ЕЩЕ БОЛЕЕ СТРОГИЙ ПРОМПТ ---
         system_prompt = f"""Ты - опытный контент-маркетолог. Твоя задача - сгенерировать план публикаций для Telegram-канала на {period_days} дней.
-Используй только следующие темы: {', '.join(themes)}.
-Используй **ТОЛЬКО** стили из этого списка: {', '.join(styles)}.
+Используй предоставленные темы и стили.
 
-Для каждого дня предложи ОДНУ идею поста (конкретный заголовок/концепцию) и выбери ОДИН стиль из списка выше.
-Формат КАЖДОЙ строки ответа ДОЛЖЕН БЫТЬ ТОЧНО таким:
-День <номер_дня>:: <Идея поста>:: <Стиль из списка>
-
-Пример:
-День 1:: Как начать инвестировать с нуля:: Рекомендации и советы
-День 2:: Обзор нового гаджета X:: Аналитический разбор сделок
-
-ВАЖНО:
-- Используй разделитель '::' между днем, идеей и стилем.
-- НЕ ИСПОЛЬЗУЙ markdown (**, ##, *, _).
-- НЕ добавляй никаких пояснений или лишнего текста. Только строки в указанном формате."""
-
-        user_prompt = f"""Сгенерируй план контента для Telegram-канала "{channel_name}" на {period_days} дней.
 Темы: {', '.join(themes)}
 Стили (используй ТОЛЬКО их): {', '.join(styles)}
 
-Выдай ровно {period_days} строк в формате:
-День <номер_дня>:: <Идея поста>:: <Стиль из списка>"""
+Для КАЖДОГО дня из {period_days} дней предложи ТОЛЬКО ОДНУ идею поста (конкретный заголовок/концепцию) и выбери ТОЛЬКО ОДИН стиль из списка выше.
+
+СТРОГО СЛЕДУЙ ФОРМАТУ ВЫВОДА:
+Каждая строка должна содержать только день, идею и стиль, разделенные ДВУМЯ двоеточиями (::).
+НЕ ДОБАВЛЯЙ НИКАКИХ ЗАГОЛОВКОВ, НОМЕРОВ ВЕРСИЙ, СПИСКОВ ФИЧ, КОММЕНТАРИЕВ ИЛИ ЛЮБОГО ДРУГОГО ЛИШНЕГО ТЕКСТА.
+Только строки плана.
+
+Пример НУЖНОГО формата:
+День 1:: Запуск нового продукта X:: Анонс
+День 2:: Советы по использованию Y:: Лайфхак
+День 3:: Интервью с экспертом Z:: Интервью
+
+Формат КАЖДОЙ строки: День <номер_дня>:: <Идея поста>:: <Стиль из списка>"""
+
+        user_prompt = f"""Сгенерируй план контента для Telegram-канала \"{channel_name}\" на {period_days} дней.
+Темы: {', '.join(themes)}
+Стили (используй ТОЛЬКО их): {', '.join(styles)}
+
+Выдай ровно {period_days} строк СТРОГО в формате:
+День <номер_дня>:: <Идея поста>:: <Стиль из списка>
+
+Не включай ничего, кроме этих строк."""
         # --- ИЗМЕНЕНИЕ КОНЕЦ ---
 
         # Настройка клиента OpenAI для использования OpenRouter
@@ -1035,12 +1040,14 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
             for day in range(1, period_days + 1):
                 random_theme = random.choice(themes) if themes else "Общая тема"
                 random_style = random.choice(styles) if styles else "Общий стиль"
+                # === ИЗМЕНЕНИЕ: Убираем 'Пост о' ===
+                fallback_topic = f"{random_theme} ({random_style})"
                 plan_items.append(PlanItem(
                     day=day,
-                    topic_idea=f"Пост о {random_theme}",
+                    topic_idea=fallback_topic, # <--- Используем новую строку
                     format_style=random_style
                 ))
-                
+        
         # Сортируем по дням
         plan_items.sort(key=lambda x: x.day)
         
@@ -1052,17 +1059,17 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
             existing_days = {item.day for item in plan_items}
             needed_days = period_days - len(plan_items)
             logger.warning(f"План короче запрошенного ({len(plan_items)}/{period_days}), дополняем {needed_days} идеями.")
-            # Находим максимальный существующий день или начинаем с 1
             start_day = max(existing_days) + 1 if existing_days else 1
             for i in range(needed_days):
                 current_day = start_day + i
-                # Проверяем, что такого дня еще нет (на всякий случай)
                 if current_day not in existing_days:
                     random_theme = random.choice(themes) if themes else "Дополнительная тема"
                     random_style = random.choice(styles) if styles else "Дополнительный стиль"
+                    # === ИЗМЕНЕНИЕ: Убираем 'Пост о' и '(Дополнено)' ===
+                    fallback_topic = f"{random_theme} ({random_style})"
                     plan_items.append(PlanItem(
                         day=current_day,
-                        topic_idea=f"(Дополнено) Пост о {random_theme}",
+                        topic_idea=fallback_topic, # <--- Используем новую строку
                         format_style=random_style
                     ))
         
