@@ -2483,7 +2483,7 @@ async def fix_schema():
             # === ДОБАВЛЕНО: Проверка существования колонки saved_image_id ===
             if command['name'] == 'add_saved_image_id_to_saved_posts' and status_code in [200, 204]:
                 logger.info("Проверка фактического наличия колонки 'saved_image_id' в 'saved_posts'...")
-                verification_query = "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'saved_posts' AND column_name = 'saved_image_id';"
+                verification_query = "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'saved_posts' AND column_name = 'saved_image_id'" # УБРАНА ТОЧКА С ЗАПЯТОЙ
                 verify_result = await _execute_sql_direct(verification_query)
                 verify_status = verify_result.get("status_code")
                 op_result_verify = {
