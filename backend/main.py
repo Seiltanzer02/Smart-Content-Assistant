@@ -1126,9 +1126,9 @@ async def get_posts(request: Request, channel_name: Optional[str] = None):
             # Проверяем, есть ли связанные данные изображения и они не пустые
             image_relation_data = post_data.get("saved_images")
             
-            # === ДОБАВЛЕНО: Логирование полученных данных изображения ===
-            logger.debug(f"Обработка поста ID: {response_item.id}. Связанные данные изображения: {image_relation_data}")
-            # === КОНЕЦ ДОБАВЛЕНИЯ ===
+            # === ИЗМЕНЕНО: Логирование на уровне INFO ===
+            logger.info(f"Обработка поста ID: {response_item.id}. Связанные данные изображения: {image_relation_data}")
+            # === КОНЕЦ ИЗМЕНЕНИЯ ===
             
             if image_relation_data and isinstance(image_relation_data, dict):
                 # Создаем объект PostImage из данных saved_images
@@ -1146,7 +1146,9 @@ async def get_posts(request: Request, channel_name: Optional[str] = None):
                         author_url=image_relation_data.get("author_url"),
                         source=image_relation_data.get("source")
                     )
-                    logger.debug(f"Успешно создано selected_image_data для поста {response_item.id} с изображением ID: {response_item.selected_image_data.id}")
+                    # === ИЗМЕНЕНО: Логирование на уровне INFO ===
+                    logger.info(f"Успешно создано selected_image_data для поста {response_item.id} с изображением ID: {response_item.selected_image_data.id}")
+                    # === КОНЕЦ ИЗМЕНЕНИЯ ===
                 except Exception as mapping_error:
                      logger.error(f"Ошибка при создании PostImage для поста {response_item.id}: {mapping_error}")
                      logger.error(f"Данные изображения: {image_relation_data}")
@@ -1836,7 +1838,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.75,
-                max_tokens=750, # <--- УМЕНЬШЕНО ЗНАЧЕНИЕ до 750
+                max_tokens=650, # <--- УМЕНЬШЕНО ЗНАЧЕНИЕ до 650
                 timeout=120,
                 extra_headers={
                     "HTTP-Referer": "https://content-manager.onrender.com",
@@ -2924,11 +2926,15 @@ logger.info(f"Папка для загруженных изображений: {
 # --- НОВЫЙ ЭНДПОИНТ ДЛЯ ЗАГРУЗКИ ИЗОБРАЖЕНИЙ ---
 @app.post("/upload-image")
 async def upload_image(request: Request, file: UploadFile = File(...)):
-    """Загружает файл изображения в папку uploads."""
+    """Загружает файл изображения в Supabase Storage."""
     telegram_user_id = request.headers.get("X-Telegram-User-Id")
     if not telegram_user_id:
         logger.warning("Запрос загрузки изображения без идентификации пользователя Telegram")
         raise HTTPException(status_code=401, detail="Для загрузки изображения необходимо авторизоваться через Telegram")
+
+    if not supabase:
+        logger.error("Клиент Supabase не инициализирован")
+        raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
 
     try:
         # Проверка типа файла
@@ -2937,53 +2943,63 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
              logger.warning(f"Попытка загрузить не изображение: {file.filename}, тип: {content_type}")
              raise HTTPException(status_code=400, detail="Допускаются только файлы изображений (JPEG, PNG, GIF, WEBP)")
 
-        # Генерируем уникальное имя файла, сохраняя расширение
+        # Генерируем уникальное имя файла/путь в бакете, сохраняя расширение
         _, ext = os.path.splitext(file.filename)
-        # Ограничиваем допустимые расширения
         allowed_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
         if ext.lower() not in allowed_extensions:
              logger.warning(f"Попытка загрузить файл с недопустимым расширением: {file.filename}")
              raise HTTPException(status_code=400, detail=f"Недопустимое расширение файла. Разрешены: {', '.join(allowed_extensions)}")
 
-        filename = f"{uuid.uuid4()}{ext.lower()}" # Приводим расширение к нижнему регистру
-        file_path = os.path.join(UPLOADS_DIR, filename)
+        # Формируем путь внутри бакета (например, public/<uuid>.<ext>)
+        # 'public/' - необязательная папка внутри бакета для удобства организации
+        storage_path = f"public/{uuid.uuid4()}{ext.lower()}"
+        bucket_name = "post-images" # Имя бакета в Supabase Storage
 
-        # Сохраняем файл на диск
-        try:
-             with open(file_path, "wb") as buffer:
-                 shutil.copyfileobj(file.file, buffer)
-        except Exception as write_err:
-             logger.error(f"Ошибка при записи файла {filename} на диск: {write_err}")
-             raise HTTPException(status_code=500, detail=f"Ошибка при сохранении файла на сервере.")
+        # Читаем содержимое файла
+        file_content = await file.read()
+        # Сбрасываем указатель файла, если он понадобится снова (хотя здесь не нужен)
+        await file.seek(0)
 
-        logger.info(f"Пользователь {telegram_user_id} успешно загрузил изображение: {filename}")
+        logger.info(f"Попытка загрузки файла в Supabase Storage: бакет='{bucket_name}', путь='{storage_path}', тип='{content_type}'")
 
-        # Возвращаем относительный URL к загруженному файлу
-        return {"url": f"/uploads/{filename}"}
+        # Загружаем файл в Supabase Storage
+        # Используем file_options для установки content-type
+        upload_response = supabase.storage.from_(bucket_name).upload(
+            path=storage_path,
+            file=file_content,
+            file_options={"content-type": content_type, "cache-control": "3600"} # Устанавливаем тип и кэширование
+        )
 
-    except HTTPException as http_err: # Перехватываем свои же HTTPException
+        # Supabase Python client v1 не возвращает полезных данных при успехе, проверяем на исключения
+        # В v2 (если используется) ответ будет другим. Пока ориентируемся на отсутствие ошибок.
+        logger.info(f"Файл успешно загружен в Supabase Storage (ответ API: {upload_response}). Путь: {storage_path}")
+
+        # Получаем публичный URL для загруженного файла
+        public_url_response = supabase.storage.from_(bucket_name).get_public_url(storage_path)
+
+        if not public_url_response:
+             logger.error(f"Не удалось получить публичный URL для файла: {storage_path}")
+             raise HTTPException(status_code=500, detail="Не удалось получить URL для загруженного файла.")
+
+        public_url = public_url_response # В v1 get_public_url возвращает строку URL
+
+        logger.info(f"Пользователь {telegram_user_id} успешно загрузил изображение: {storage_path}, URL: {public_url}")
+
+        # Возвращаем ТОЛЬКО публичный URL
+        return {"url": public_url}
+
+    except HTTPException as http_err:
         raise http_err
+    except APIError as storage_api_err:
+        logger.error(f"Ошибка API Supabase Storage при загрузке файла: {storage_api_err}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Ошибка хранилища при загрузке: {storage_api_err.message}")
     except Exception as e:
-        logger.error(f"Непредвиденная ошибка при загрузке файла: {e}", exc_info=True) # Логируем traceback
+        logger.error(f"Непредвиденная ошибка при загрузке файла в Supabase Storage: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Не удалось обработать загрузку файла: {str(e)}")
     finally:
         # Важно закрыть файл в любом случае
         if file and hasattr(file, 'close') and callable(file.close):
             await file.close()
-
-# --- МОНТИРУЕМ ПАПКУ UPLOADS ДЛЯ ОБСЛУЖИВАНИЯ ---
-# Важно монтировать ДО обработчика SPA ("/{rest_of_path:path}")
-try:
-    # Проверяем, существует ли папка
-    if os.path.isdir(UPLOADS_DIR):
-        app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
-        logger.info(f"Папка '{UPLOADS_DIR}' успешно смонтирована для обслуживания по пути '/uploads'")
-    else:
-        logger.warning(f"Папка '{UPLOADS_DIR}' не найдена, обслуживание загруженных файлов не настроено.")
-except RuntimeError as mount_error:
-    logger.error(f"Ошибка при монтировании папки uploads: {mount_error}. Возможно, имя 'uploads' уже используется.")
-except Exception as e:
-     logger.error(f"Непредвиденная ошибка при монтировании папки uploads: {e}")
 
 # --- Настройка обслуживания статических файлов (SPA) ---
 # Убедимся, что этот код идет ПОСЛЕ монтирования /uploads
