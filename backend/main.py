@@ -1123,6 +1123,11 @@ async def get_posts(request: Request, channel_name: Optional[str] = None):
             
             # Проверяем, есть ли связанные данные изображения и они не пустые
             image_relation_data = post_data.get("saved_images")
+            
+            # === ДОБАВЛЕНО: Логирование полученных данных изображения ===
+            logger.debug(f"Обработка поста ID: {response_item.id}. Связанные данные изображения: {image_relation_data}")
+            # === КОНЕЦ ДОБАВЛЕНИЯ ===
+            
             if image_relation_data and isinstance(image_relation_data, dict):
                 # Создаем объект PostImage из данных saved_images
                 # Убедимся, что ключи соответствуют модели PostImage
@@ -1131,14 +1136,15 @@ async def get_posts(request: Request, channel_name: Optional[str] = None):
                         id=image_relation_data.get("id"),
                         url=image_relation_data.get("url"),
                         preview_url=image_relation_data.get("preview_url"),
-                        alt=image_relation_data.get("alt"),
+                        # === ИСПРАВЛЕНО: Сопоставление alt -> alt_description ===
+                        alt=image_relation_data.get("alt_description"), # <--- ИСПРАВЛЕНО
                         author=image_relation_data.get("author"), # В saved_images это 'author'
                         author_url=image_relation_data.get("author_url"),
                         source=image_relation_data.get("source")
                     )
-                    logger.debug(f"Добавлено изображение {response_item.selected_image_data.id} для поста {response_item.id}")
+                    logger.debug(f"Успешно создано selected_image_data для поста {response_item.id} с изображением ID: {response_item.selected_image_data.id}")
                 except Exception as mapping_error:
-                     logger.error(f"Ошибка при маппинге данных изображения для поста {response_item.id}: {mapping_error}")
+                     logger.error(f"Ошибка при создании PostImage для поста {response_item.id}: {mapping_error}")
                      logger.error(f"Данные изображения: {image_relation_data}")
                      response_item.selected_image_data = None # Очищаем при ошибке
             else:
@@ -1156,6 +1162,9 @@ async def get_posts(request: Request, channel_name: Optional[str] = None):
         
     except Exception as e:
         logger.error(f"Ошибка при получении постов: {e}")
+        # === ДОБАВЛЕНО: Перевыброс HTTPException для корректного ответа ===
+        raise HTTPException(status_code=500, detail=str(e))
+        # === КОНЕЦ ДОБАВЛЕНИЯ ===
 
 @app.post("/posts", response_model=SavedPostResponse)
 async def create_post(request: Request, post_data: PostData):
@@ -1823,7 +1832,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.75,
-                max_tokens=850, # <--- УМЕНЬШЕНО ЗНАЧЕНИЕ до 850
+                max_tokens=800, # <--- УМЕНЬШЕНО ЗНАЧЕНИЕ до 800
                 timeout=120,
                 extra_headers={
                     "HTTP-Referer": "https://content-manager.onrender.com",
