@@ -49,7 +49,9 @@ from unsplash import Auth as UnsplashAuth # <-- ИМПОРТИРУЕМ ИЗ ПР
 # ---------------------------------------
 
 # --- ПЕРЕМЕЩАЕМ Логгирование В НАЧАЛО --- 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# === ИЗМЕНЕНО: Уровень логирования на DEBUG ===
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+# === КОНЕЦ ИЗМЕНЕНИЯ ===
 logger = logging.getLogger(__name__)
 # --- КОНЕЦ ПЕРЕМЕЩЕНИЯ --- 
 
@@ -1132,12 +1134,14 @@ async def get_posts(request: Request, channel_name: Optional[str] = None):
                 # Создаем объект PostImage из данных saved_images
                 # Убедимся, что ключи соответствуют модели PostImage
                 try:
+                    # --- ИЗМЕНЕНИЕ: Приоритет alt_description, затем alt ---
+                    alt_text = image_relation_data.get("alt_description") or image_relation_data.get("alt")
+                    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
                     response_item.selected_image_data = PostImage(
                         id=image_relation_data.get("id"),
                         url=image_relation_data.get("url"),
                         preview_url=image_relation_data.get("preview_url"),
-                        # === ИСПРАВЛЕНО: Сопоставление alt -> alt_description ===
-                        alt=image_relation_data.get("alt_description"), # <--- ИСПРАВЛЕНО
+                        alt=alt_text, # <--- Используем подготовленный alt_text
                         author=image_relation_data.get("author"), # В saved_images это 'author'
                         author_url=image_relation_data.get("author_url"),
                         source=image_relation_data.get("source")
@@ -1832,7 +1836,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.75,
-                max_tokens=800, # <--- УМЕНЬШЕНО ЗНАЧЕНИЕ до 800
+                max_tokens=750, # <--- УМЕНЬШЕНО ЗНАЧЕНИЕ до 750
                 timeout=120,
                 extra_headers={
                     "HTTP-Referer": "https://content-manager.onrender.com",
