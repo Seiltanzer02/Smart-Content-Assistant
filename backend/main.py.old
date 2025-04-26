@@ -828,11 +828,7 @@ async def get_saved_ideas(request: Request, channel_name: Optional[str] = None):
                 "is_detailed": item.get("is_detailed"),
                 "created_at": item.get("created_at")
             }
-            # Добавляем только если есть тема
-            if topic_idea:
-                ideas.append(idea)
-            else:
-                logger.warning(f"Пропущена идея без topic_idea: ID={item.get('id', 'N/A')}")
+            ideas.append(idea)
         # === КОНЕЦ ИЗМЕНЕНИЯ ===
                 
         logger.info(f"Получено {len(ideas)} идей для пользователя {telegram_user_id}")
@@ -1866,7 +1862,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.75,
-                max_tokens=850, # <--- ИСПРАВЛЕНО: Уменьшено с 1000 до 850 токенов
+                max_tokens=500, # <--- УМЕНЬШЕНО ЗНАЧЕНИЕ до 500
                 timeout=120,
                 extra_headers={
                     "HTTP-Referer": "https://content-manager.onrender.com",

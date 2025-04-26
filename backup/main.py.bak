@@ -813,26 +813,21 @@ async def get_saved_ideas(request: Request, channel_name: Optional[str] = None):
         ideas = []
         for item in result.data:
             # Просто берем нужные поля напрямую из ответа БД
-            topic_idea = item.get("topic_idea", "")
-            if not topic_idea:
-                logger.warning(f"Пропущена идея без topic_idea: ID={item.get('id', 'N/A')}")
-                continue
-                
-            # Создаем объект идеи только если тема существует
             idea = {
                 "id": item.get("id"),
                 "channel_name": item.get("channel_name"),
-                "topic_idea": topic_idea,
-                "format_style": item.get("format_style"),
+                "topic_idea": item.get("topic_idea"), # Берем напрямую
+                "format_style": item.get("format_style"), # Берем напрямую
                 "relative_day": item.get("relative_day"),
                 "is_detailed": item.get("is_detailed"),
                 "created_at": item.get("created_at")
+                # Убрана ненужная обработка themes_json/styles_json
             }
             # Добавляем только если есть тема
-            if topic_idea:
+            if idea["topic_idea"]:
                 ideas.append(idea)
             else:
-                logger.warning(f"Пропущена идея без topic_idea: ID={item.get('id', 'N/A')}")
+                logger.warning(f"Пропущена идея без topic_idea: ID={idea.get('id', 'N/A')}") # Добавил .get для безопасности
         # === КОНЕЦ ИЗМЕНЕНИЯ ===
                 
         logger.info(f"Получено {len(ideas)} идей для пользователя {telegram_user_id}")
@@ -1866,24 +1861,26 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.75,
-                max_tokens=850, # <--- ИСПРАВЛЕНО: Уменьшено с 1000 до 850 токенов
+                max_tokens=500, # <--- УМЕНЬШЕНО ЗНАЧЕНИЕ до 500
                 timeout=120,
                 extra_headers={
                     "HTTP-Referer": "https://content-manager.onrender.com",
                     "X-Title": "Smart Content Assistant"
                 }
             )
-            
-            # Обработка ответа от API
-            if response and hasattr(response, 'choices') and response.choices and response.choices[0].message:
+        
+            # Проверка ответа и извлечение текста
+            if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
                 post_text = response.choices[0].message.content.strip()
                 logger.info(f"Получен текст поста ({len(post_text)} символов)")
+            # === ДОБАВЛЕНО: Явная проверка на ошибку в ответе ===
             elif response and hasattr(response, 'error') and response.error:
-                # Явная обработка ошибки в ответе
                 err_details = response.error
-                api_error_message = getattr(err_details, 'message', str(err_details))
+                # Пытаемся получить сообщение об ошибке
+                api_error_message = getattr(err_details, 'message', str(err_details)) 
                 logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
                 post_text = "[Текст не сгенерирован из-за ошибки API]"
+            # === КОНЕЦ ДОБАВЛЕНИЯ ===
             else:
                 # Общий случай некорректного ответа
                 api_error_message = "API вернул некорректный или пустой ответ"
