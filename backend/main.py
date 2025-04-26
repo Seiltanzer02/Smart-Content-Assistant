@@ -963,8 +963,27 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
             }
         )
         
-        plan_text = response.choices[0].message.content.strip()
-        logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
+        # === НАЧАЛО ИЗМЕНЕНИЯ: Проверка ответа API ===
+        plan_text = ""
+        if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+            plan_text = response.choices[0].message.content.strip()
+            logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
+        else:
+            # Логируем полный ответ, если структура неожиданная
+            logger.error(f"Некорректный или пустой ответ от OpenRouter API при генерации плана. Status: {response.response.status_code if hasattr(response, 'response') else 'N/A'}")
+            try:
+                # Попробуем залогировать тело ответа, если оно есть
+                raw_response_content = await response.response.text() if hasattr(response, 'response') and hasattr(response.response, 'text') else str(response)
+                logger.error(f"Полный ответ API (или его представление): {raw_response_content}")
+            except Exception as log_err:
+                logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
+                
+            # Возвращаем пустой план с сообщением об ошибке
+            return PlanGenerationResponse(
+                plan=[],
+                message="Ошибка: API не вернул ожидаемый результат для генерации плана."
+            )
+        # === КОНЕЦ ИЗМЕНЕНИЯ ===
         
         plan_items = []
         lines = plan_text.split('\n')
