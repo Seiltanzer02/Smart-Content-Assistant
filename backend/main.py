@@ -813,26 +813,26 @@ async def get_saved_ideas(request: Request, channel_name: Optional[str] = None):
         ideas = []
         for item in result.data:
             # Просто берем нужные поля напрямую из ответа БД
-            idea = {
-                "id": item.get("id"),
-                "channel_name": item.get("channel_name"),
+                idea = {
+                    "id": item.get("id"),
+                    "channel_name": item.get("channel_name"),
                 "topic_idea": item.get("topic_idea"), # Берем напрямую
                 "format_style": item.get("format_style"), # Берем напрямую
                 "relative_day": item.get("relative_day"),
                 "is_detailed": item.get("is_detailed"),
-                "created_at": item.get("created_at")
+                    "created_at": item.get("created_at")
                 # Убрана ненужная обработка themes_json/styles_json
-            }
+                }
             # Добавляем только если есть тема
             if idea["topic_idea"]:
-                 ideas.append(idea)
+                ideas.append(idea)
             else:
                  logger.warning(f"Пропущена идея без topic_idea: ID={idea['id']}")
         # === КОНЕЦ ИЗМЕНЕНИЯ ===
-
+                
         logger.info(f"Получено {len(ideas)} идей для пользователя {telegram_user_id}")
         return SuggestedIdeasResponse(ideas=ideas)
-
+        
     except Exception as e:
         logger.error(f"Ошибка при получении идей: {e}")
         return SuggestedIdeasResponse(
@@ -962,21 +962,21 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
                 "X-Title": "Smart Content Assistant"
             }
         )
-
+        
         plan_text = response.choices[0].message.content.strip()
         logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
-
+        
         plan_items = []
         lines = plan_text.split('\n')
 
         # --- ИЗМЕНЕНИЕ НАЧАЛО: Улучшенный парсинг с новым разделителем ---
         expected_style_set = set(s.lower() for s in styles) # Для быстрой проверки
-
+        
         for line in lines:
             line = line.strip()
             if not line:
                 continue
-
+                
             parts = line.split('::')
             if len(parts) == 3:
                 try:
@@ -991,11 +991,11 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
                         format_style = random.choice(styles) if styles else "Без указания стиля"
 
                     if topic_idea: # Пропускаем, если тема пустая
-                         plan_items.append(PlanItem(
+            plan_items.append(PlanItem(
                             day=day,
-                            topic_idea=topic_idea,
-                            format_style=format_style
-                         ))
+                    topic_idea=topic_idea,
+                    format_style=format_style
+                ))
                     else:
                         logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
 
@@ -1008,7 +1008,7 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
         # --- ИЗМЕНЕНИЕ КОНЕЦ ---
 
         # ... (остальная логика обработки plan_items: сортировка, дополнение, проверка пустого плана) ...
-         # Если и сейчас нет идей, генерируем вручную
+        # Если и сейчас нет идей, генерируем вручную
         if not plan_items:
             logger.warning("Не удалось извлечь идеи из ответа LLM или все строки были некорректными, генерируем базовый план.")
             for day in range(1, period_days + 1):
@@ -1019,13 +1019,13 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
                     topic_idea=f"Пост о {random_theme}",
                     format_style=random_style
                 ))
-
+                
         # Сортируем по дням
         plan_items.sort(key=lambda x: x.day)
-
+        
         # Обрезаем до запрошенного количества дней (на случай, если LLM выдал больше)
         plan_items = plan_items[:period_days]
-
+        
         # Если план получился короче запрошенного периода, дополняем (возможно, из-за ошибок парсинга)
         if len(plan_items) < period_days:
             existing_days = {item.day for item in plan_items}
@@ -1044,13 +1044,13 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
                      topic_idea=f"(Дополнено) Пост о {random_theme}",
                         format_style=random_style
                     ))
-
+        
         # Сортируем по дням еще раз после возможного дополнения
         plan_items.sort(key=lambda x: x.day)
-
+        
         logger.info(f"Сгенерирован и обработан план из {len(plan_items)} идей для канала @{channel_name}")
         return PlanGenerationResponse(plan=plan_items)
-
+                
     except Exception as e:
         logger.error(f"Ошибка при генерации плана: {e}\\n{traceback.format_exc()}") # Добавляем traceback
         return PlanGenerationResponse(
@@ -1258,12 +1258,12 @@ async def create_post(request: Request, post_data: PostData):
                         "author": selected_image.author or "", # Соответствует 'author' в PostImage
                         "author_url": selected_image.author_url or "",
                         "source": selected_image.source or "frontend_selection",
-                        "user_id": int(telegram_user_id),
+                    "user_id": int(telegram_user_id),
                         # --- УДАЛЕНО: external_id ---
-                    }
-                    
+                }
+                
                     image_result = supabase.table("saved_images").insert(image_data_to_save).execute()
-                    if hasattr(image_result, 'data') and len(image_result.data) > 0:
+                if hasattr(image_result, 'data') and len(image_result.data) > 0:
                         saved_image_id = new_internal_id # Используем наш ID для связи
                         logger.info(f"Сохранено новое изображение {saved_image_id} для поста")
                     else:
@@ -1290,7 +1290,7 @@ async def create_post(request: Request, post_data: PostData):
         # === ИЗМЕНЕНО: Убран механизм ретрая ===
         try:
             logger.info(f"Выполняем insert в saved_posts для ID {post_to_save['id']}...")
-            result = supabase.table("saved_posts").insert(post_to_save).execute()
+        result = supabase.table("saved_posts").insert(post_to_save).execute()
             logger.info(f"Insert выполнен. Status: {result.status_code if hasattr(result, 'status_code') else 'N/A'}")
         except APIError as e:
             logger.error(f"Ошибка APIError при insert в saved_posts: {e}")
@@ -1299,7 +1299,7 @@ async def create_post(request: Request, post_data: PostData):
         except Exception as general_e:
             logger.error(f"Непредвиденная ошибка при insert в saved_posts: {general_e}")
             raise HTTPException(status_code=500, detail=f"Непредвиденная ошибка БД при создании поста: {str(general_e)}")
-
+        
         # Проверка результата
         if not hasattr(result, 'data') or len(result.data) == 0:
             logger.error(f"Ошибка при сохранении поста {post_to_save['id']}: Ответ Supabase пуст или не содержит данных.")
@@ -1357,17 +1357,17 @@ async def update_post(post_id: str, request: Request, post_data: PostData):
         if not telegram_user_id:
             logger.warning("Запрос обновления поста без идентификации пользователя Telegram")
             raise HTTPException(status_code=401, detail="Для обновления поста необходимо авторизоваться через Telegram")
-
+        
         if not supabase:
             logger.error("Клиент Supabase не инициализирован")
             raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
-
+        
         # Проверяем, что пост принадлежит пользователю
         post_check = supabase.table("saved_posts").select("id").eq("id", post_id).eq("user_id", int(telegram_user_id)).execute()
         if not hasattr(post_check, 'data') or len(post_check.data) == 0:
             logger.warning(f"Попытка обновить чужой или несуществующий пост: {post_id}")
             raise HTTPException(status_code=404, detail="Пост не найден или нет прав на его редактирование")
-
+        
         # === ИЗМЕНЕНИЕ ЛОГИКИ ОБРАБОТКИ ИЗОБРАЖЕНИЯ ===
         # Используем getattr для безопасного доступа, на случай если поле отсутствует в запросе
         selected_image = getattr(post_data, 'selected_image_data', None)
@@ -1465,7 +1465,7 @@ async def update_post(post_id: str, request: Request, post_data: PostData):
         except Exception as general_e:
             logger.error(f"Непредвиденная ошибка при update в saved_posts для ID {post_id}: {general_e}")
             raise HTTPException(status_code=500, detail=f"Непредвиденная ошибка БД при обновлении поста: {str(general_e)}")
-
+        
         # Проверка результата
         if not hasattr(result, 'data') or len(result.data) == 0:
             logger.error(f"Ошибка при обновлении поста {post_id}: Ответ Supabase пуст или не содержит данных.")
@@ -1542,7 +1542,7 @@ async def delete_post(post_id: str, request: Request):
             logger.error(f"Ошибка при удалении связей post_images для поста {post_id} перед удалением поста: {del_link_err}")
             # Продолжаем удаление поста, но логируем ошибку
         # --- КОНЕЦ ДОБАВЛЕНИЯ ---
-
+        
         # Удаление из Supabase
         result = supabase.table("saved_posts").delete().eq("id", post_id).execute()
         
@@ -1711,30 +1711,30 @@ async def search_unsplash_images(query: str, count: int = 5, topic: str = "", fo
         all_photos = []
         async with httpx.AsyncClient(timeout=15.0) as client: # Увеличим таймаут
             for keyword in keywords[:3]:
-                try:
-                    logger.info(f"Поиск изображений в Unsplash по запросу: {keyword}")
+            try:
+                logger.info(f"Поиск изображений в Unsplash по запросу: {keyword}")
                     response = await client.get(
                         unsplash_api_url,
                         headers=headers,
                         params={"query": keyword, "per_page": per_page}
                     )
-                        
-                    if response.status_code != 200:
-                        logger.error(f"Ошибка при запросе к Unsplash API: {response.status_code} {response.text}")
-                        continue
-                        
-                    results = response.json()
+                    
+                if response.status_code != 200:
+                    logger.error(f"Ошибка при запросе к Unsplash API: {response.status_code} {response.text}")
+                    continue
+                    
+                results = response.json()
                     if 'results' in results and results['results']:
                         all_photos.extend(results['results'])
                     else:
-                         logger.warning(f"Нет результатов по запросу '{keyword}'")
+                    logger.warning(f"Нет результатов по запросу '{keyword}'")
                          
                 except httpx.ReadTimeout:
                      logger.warning(f"Таймаут при поиске изображений по ключевому слову '{keyword}'")
                      continue # Переходим к следующему ключевому слову
-                except Exception as e:
-                    logger.error(f"Ошибка при выполнении запроса к Unsplash по ключевому слову '{keyword}': {e}")
-                    continue
+            except Exception as e:
+                logger.error(f"Ошибка при выполнении запроса к Unsplash по ключевому слову '{keyword}': {e}")
+                continue
         
         if not all_photos:
             logger.warning(f"Не найдено изображений по всем ключевым словам")
@@ -1849,27 +1849,27 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
         # === ИЗМЕНЕНО: Добавлена обработка ошибок API ===
         post_text = ""
         try:
-            # Запрос к API
-            logger.info(f"Отправка запроса на генерацию поста по идее: {topic_idea}")
-            response = await client.chat.completions.create(
-                model="deepseek/deepseek-chat",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.75,
-                max_tokens=650, # <--- УМЕНЬШЕНО ЗНАЧЕНИЕ до 650
-                timeout=120,
-                extra_headers={
-                    "HTTP-Referer": "https://content-manager.onrender.com",
-                    "X-Title": "Smart Content Assistant"
-                }
-            )
-            
+        # Запрос к API
+        logger.info(f"Отправка запроса на генерацию поста по идее: {topic_idea}")
+        response = await client.chat.completions.create(
+            model="deepseek/deepseek-chat",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.75,
+                max_tokens=500, # <--- УМЕНЬШЕНО ЗНАЧЕНИЕ до 500
+            timeout=120,
+            extra_headers={
+                "HTTP-Referer": "https://content-manager.onrender.com",
+                "X-Title": "Smart Content Assistant"
+            }
+        )
+        
             # Проверка ответа и извлечение текста
             if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-                post_text = response.choices[0].message.content.strip()
-                logger.info(f"Получен текст поста ({len(post_text)} символов)")
+        post_text = response.choices[0].message.content.strip()
+        logger.info(f"Получен текст поста ({len(post_text)} символов)")
             # === ДОБАВЛЕНО: Явная проверка на ошибку в ответе ===
             elif response and hasattr(response, 'error') and response.error:
                 err_details = response.error
@@ -1949,7 +1949,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
         if api_error_message:
             # Если была ошибка API, добавляем ее в сообщение ответа
             response_message = f"Ошибка генерации текста: {api_error_message}. Изображений найдено: {len(found_images[:IMAGE_RESULTS_COUNT])}"
-            
+        
         return PostDetailsResponse(
             generated_text=post_text, # Будет пустым или '[...]' при ошибке
             found_images=found_images[:IMAGE_RESULTS_COUNT],
@@ -2025,9 +2025,9 @@ async def startup_event():
 
     # Проверка и добавление недостающих столбцов (оставляем существующую логику)
     if supabase:
-        if not await check_db_tables():
-            logger.error("Ошибка при проверке таблиц в базе данных!")
-            # Продолжаем работу приложения даже при ошибке
+    if not await check_db_tables():
+        logger.error("Ошибка при проверке таблиц в базе данных!")
+        # Продолжаем работу приложения даже при ошибке
         else:
             logger.info("Проверка таблиц базы данных завершена успешно.")
     else:
@@ -2495,7 +2495,7 @@ async def fix_schema():
                 if verify_status == 200 and verify_result.get("data") and len(verify_result["data"]) > 0:
                     logger.info("ПРОВЕРКА УСПЕШНА: Колонка 'saved_image_id' найдена в 'saved_posts'.")
                     saved_image_id_column_verified = True
-                else:
+        else:
                     logger.error("ПРОВЕРКА НЕУДАЧНА: Колонка 'saved_image_id' НЕ найдена в 'saved_posts' после команды ALTER TABLE!")
                     logger.error(f"Результат проверки: {op_result_verify}")
                     all_commands_successful = False # Считаем операцию неуспешной, если колонка не создалась

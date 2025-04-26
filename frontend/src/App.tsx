@@ -140,6 +140,7 @@ interface SavedPost {
   image_url?: string;
   channel_name?: string;
   images_ids?: string[];
+  selected_image_data?: PostImage; // Добавляем поле для данных выбранного изображения
 }
 
 // Тип для дня календаря
@@ -390,7 +391,7 @@ function App() {
   const [selectedIdea, setSelectedIdea] = useState<SuggestedIdea | null>(null);
   const [isGeneratingPostDetails, setIsGeneratingPostDetails] = useState<boolean>(false);
   const [suggestedImages, setSuggestedImages] = useState<PostImage[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); 
   const [success, setSuccess] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<PostImage | null>(null);
 
@@ -464,7 +465,7 @@ function App() {
       // Загрузка сохраненного анализа для ТЕКУЩЕГО выбранного канала
       if (channelName) {
         fetchSavedAnalysis(channelName);
-      }
+    }
     }
   }, [isAuthenticated, channelName]);
   
@@ -553,7 +554,7 @@ function App() {
     setSelectedIdea(null); 
   }, [isAuthenticated, channelName]);
   // --- КОНЕЦ ИЗМЕНЕНИЯ --- 
-
+  
   // Функция для загрузки сохраненных постов
   const fetchSavedPosts = async () => {
     setLoadingSavedPosts(true);
@@ -664,7 +665,7 @@ function App() {
 
         if (selectedIdea) {
           setSuggestedImages(newImages);
-          setSuccess('Изображения успешно обновлены');
+        setSuccess('Изображения успешно обновлены');
         }
       }
     } catch (err: any) {
@@ -715,7 +716,7 @@ function App() {
         });
         setSuccess("Пост успешно сохранен");
       }
-
+      
       if (response.data) {
         // Update local state and navigate
         await fetchSavedPosts();
@@ -728,7 +729,7 @@ function App() {
         setSelectedImage(null);
         setSuggestedImages([]);
       }
-    } catch (err: any) {
+    } catch (err: any) { 
       const errorMsg = err.response?.data?.detail || err.message || (currentPostId ? 'Ошибка при обновлении поста' : 'Ошибка при сохранении поста');
       setError(errorMsg);
       console.error(currentPostId ? 'Ошибка при обновлении поста:' : 'Ошибка при сохранении поста:', err);
@@ -817,7 +818,7 @@ function App() {
     setSuccess("Изображение успешно загружено и выбрано");
   };
   // --- КОНЕЦ ДОБАВЛЕНИЯ ---
-
+  
   // Функция для открытия редактирования поста
   const startEditingPost = (post: SavedPost) => {
     setCurrentPostId(post.id);
@@ -825,7 +826,6 @@ function App() {
     setCurrentPostTopic(post.topic_idea);
     setCurrentPostFormat(post.format_style);
     setCurrentPostText(post.final_text);
-    // setSelectedImage(null); // Убираем старый сброс
     setChannelName(post.channel_name || '');
     setSuggestedImages([]); // Очищаем предложенные
     setIsGeneratingPostDetails(false);
@@ -833,14 +833,22 @@ function App() {
     setSuccess(null);
     setCurrentView('edit');
 
-    // Пытаемся загрузить сохраненное изображение для поста
-    const savedImageId = post.images_ids && post.images_ids.length > 0 ? post.images_ids[0] : null;
-    if (savedImageId) {
-        fetchAndSetSavedImage(savedImageId);
+    // --- ИСПРАВЛЕНО: Используем selected_image_data напрямую ---
+    // Проверяем, есть ли данные о выбранном изображении
+    if (post.selected_image_data) {
+      // Используем данные напрямую, не нужно загружать их отдельно
+      setSelectedImage(post.selected_image_data);
     } else {
-        // Если ID изображения нет в данных поста, сбрасываем selectedImage
+      // Для обратной совместимости: если selected_image_data нет, но есть images_ids
+      const savedImageId = post.images_ids && post.images_ids.length > 0 ? post.images_ids[0] : null;
+      if (savedImageId) {
+        fetchAndSetSavedImage(savedImageId);
+      } else {
+        // Если нет ни selected_image_data, ни images_ids, сбрасываем selectedImage
         setSelectedImage(null);
+      }
     }
+    // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
   };
   
   // Функция для сохранения идей в базу данных
@@ -1048,14 +1056,14 @@ function App() {
 
   // Функция для получения подробностей идеи
   const handleDetailIdea = (idea: SuggestedIdea) => {
-    setSelectedIdea(idea);
+      setSelectedIdea(idea);
     setCurrentPostId(null);
     setChannelName(idea.channel_name || '');
     setCurrentPostTopic(idea.topic_idea);
     setCurrentPostFormat(idea.format_style);
     setCurrentPostDate(new Date().toISOString().split('T')[0]);
     setCurrentPostText('');
-    setSelectedImage(null);
+      setSelectedImage(null);
     setSuggestedImages([]);
     setError(null);
     setSuccess(null);
@@ -1093,12 +1101,12 @@ function App() {
             channel_name: selectedIdea.channel_name || '',
             regenerate_images_only: false // We need both text and images
           }, {
-            headers: {
-              'x-telegram-user-id': userId ? Number(userId) : 'unknown'
-            }
+          headers: {
+            'x-telegram-user-id': userId ? Number(userId) : 'unknown'
+          }
           });
 
-          if (response.data) {
+      if (response.data) {
             console.log("Received post details:", response.data);
             // Update the post text state - Используем generated_text!
             setCurrentPostText(response.data.generated_text || ''); 
@@ -1123,13 +1131,13 @@ function App() {
           } else {
              console.warn('Received empty response when fetching post details.');
              setError('Не удалось получить детали поста (пустой ответ).');
-          }
-        } catch (err: any) {
+      }
+    } catch (err: any) {
           // Улучшаем логирование и отображение ошибки
           const errorMsg = err.response?.data?.detail || err.message || 'Ошибка при загрузке деталей поста';
           setError(errorMsg); 
           console.error('Ошибка при загрузке деталей поста:', errorMsg, err.response?.data || err);
-        } finally {
+    } finally {
           setIsGeneratingPostDetails(false);
         }
       }
@@ -1299,12 +1307,12 @@ function App() {
                   </div>
               )}
 
-      {isAnalyzing && (
-        <div className="loading-indicator">
-          <div className="loading-spinner"></div>
-          <p>Анализируем канал...</p>
-        </div>
-      )}
+              {isAnalyzing && (
+                <div className="loading-indicator">
+                  <div className="loading-spinner"></div>
+                  <p>Анализируем канал...</p>
+                </div>
+              )}
 
       {analysisResult && (
           <div className="results-container">
@@ -1376,18 +1384,18 @@ function App() {
                   }
                 </p>
               ) : null}
-                {/* --- ДОБАВЛЕНО: Кнопка для повторной генерации идей --- */} 
-                <button 
+                {/* --- ДОБАВЛЕНО: Кнопка для повторной генерации идей --- */ 
+        <button 
                     onClick={generateIdeas} 
                     className="action-button generate-button"
                     disabled={isGeneratingIdeas || !analysisResult} 
                     style={{marginTop: '20px'}} // Добавим отступ
                   >
                     {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать новые идеи'}
-                 </button>
+        </button>
                  {/* --- КОНЕЦ ДОБАВЛЕНИЯ --- */}
-                </div>
-            )}
+             </div>
+              )}
             {/* Сообщение, если канал не выбран для идей */} 
             {currentView === 'suggestions' && !channelName && (
                 <p>Пожалуйста, выберите канал для просмотра или генерации идей.</p>
@@ -1522,7 +1530,7 @@ function App() {
                         }}
                      >
                         + Добавить текущий канал
-                     </button>
+              </button>
                      <button
                         className="action-button"
                         onClick={filterPostsByChannels}
@@ -1659,20 +1667,20 @@ function App() {
                   />
                 </div>
               </div>
-
+              
               {/* --- Редактор текста поста --- */}
               <div className="form-group post-text-editor">
                 <label htmlFor="postText">Текст поста:</label>
-                <textarea
+                  <textarea 
                   id="postText"
                   value={currentPostText}
                   onChange={(e) => setCurrentPostText(e.target.value)}
                   rows={10}
                   placeholder="Введите или сгенерируйте текст поста..."
                   disabled={isSavingPost || isGeneratingPostDetails}
-                />
-              </div>
-
+                  />
+                </div>
+                
               {/* --- НАЧАЛО: Секция управления изображениями --- */}
               <div className="image-management-section">
                   
@@ -1690,7 +1698,7 @@ function App() {
                                   <img 
                                       src={image.preview_url || image.url} 
                                       alt={image.alt || 'Suggested image'} 
-                                      onError={(e) => {
+                          onError={(e) => {
                                           const target = e.target as HTMLImageElement;
                                           target.src = 'https://via.placeholder.com/100?text=Ошибка'; 
                                           console.error('Image load error:', image.preview_url || image.url);
@@ -1701,10 +1709,10 @@ function App() {
                                   )}
                                   </div>
                               ))}
-                          </div>
                       </div>
+                    </div>
                   )}
-
+                  
                   {/* --- Блок для своего изображения: Загрузчик и Превью --- */}
                   <div className="custom-image-section">
                      <h4>Свое изображение:</h4>
@@ -1724,24 +1732,24 @@ function App() {
                                   >
                                       <span>🗑️ Удалить</span>
                                   </button>
-                              </div>
-                          </div>
-                      )}
+                    </div>
                   </div>
+                      )}
+                </div>
               </div>
               {/* --- КОНЕЦ: Секция управления изображениями --- */}                  
-
+                
               {/* Кнопки действий */}
               <div className="form-actions">
-                <button 
+                  <button 
                     onClick={handleSaveOrUpdatePost} 
                     className="action-button save-button"
                     disabled={isSavingPost || isGeneratingPostDetails || !currentPostText}
                   >
                     {isSavingPost ? 'Сохранение...' : (currentPostId ? 'Обновить пост' : 'Сохранить пост')}
-                </button>
+                  </button>
                  {/* Добавляем кнопку Отмена */}
-                 <button 
+                  <button 
                     onClick={() => {
                         setCurrentView('calendar'); // Возвращаемся в календарь
                         // Сбрасываем состояние редактирования
@@ -1755,10 +1763,10 @@ function App() {
                     }}
                     className="action-button cancel-button"
                     disabled={isSavingPost}
-                >
+                  >
                     Отмена
-                </button>
-              </div>
+                  </button>
+                </div>
 
             </div>
           )}
