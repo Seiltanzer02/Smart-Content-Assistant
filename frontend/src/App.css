@@ -714,7 +714,7 @@ h1 {
   }
   .calendar-day .post-actions {
       /* Если нужно, можно еще уменьшить кнопки на совсем маленьких экранах */
-  }
+}
 }
 /* --- КОНЕЦ: ПОВТОРНОЕ ИСПРАВЛЕНИЕ СТИЛЕЙ КАЛЕНДАРЯ --- */
 
@@ -1824,8 +1824,8 @@ html[data-tg-color-scheme="dark"] body {
     --tg-theme-secondary-bg-color-rgb: 35, 46, 58;
     --tg-theme-bg-color-rgb: 24, 34, 45;
     --tg-theme-hint-color-rgb: 138, 155, 168;
-}
-
+  }
+  
 /* Применяем цвета ко всем элементам для лучшей поддержки тем */
 body,
 .app-container,
@@ -1842,8 +1842,8 @@ body,
 .channel-checkbox {
     background-color: var(--tg-theme-bg-color);
     color: var(--tg-theme-text-color);
-}
-
+  }
+  
 .results-container,
 .idea-item,
 .posts-table th,
