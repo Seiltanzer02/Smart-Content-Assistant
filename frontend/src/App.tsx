@@ -1384,7 +1384,6 @@ function App() {
                   }
                 </p>
               ) : null}
-                {/* --- ДОБАВЛЕНО: Кнопка для повторной генерации идей --- */ 
         <button 
                     onClick={generateIdeas} 
                     className="action-button generate-button"
@@ -1393,7 +1392,6 @@ function App() {
                   >
                     {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать новые идеи'}
         </button>
-                 {/* --- КОНЕЦ ДОБАВЛЕНИЯ --- */}
              </div>
               )}
             {/* Сообщение, если канал не выбран для идей */} 
