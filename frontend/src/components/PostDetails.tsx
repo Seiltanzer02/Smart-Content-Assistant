@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ImageSelector from './ImageSelector';
 import axios from 'axios';
 import { API_BASE_URL } from '../utils/api';
@@ -16,6 +16,7 @@ interface Image {
 interface PostDetailsProps {
   postText: string;
   images: Image[];
+  initialSelectedImage?: Image | null;
   topicIdea: string;
   formatStyle: string;
   channelName?: string;
@@ -27,6 +28,7 @@ interface PostDetailsProps {
 const PostDetails: React.FC<PostDetailsProps> = ({
   postText,
   images = [],
+  initialSelectedImage,
   topicIdea,
   formatStyle,
   channelName,
@@ -34,9 +36,13 @@ const PostDetails: React.FC<PostDetailsProps> = ({
   onSave,
   isSaving
 }) => {
-  const [selectedImage, setSelectedImage] = useState<Image | null>(null);
+  const [selectedImage, setSelectedImage] = useState<Image | null>(initialSelectedImage || null);
   const [editedText, setEditedText] = useState<string>(postText);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+
+  useEffect(() => {
+    setSelectedImage(initialSelectedImage || null);
+  }, [initialSelectedImage]);
 
   const handleSavePost = async () => {
     await onSave(selectedImage, editedText);
