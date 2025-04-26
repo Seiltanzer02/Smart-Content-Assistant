@@ -1095,11 +1095,67 @@ async def get_posts(request: Request, channel_name: Optional[str] = None):
             logger.error(f"Ошибка при получении постов из БД: {result}")
             return []
             
-        return result.data
+        # === ИЗМЕНЕНИЕ: Запрос для получения связанных изображений ===
+        # Строим запрос к базе данных, запрашивая связанные данные из saved_images
+        # Обратите внимание: имя таблицы saved_images используется как имя связи
+        query = supabase.table("saved_posts").select(
+            "*, saved_images(*)" # <--- Запрашиваем все поля поста и все поля связанного изображения
+        ).eq("user_id", int(telegram_user_id))
+        # === КОНЕЦ ИЗМЕНЕНИЯ ===
+        
+        # Если указано имя канала, фильтруем по нему
+        if channel_name:
+            query = query.eq("channel_name", channel_name)
+            
+        # Выполняем запрос
+        result = query.order("target_date", desc=True).execute()
+        
+        # Проверка результата
+        if not hasattr(result, 'data'):
+            logger.error(f"Ошибка при получении постов из БД: {result}")
+            return []
+            
+        # === ИЗМЕНЕНИЕ: Обработка ответа для включения данных изображения ===
+        posts_with_images = []
+        for post_data in result.data:
+            # Создаем объект SavedPostResponse из основных данных поста
+            response_item = SavedPostResponse(**post_data)
+            
+            # Проверяем, есть ли связанные данные изображения и они не пустые
+            image_relation_data = post_data.get("saved_images")
+            if image_relation_data and isinstance(image_relation_data, dict):
+                # Создаем объект PostImage из данных saved_images
+                # Убедимся, что ключи соответствуют модели PostImage
+                try:
+                    response_item.selected_image_data = PostImage(
+                        id=image_relation_data.get("id"),
+                        url=image_relation_data.get("url"),
+                        preview_url=image_relation_data.get("preview_url"),
+                        alt=image_relation_data.get("alt"),
+                        author=image_relation_data.get("author"), # В saved_images это 'author'
+                        author_url=image_relation_data.get("author_url"),
+                        source=image_relation_data.get("source")
+                    )
+                    logger.debug(f"Добавлено изображение {response_item.selected_image_data.id} для поста {response_item.id}")
+                except Exception as mapping_error:
+                     logger.error(f"Ошибка при маппинге данных изображения для поста {response_item.id}: {mapping_error}")
+                     logger.error(f"Данные изображения: {image_relation_data}")
+                     response_item.selected_image_data = None # Очищаем при ошибке
+            else:
+                # Если ключ 'saved_images' отсутствует или пуст, selected_image_data остается None
+                response_item.selected_image_data = None
+                # Логируем, если ожидали изображение (т.е. saved_image_id не None), но его нет
+                if post_data.get("saved_image_id"):
+                    logger.warning(f"Для поста {post_data['id']} есть saved_image_id, но связанные данные изображения не были получены или пусты. Связанные данные: {image_relation_data}")
+
+
+            posts_with_images.append(response_item)
+            
+        return posts_with_images
+        # === КОНЕЦ ИЗМЕНЕНИЯ ===
         
     except Exception as e:
         logger.error(f"Ошибка при получении постов: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/posts", response_model=SavedPostResponse)
 async def create_post(request: Request, post_data: PostData):
@@ -1767,7 +1823,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.75,
-                max_tokens=1000, # <--- УМЕНЬШЕНО ЗНАЧЕНИЕ
+                max_tokens=850, # <--- УМЕНЬШЕНО ЗНАЧЕНИЕ до 850
                 timeout=120,
                 extra_headers={
                     "HTTP-Referer": "https://content-manager.onrender.com",
