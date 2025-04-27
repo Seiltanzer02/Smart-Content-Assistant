@@ -40,7 +40,7 @@ const ImageSelector: React.FC<ImageSelectorProps> = ({ onImageSelect, selectedIm
 
       const response = await axios.get(`${API_BASE_URL}/user-images`, {
         headers: {
-          'x-telegram-user-id': userId
+          'x-telegram-user-id': userId ? Number(userId) : undefined
         }
       });
 

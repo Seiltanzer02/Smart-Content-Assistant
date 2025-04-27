@@ -606,8 +606,8 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         
         # --- ИЗМЕНЕНИЕ: Упрощенное извлечение результата --- 
         # Теперь analyze_content_with_deepseek всегда возвращает словарь с ключами themes и styles
-        themes = analysis_result.get("themes", [])
-        styles = analysis_result.get("styles", [])
+            themes = analysis_result.get("themes", [])
+            styles = analysis_result.get("styles", [])
         # --- КОНЕЦ ИЗМЕНЕНИЯ --- 
         
         # Сохранение результата анализа в базе данных (если есть telegram_user_id)
@@ -791,6 +791,16 @@ async def get_saved_ideas(request: Request, channel_name: Optional[str] = None):
             logger.warning("Запрос идей без идентификации пользователя Telegram")
             return SuggestedIdeasResponse(
                 message="Для доступа к идеям необходимо авторизоваться через Telegram",
+                ideas=[]
+            )
+        
+        # Преобразуем ID пользователя в число
+        try:
+            telegram_user_id = int(telegram_user_id)
+        except (ValueError, TypeError):
+            logger.error(f"Некорректный ID пользователя в заголовке: {telegram_user_id}")
+            return SuggestedIdeasResponse(
+                message="Некорректный ID пользователя",
                 ideas=[]
             )
         
@@ -2824,6 +2834,13 @@ async def save_suggested_ideas_batch(payload: SaveIdeasRequest, request: Request
     telegram_user_id = request.headers.get("x-telegram-user-id")
     if not telegram_user_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Преобразуем ID пользователя в целое число
+    try:
+        telegram_user_id = int(telegram_user_id)
+    except (ValueError, TypeError):
+        logger.error(f"Некорректный ID пользователя в заголовке: {telegram_user_id}")
+        raise HTTPException(status_code=400, detail="Некорректный формат ID пользователя")
 
     if not supabase:
         logger.error("Supabase client not initialized")
@@ -3007,6 +3024,13 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
     if not telegram_user_id:
         logger.warning("Запрос загрузки изображения без идентификации пользователя Telegram")
         raise HTTPException(status_code=401, detail="Для загрузки изображения необходимо авторизоваться через Telegram")
+
+    # Преобразуем ID пользователя в целое число
+    try:
+        telegram_user_id = int(telegram_user_id)
+    except (ValueError, TypeError):
+        logger.error(f"Некорректный ID пользователя в заголовке: {telegram_user_id}")
+        raise HTTPException(status_code=400, detail="Некорректный формат ID пользователя")
 
     if not supabase:
         logger.error("Клиент Supabase не инициализирован")
