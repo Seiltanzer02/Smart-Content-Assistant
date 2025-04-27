@@ -12,6 +12,13 @@ import { ClipLoader } from 'react-spinners';
 const API_BASE_URL = '';
 // const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000'; // Убираем использование process.env
 
+// --- ДОБАВЛЕНО: Вспомогательная функция для ключей localStorage ---
+const getUserSpecificKey = (baseKey: string, userId: string | null): string | null => {
+  if (!userId) return null; // Не работаем с localStorage без ID пользователя
+  return `${userId}_${baseKey}`;
+};
+// --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
 // Компоненты для отображения загрузки и сообщений
 const Loading = ({ message }: { message: string }) => (
   <div className="loading-indicator">
@@ -415,60 +422,80 @@ function App() {
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   // --- КОНЕЦ ВОССТАНОВЛЕНИЯ ---
 
-  // Быстрая инициализация без localStorage
+  // --- ИЗМЕНЕНИЕ: Загрузка состояния ИЗ localStorage ПОСЛЕ аутентификации ---
   useEffect(() => {
-    // Восстанавливаем состояние из localStorage
-    const storedChannel = localStorage.getItem('channelName');
-    if (storedChannel) {
-      setChannelName(storedChannel);
-    }
-    
-    const storedSelectedChannels = localStorage.getItem('selectedChannels');
-    if (storedSelectedChannels) {
-      try {
-        setSelectedChannels(JSON.parse(storedSelectedChannels));
-    } catch (e) {
-        console.error('Ошибка при восстановлении выбранных каналов:', e);
-      }
-    }
-    
-    setTimeout(() => {
-      setLoading(false);
-    }, 500);
-  }, []);
-
-  // Сохраняем канал в localStorage при изменении
-  useEffect(() => {
-    if (channelName) {
-      localStorage.setItem('channelName', channelName);
-      
-      // НЕ добавляем канал в список каналов здесь - 
-      // это будет происходить только после успешного анализа
-    }
-  }, [channelName]);
-  
-  // Загружаем список всех каналов при авторизации
-  useEffect(() => {
-    if (isAuthenticated) {
-      const storedChannels = localStorage.getItem('allChannels');
-      if (storedChannels) {
-        try {
-          setAllChannels(JSON.parse(storedChannels));
-        } catch (e) {
-          console.error('Ошибка при восстановлении списка каналов:', e);
+    if (isAuthenticated && userId) {
+      // Восстанавливаем состояние из localStorage, используя user-specific ключи
+      const channelKey = getUserSpecificKey('channelName', userId);
+      if (channelKey) {
+        const storedChannel = localStorage.getItem(channelKey);
+        if (storedChannel) {
+          setChannelName(storedChannel);
         }
       }
-      
-      // Загружаем сохраненные посты
+
+      const selectedChannelsKey = getUserSpecificKey('selectedChannels', userId);
+      if (selectedChannelsKey) {
+        const storedSelectedChannels = localStorage.getItem(selectedChannelsKey);
+        if (storedSelectedChannels) {
+          try {
+            setSelectedChannels(JSON.parse(storedSelectedChannels));
+          } catch (e) {
+            console.error('Ошибка при восстановлении выбранных каналов:', e);
+          }
+        }
+      }
+
+      const allChannelsKey = getUserSpecificKey('allChannels', userId);
+      if (allChannelsKey) {
+        const storedChannels = localStorage.getItem(allChannelsKey);
+        if (storedChannels) {
+          try {
+            setAllChannels(JSON.parse(storedChannels));
+          } catch (e) {
+            console.error('Ошибка при восстановлении списка каналов:', e);
+          }
+        }
+      } else {
+          // Если список каналов не найден, загружаем его из постов
+          // (Это произойдет ниже в другом useEffect, зависящем от isAuthenticated)
+      }
+
+      // Загружаем сохраненные посты (перенесено сюда для ясности, т.к. зависит от userId для заголовка)
       fetchSavedPosts();
 
       // Загрузка сохраненного анализа для ТЕКУЩЕГО выбранного канала
-      if (channelName) {
+      if (channelName) { // channelName будет установлен выше, если есть в localStorage
         fetchSavedAnalysis(channelName);
+      }
     }
+
+    // Устанавливаем флаг загрузки после попытки аутентификации/загрузки
+    // (Перенесено из старого useEffect)
+    setTimeout(() => {
+      setLoading(false);
+    }, 500);
+  }, [isAuthenticated, userId]); // Запускаем при изменении статуса аутентификации и userId
+
+  // --- ИЗМЕНЕНИЕ: Сохраняем канал в localStorage при изменении (ИСПОЛЬЗУЯ user-specific ключ) ---
+  useEffect(() => {
+    const key = getUserSpecificKey('channelName', userId);
+    if (key && channelName) {
+      localStorage.setItem(key, channelName);
     }
-  }, [isAuthenticated, channelName]);
-  
+  }, [channelName, userId]); // Запускаем при изменении канала ИЛИ userId
+
+  // Загружаем список всех каналов при авторизации (этот useEffect можно упростить или объединить)
+  useEffect(() => {
+    if (isAuthenticated && userId) {
+       // Если allChannels пуст после попытки загрузки из localStorage, пробуем собрать из постов
+       if (allChannels.length === 0) {
+         console.log("Список каналов пуст, пытаемся обновить из постов...");
+         updateChannelsFromPosts(savedPosts); // Используем уже загруженные посты
+       }
+    }
+  }, [isAuthenticated, userId, allChannels.length, savedPosts]); // Добавили allChannels.length и savedPosts
+
   // --- ВОССТАНОВЛЕНО: useEffect для генерации дней календаря --- 
   useEffect(() => {
     if (currentMonth && currentView === 'calendar') { // Добавляем проверку currentView
@@ -571,7 +598,8 @@ function App() {
         for (const channel of selectedChannels) {
           try {
             const response = await axios.get('/posts', {
-              params: { channel_name: channel } // Фильтруем по каждому каналу из фильтра
+              params: { channel_name: channel }, // Фильтруем по каждому каналу из фильтра
+              headers: { 'x-telegram-user-id': userId } // <-- ДОБАВЛЕНО
             });
             if (response.data && Array.isArray(response.data)) {
               allFilteredPosts.push(...response.data);
@@ -585,7 +613,8 @@ function App() {
       } else if (channelName) {
         // Если фильтр не активен, но выбран канал вверху, грузим посты для него
         const response = await axios.get('/posts', {
-          params: { channel_name: channelName } // Фильтруем по текущему выбранному каналу
+          params: { channel_name: channelName }, // Фильтруем по текущему выбранному каналу
+          headers: { 'x-telegram-user-id': userId } // <-- ДОБАВЛЕНО
         });
         if (response.data && Array.isArray(response.data)) {
           postsToSet = response.data;
@@ -593,7 +622,9 @@ function App() {
         }
       } else {
         // Если ни фильтр, ни канал не выбраны, грузим все посты пользователя
-        const response = await axios.get('/posts');
+        const response = await axios.get('/posts', { // <-- ИЗМЕНЕНО: Добавлен объект конфигурации
+           headers: { 'x-telegram-user-id': userId } // <-- ДОБАВЛЕНО
+        });
         if (response.data && Array.isArray(response.data)) {
           postsToSet = response.data;
           updateChannelsFromPosts(postsToSet); // Обновляем список всех каналов
@@ -623,7 +654,12 @@ function App() {
     if (channels.length > 0) {
       const updatedChannels = [...new Set([...allChannels, ...channels])];
       setAllChannels(updatedChannels);
-      localStorage.setItem('allChannels', JSON.stringify(updatedChannels));
+      // --- ИЗМЕНЕНИЕ: Сохраняем allChannels с user-specific ключом ---
+      const key = getUserSpecificKey('allChannels', userId);
+      if (key) {
+        localStorage.setItem(key, JSON.stringify(updatedChannels));
+      }
+      // --- КОНЕЦ ИЗМЕНЕНИЯ ---
     }
   };
   
@@ -931,13 +967,23 @@ function App() {
       if (!allChannels.includes(channelName)) {
         const updatedChannels = [...allChannels, channelName];
         setAllChannels(updatedChannels);
-        localStorage.setItem('allChannels', JSON.stringify(updatedChannels));
-      
+        // --- ИЗМЕНЕНИЕ: Сохраняем allChannels с user-specific ключом ---
+        const allKey = getUserSpecificKey('allChannels', userId);
+        if (allKey) {
+          localStorage.setItem(allKey, JSON.stringify(updatedChannels));
+        }
+        // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
         // Добавляем канал в список выбранных, если его там нет
         if (!selectedChannels.includes(channelName)) {
           const updatedSelected = [...selectedChannels, channelName];
           setSelectedChannels(updatedSelected);
-          localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
+          // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
+          const selectedKey = getUserSpecificKey('selectedChannels', userId);
+          if (selectedKey) {
+            localStorage.setItem(selectedKey, JSON.stringify(updatedSelected));
+          }
+          // --- КОНЕЦ ИЗМЕНЕНИЯ ---
         }
       }
       // Устанавливаем флаг, что анализ загружен из БД
@@ -1417,7 +1463,12 @@ function App() {
                       if (channelName && !selectedChannels.includes(channelName)) {
                         const updatedSelected = [...selectedChannels, channelName];
                         setSelectedChannels(updatedSelected);
-                        localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
+                        // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
+                        const key = getUserSpecificKey('selectedChannels', userId);
+                        if (key) {
+                          localStorage.setItem(key, JSON.stringify(updatedSelected));
+                        }
+                        // --- КОНЕЦ ИЗМЕНЕНИЯ ---
                       }
                     }}
                   >
@@ -1442,7 +1493,12 @@ function App() {
                         onClick={() => {
                           const updatedSelected = selectedChannels.filter(c => c !== channel);
                           setSelectedChannels(updatedSelected);
-                          localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
+                          // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
+                          const key = getUserSpecificKey('selectedChannels', userId);
+                          if (key) {
+                             localStorage.setItem(key, JSON.stringify(updatedSelected));
+                          }
+                          // --- КОНЕЦ ИЗМЕНЕНИЯ ---
                         }}
                       >
                         ✕
@@ -1523,7 +1579,12 @@ function App() {
                            if (channelName && !selectedChannels.includes(channelName)) {
                               const updatedSelected = [...selectedChannels, channelName];
                               setSelectedChannels(updatedSelected);
-                              localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
+                              // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
+                              const key = getUserSpecificKey('selectedChannels', userId);
+                              if (key) {
+                                localStorage.setItem(key, JSON.stringify(updatedSelected));
+                              }
+                              // --- КОНЕЦ ИЗМЕНЕНИЯ ---
                            }
                         }}
                      >
@@ -1545,7 +1606,12 @@ function App() {
                               onClick={() => {
                                  const updatedSelected = selectedChannels.filter(c => c !== channel);
                                  setSelectedChannels(updatedSelected);
-                                 localStorage.setItem('selectedChannels', JSON.stringify(updatedSelected));
+                                 // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
+                                 const key = getUserSpecificKey('selectedChannels', userId);
+                                 if (key) {
+                                    localStorage.setItem(key, JSON.stringify(updatedSelected));
+                                 }
+                                 // --- КОНЕЦ ИЗМЕНЕНИЯ ---
                               }}
                            >
                               ✕
