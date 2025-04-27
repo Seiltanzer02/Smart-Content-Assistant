@@ -604,11 +604,9 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         # Анализ через deepseek
         analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
         
-        # --- ИЗМЕНЕНИЕ: Упрощенное извлечение результата --- 
-        # Теперь analyze_content_with_deepseek всегда возвращает словарь с ключами themes и styles
-            themes = analysis_result.get("themes", [])
-            styles = analysis_result.get("styles", [])
-        # --- КОНЕЦ ИЗМЕНЕНИЯ --- 
+        # Извлекаем результаты из возвращаемого словаря
+        themes = analysis_result.get("themes", [])
+        styles = analysis_result.get("styles", [])
         
         # Сохранение результата анализа в базе данных (если есть telegram_user_id)
         if telegram_user_id and supabase:
