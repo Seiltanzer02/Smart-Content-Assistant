@@ -568,22 +568,31 @@ function App() {
   // --- ИЗМЕНЕНИЕ: useEffect для загрузки данных при смене канала --- 
   useEffect(() => {
     if (isAuthenticated && channelName) {
+      // --- ДОБАВЛЕНО: Очистка состояния перед загрузкой ---
+      setAnalysisResult(null); // Очищаем предыдущий анализ
+      setSuggestedIdeas([]);  // Очищаем предыдущие идеи
+      setSavedPosts([]); // Очищаем предыдущие посты
+      setSelectedIdea(null); // Сбрасываем выбранную идею
+      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
       // Загрузка сохраненного анализа для выбранного канала
       fetchSavedAnalysis(channelName);
       // Загрузка сохраненных идей для выбранного канала
       fetchSavedIdeas();
-      // Загрузка сохраненных постов для выбранного канала (или всех, если фильтр пуст)
+      // Загрузка сохраненных постов для выбранного канала
       fetchSavedPosts(); 
     } else if (isAuthenticated) {
       // Если канал не выбран, очищаем специфичные для канала данные
       setAnalysisResult(null);
       setSuggestedIdeas([]);
-      // Возможно, загрузить все посты, если канал не выбран?
-      // fetchSavedPosts(); // Пока оставим загрузку постов по фильтру
+      // --- ДОБАВЛЕНО: Также очищаем посты, если канал сброшен ---
+      setSavedPosts([]); 
+      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+      setSelectedIdea(null); 
+      // Возможно, загрузить все посты пользователя, если канал не выбран?
+      fetchSavedPosts(); // Загружаем все посты пользователя
     }
-    // Сбрасываем выбранную идею при смене канала
-    setSelectedIdea(null); 
-  }, [isAuthenticated, channelName]);
+  }, [isAuthenticated, channelName]); // Зависимости остаются прежними
   // --- КОНЕЦ ИЗМЕНЕНИЯ --- 
   
   // Функция для загрузки сохраненных постов
@@ -595,63 +604,71 @@ function App() {
     console.log(`[fetchSavedPosts] Используемый userId для заголовка: ${userId}`);
     if (!userId) {
       console.error("[fetchSavedPosts] userId отсутствует, запрос постов не будет выполнен корректно.");
-      // Можно прервать выполнение или показать ошибку пользователю
-      // setError("Ошибка аутентификации: не удалось получить ID пользователя.");
-      // setLoadingSavedPosts(false);
-      // return;
+      setLoadingSavedPosts(false);
+      // --- ДОБАВЛЕНО: Очищаем посты при ошибке userId ---
+      setSavedPosts([]);
+      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+      return; // Прерываем выполнение
     }
     // --- КОНЕЦ ДОБАВЛЕНИЯ ---
 
     try {
-      // --- ИЗМЕНЕНИЕ: Фильтруем посты по выбранному channelName, ЕСЛИ нет активного фильтра каналов --- 
-      let postsToSet: SavedPost[] = [];
+      // --- ИЗМЕНЕНИЕ: Заменяем postsToSet на postsResult, чтобы гарантировать перезапись --- 
+      let postsResult: SavedPost[] = [];
       const useChannelFilter = selectedChannels.length > 0;
       
       if (useChannelFilter) {
         // Используем фильтр selectedChannels
         const allFilteredPosts: SavedPost[] = [];
-        for (const channel of selectedChannels) {
-          try {
-            const response = await axios.get('/posts', {
-              params: { channel_name: channel }, // Фильтруем по каждому каналу из фильтра
-              headers: { 'x-telegram-user-id': userId } // <-- ДОБАВЛЕНО
-            });
+        // --- ИЗМЕНЕНО: Используем Promise.all для параллельной загрузки ---
+        const promises = selectedChannels.map(channel =>
+          axios.get('/posts', {
+            params: { channel_name: channel },
+            headers: { 'x-telegram-user-id': userId }
+          }).then(response => {
             if (response.data && Array.isArray(response.data)) {
-              allFilteredPosts.push(...response.data);
+              return response.data;
             }
-          } catch (err) {
+            return [];
+          }).catch(err => {
             console.error(`Ошибка при загрузке постов для канала ${channel}:`, err);
-          }
-        }
-        postsToSet = allFilteredPosts;
-        updateChannelsFromPosts(postsToSet); // Обновляем список всех каналов
+            return []; // Возвращаем пустой массив при ошибке
+          })
+        );
+        const results = await Promise.all(promises);
+        postsResult = results.flat(); // Объединяем массивы результатов
+        // --- КОНЕЦ ИЗМЕНЕНИЯ ---
       } else if (channelName) {
         // Если фильтр не активен, но выбран канал вверху, грузим посты для него
         const response = await axios.get('/posts', {
-          params: { channel_name: channelName }, // Фильтруем по текущему выбранному каналу
-          headers: { 'x-telegram-user-id': userId } // <-- ДОБАВЛЕНО
+          params: { channel_name: channelName }, 
+          headers: { 'x-telegram-user-id': userId } 
         });
         if (response.data && Array.isArray(response.data)) {
-          postsToSet = response.data;
-          updateChannelsFromPosts(postsToSet); // Обновляем список всех каналов
+          postsResult = response.data;
         }
       } else {
         // Если ни фильтр, ни канал не выбраны, грузим все посты пользователя
-        const response = await axios.get('/posts', { // <-- ИЗМЕНЕНО: Добавлен объект конфигурации
-           headers: { 'x-telegram-user-id': userId } // <-- ДОБАВЛЕНО
+        const response = await axios.get('/posts', { 
+           headers: { 'x-telegram-user-id': userId } 
         });
         if (response.data && Array.isArray(response.data)) {
-          postsToSet = response.data;
-          updateChannelsFromPosts(postsToSet); // Обновляем список всех каналов
+          postsResult = response.data;
         }
       }
       
-      setSavedPosts(postsToSet);
+      // --- ИЗМЕНЕНИЕ: Гарантированно перезаписываем состояние --- 
+      setSavedPosts(postsResult); 
+      // Обновляем список всех каналов на основе ТОЛЬКО ЧТО полученных постов
+      updateChannelsFromPosts(postsResult); 
       // --- КОНЕЦ ИЗМЕНЕНИЯ ---
       
     } catch (err: any) {
       console.error('Ошибка при загрузке сохраненных постов:', err);
       setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке сохраненных постов');
+      // --- ДОБАВЛЕНО: Очищаем посты при ошибке загрузки ---
+      setSavedPosts([]); 
+      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
     } finally {
       setLoadingSavedPosts(false);
     }
@@ -659,21 +676,29 @@ function App() {
   
   // Вспомогательная функция для обновления списка каналов из постов
   const updateChannelsFromPosts = (posts: SavedPost[]) => {
-    // Собираем уникальные каналы из постов
-    const channels = [...new Set(posts
+    const currentUserPosts = posts.filter(post => String(post.user_id) === String(userId));
+    if (posts.length !== currentUserPosts.length) {
+        console.warn(`[updateChannelsFromPosts] Обнаружены посты (${posts.length - currentUserPosts.length} шт.), не принадлежащие текущему пользователю (${userId}). Они будут проигнорированы при обновлении списка каналов.`);
+    }
+    
+    // Собираем уникальные каналы из ТОЛЬКО ЧТО полученных и отфильтрованных постов
+    const newChannels = [...new Set(currentUserPosts 
       .map(post => post.channel_name)
-      .filter((channel): channel is string => !!channel) // Отфильтровываем undefined и приводим к типу string
+      .filter((channel): channel is string => !!channel) 
     )];
     
-    // Обновляем список всех каналов
-    if (channels.length > 0) {
-      const updatedChannels = [...new Set([...allChannels, ...channels])];
-      setAllChannels(updatedChannels);
-      // --- ИЗМЕНЕНИЕ: Сохраняем allChannels с user-specific ключом ---
-      const key = getUserSpecificKey('allChannels', userId);
-      if (key) {
-        localStorage.setItem(key, JSON.stringify(updatedChannels));
-      }
+    // Обновляем список всех каналов, добавляя новые, которых еще нет
+    if (newChannels.length > 0) {
+      // --- ИЗМЕНЕНИЕ: Обновляем, беря текущее состояние и добавляя новые каналы ---
+      setAllChannels(prevChannels => {
+        const updatedChannels = [...new Set([...prevChannels, ...newChannels])];
+        // Сохраняем обновленный список в localStorage
+        const key = getUserSpecificKey('allChannels', userId);
+        if (key) {
+          localStorage.setItem(key, JSON.stringify(updatedChannels));
+        }
+        return updatedChannels; // Возвращаем новое состояние
+      });
       // --- КОНЕЦ ИЗМЕНЕНИЯ ---
     }
   };
@@ -946,12 +971,16 @@ function App() {
   // Функция для фильтрации постов по каналам
   const filterPostsByChannels = async () => {
     if (selectedChannels.length === 0) {
-      setError("Выберите хотя бы один канал для фильтрации");
-      return;
+       // --- ИЗМЕНЕНИЕ: Вместо ошибки, просто загружаем все посты пользователя ---
+       console.log("Фильтр каналов пуст, загружаем все посты пользователя...");
+       // setError("Выберите хотя бы один канал для фильтрации"); // Убираем ошибку
+       // return;
     }
     
-    // Просто используем основную функцию загрузки постов
-    await fetchSavedPosts();
+    // Просто используем основную функцию загрузки постов,
+    // она сама обработает пустой selectedChannels или выбранный channelName
+    await fetchSavedPosts(); 
+    // --- КОНЕЦ ИЗМЕНЕНИЯ ---
   };
 
   // Обработчик успешной авторизации
@@ -1825,7 +1854,7 @@ function App() {
                       )}
                 </div>
               </div>
-              {/* --- КОНЕЦ: Секция управления изображениями --- */}                  
+              {/* --- КОНЕЦ: Секция управления изображениями --- */} {/* <-- ИСПРАВЛЕНО: Убран лишний символ */} 
                 
               {/* Кнопки действий */}
               <div className="form-actions">
@@ -1859,7 +1888,7 @@ function App() {
             </div>
           )}
         </div>
-      </main>
+      </main> {/* <-- ИСПРАВЛЕНО: Добавлен закрывающий тег */} 
 
       <footer className="app-footer">
         <p>© 2024 Smart Content Assistant</p>
