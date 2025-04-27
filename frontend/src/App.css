@@ -1637,157 +1637,316 @@ h1 {
   overflow-x: auto; /* Добавляем горизонтальную прокрутку, если таблица не помещается */
 }
 
-/* --- ВОССТАНАВЛИВАЕМ СТИЛИ ДЛЯ СЕТКИ КАЛЕНДАРЯ --- */
-.calendar-grid {
-  width: 100%;
-  border: 1px solid #e0e0e0;
+/* === УЛУЧШЕНИЕ: Стили галереи изображений === */
+.suggested-images-section {
+  margin-top: 20px;
+  margin-bottom: 20px;
+}
+
+.image-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); /* Адаптивная сетка */
+  gap: 8px; /* Промежуток между изображениями */
+}
+
+.image-item {
+  position: relative;
+  cursor: pointer;
   border-radius: 6px;
-  overflow: hidden; /* Скрыть вылезающие границы */
+  overflow: hidden; /* Обрезаем выходящее за рамки */
+  border: 2px solid transparent; /* Граница для выделения */
+  transition: border-color 0.2s ease-in-out;
+  aspect-ratio: 1 / 1; /* Делаем элементы квадратными */
+  background-color: var(--tg-theme-secondary-bg-color, #f0f0f0); /* Фон для незагруженных */
 }
 
-.calendar-weekdays {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  background-color: #f0f0f0;
-  border-bottom: 1px solid #e0e0e0;
+.image-item img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* Масштабируем с сохранением пропорций и обрезкой */
+  transition: transform 0.2s ease-in-out;
 }
 
-.calendar-weekday {
-  padding: 10px;
-  text-align: center;
-  font-weight: 600;
-  font-size: 0.9rem;
+.image-item:hover img {
+  transform: scale(1.05); /* Небольшое увеличение при наведении */
 }
 
-.calendar-days {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  /* Устанавливаем меньшую минимальную высоту строки */
-  grid-auto-rows: minmax(80px, auto); 
+.image-item.selected {
+  border-color: var(--tg-theme-button-color, #1a73e8); /* Яркая граница для выделенного */
 }
 
+/* Checkmark для выделенного изображения */
+.checkmark {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 20px;
+    height: 20px;
+    background-color: var(--tg-theme-button-color, #1a73e8);
+    color: var(--tg-theme-button-text-color, white);
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 12px;
+    font-weight: bold;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+.custom-image-section {
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid var(--tg-theme-hint-color, #e0e0e0);
+}
+
+.selected-image-preview {
+    margin-top: 15px;
+}
+.selected-image-preview h5 {
+    margin-bottom: 8px;
+    font-size: 0.9rem;
+    color: var(--tg-theme-text-color, #555);
+}
+.preview-container {
+    position: relative;
+    max-width: 200px; /* Ограничим размер превью */
+    border-radius: 6px;
+    overflow: hidden;
+}
+.preview-container img {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.remove-image-btn {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background-color: rgba(255, 0, 0, 0.7);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 0.7rem;
+    cursor: pointer;
+}
+.remove-image-btn:hover {
+    background-color: rgba(255, 0, 0, 0.9);
+}
+/* === КОНЕЦ УЛУЧШЕНИЯ ГАЛЕРЕИ === */
+
+/* === УЛУЧШЕНИЕ: Стили календаря === */
 .calendar-day {
-  border-right: 1px solid #eee;
-  border-bottom: 1px solid #eee;
-  padding: 6px;
-  position: relative; /* Для позиционирования номера дня */
-  overflow: hidden; /* Обрезаем контент, если не влезает */
+  border: 1px solid var(--tg-theme-hint-color, #e0e0e0);
+  padding: 4px; /* Уменьшаем внутренний отступ */
+  min-height: 80px; /* Минимальная высота ячейки */
+  display: flex;
+  flex-direction: column;
+  position: relative; /* Для позиционирования постов */
   transition: background-color 0.2s;
 }
-/* Убираем лишнюю границу справа у последнего элемента в строке */
-.calendar-day:nth-child(7n) {
-  border-right: none;
+
+.calendar-day:hover {
+  background-color: var(--tg-theme-secondary-bg-color, #f9f9f9);
 }
-/* Убираем лишнюю границу снизу у последней строки (можно сложнее, но пока так) */
-/* .calendar-day:nth-last-child(-n+7) {
-  border-bottom: none;
-} */
 
 .calendar-day.other-month {
-  background-color: #f9f9f9;
-  color: #aaa;
+  background-color: var(--tg-theme-secondary-bg-color, #f8f8f8);
+  opacity: 0.7;
 }
+
 .calendar-day.today {
-  background-color: rgba(26, 115, 232, 0.05);
-}
-.calendar-day.today .day-number {
-  font-weight: bold;
-  color: #1a73e8;
+  background-color: rgba(var(--tg-theme-link-color-rgb, 26, 115, 232), 0.08);
 }
 
 .calendar-day .day-number {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  font-size: 0.8rem;
-  color: #666;
-  font-weight: 500;
+  font-size: 0.75rem; /* Меньший размер дня */
+  color: var(--tg-theme-hint-color, #888);
+  text-align: right;
+  margin-bottom: 3px;
 }
 
-.calendar-day .day-posts {
-  margin-top: 25px; /* Отступ от номера дня */
-  display: flex;
-  flex-direction: column;
-  gap: 4px; /* Отступ между постами */
+.calendar-day.today .day-number {
+  font-weight: bold;
+  color: var(--tg-theme-link-color, #1a73e8);
+}
+
+.day-posts {
+  flex-grow: 1;
+  overflow-y: auto; /* Добавляем скролл, если постов много */
+  max-height: 100px; /* Ограничиваем высоту блока постов */
+  scrollbar-width: thin;
+  scrollbar-color: var(--tg-theme-hint-color, #ccc) transparent;
+}
+
+.day-posts::-webkit-scrollbar {
+  width: 4px;
+}
+.day-posts::-webkit-scrollbar-thumb {
+  background-color: var(--tg-theme-hint-color, #ccc);
+  border-radius: 2px;
 }
 
 .calendar-day .post-item {
-  background-color: #e0f2ff;
+  background-color: var(--tg-theme-button-color, #1a73e8);
+  color: var(--tg-theme-button-text-color, white);
   border-radius: 4px;
-  padding: 4px 6px;
-  font-size: 0.75rem; /* Уменьшаем шрифт */
-  display: flex;
+  padding: 3px 5px; /* Уменьшаем паддинг поста */
+  margin-bottom: 3px; /* Меньше отступ */
+  font-size: 0.7rem; /* Меньше шрифт поста */
+  cursor: pointer;
+  position: relative; /* Для позиционирования кнопок */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex; /* Для размещения кнопок */
   justify-content: space-between;
   align-items: center;
-  transition: background-color 0.2s;
-  overflow: hidden;
-  cursor: pointer;
 }
+
 .calendar-day .post-item:hover {
-  background-color: #c0e5ff;
+  filter: brightness(90%);
 }
 
 .calendar-day .post-title {
-  flex: 1;
-  white-space: nowrap;
+  flex-grow: 1; /* Занимает доступное место */
   overflow: hidden;
   text-overflow: ellipsis;
-  font-weight: 500;
-  margin-right: 4px;
+  white-space: nowrap;
+  margin-right: 5px; /* Отступ от кнопок */
 }
 
 .calendar-day .post-actions {
   display: flex;
-  gap: 4px;
-  opacity: 0; /* Скрыты по умолчанию */
-  transition: opacity 0.2s;
+  align-items: center;
+  /* Кнопки будут показываться при наведении на post-item */
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out;
 }
 
 .calendar-day .post-item:hover .post-actions {
-  opacity: 1; /* Показываем при наведении на пост */
+  opacity: 1; /* Показываем кнопки при наведении на пост */
 }
 
 .calendar-day .post-actions .action-button {
-  padding: 2px;
-  min-width: 20px; /* Уменьшаем кнопки */
-  height: 20px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.8rem; /* Уменьшаем иконку */
-}
-
-.calendar-day .post-actions .edit-button {
-  background-color: rgba(76, 175, 80, 0.8); /* Полупрозрачные */
-  color: white;
+  padding: 2px 4px; /* Очень маленький паддинг */
+  font-size: 0.7rem; /* Очень маленький шрифт */
+  line-height: 1;
+  background: none;
   border: none;
-}
-.calendar-day .post-actions .edit-button:hover {
-  background-color: #4caf50;
+  color: var(--tg-theme-button-text-color, white);
+  opacity: 0.8;
+  margin-left: 3px; /* Отступ между кнопками */
 }
 
-.calendar-day .post-actions .delete-button {
-  background-color: rgba(244, 67, 54, 0.8); /* Полупрозрачные */
-  color: white;
-  border: none;
+.calendar-day .post-actions .action-button span {
+    display: inline-block; /* Чтобы эмодзи/иконки не ломались */
+    vertical-align: middle;
 }
-.calendar-day .post-actions .delete-button:hover {
-  background-color: #f44336;
+
+.calendar-day .post-actions .action-button:hover {
+  opacity: 1;
+  transform: scale(1.1);
 }
-/* --- КОНЕЦ ВОССТАНОВЛЕНИЯ СТИЛЕЙ КАЛЕНДАРЯ --- */
 
-/* Удаляем дублирующие/неактуальные стили */
-/* Удаляем старые стили сетки календаря - ЭТО БЫЛО НЕПРАВИЛЬНО, УДАЛЯЕМ ЭТОТ БЛОК КОММЕНТАРИЕВ */
-/* .calendar-grid,
-.calendar-weekdays,
-.calendar-day,
-.calendar-header,
-.calendar-container .nav-button {
-  display: none; 
-} */
+/* Стили для мобильных устройств */
+@media (max-width: 768px) {
 
-/* ... остальной код ... */
+  .navigation-buttons {
+    justify-content: flex-start; /* Начинаем с левого края для скролла */
+  }
+
+  .action-button {
+    padding: 7px 12px;
+    font-size: 0.8rem;
+  }
+
+  .view-container {
+    padding: 10px;
+  }
+  .view h2 {
+    font-size: 1rem;
+  }
+
+  .channel-input {
+      font-size: 0.85rem;
+      padding: 8px 10px;
+  }
+  .input-container .action-button {
+      padding: 8px 10px;
+  }
+
+  .idea-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .idea-item .action-button {
+    margin-top: 8px;
+    align-self: flex-end;
+  }
+
+  /* Адаптация календаря */
+  .calendar-grid {
+    gap: 2px; /* Меньше отступ между ячейками */
+  }
+  .calendar-day {
+    min-height: 65px; /* Меньше минимальная высота */
+    padding: 3px;
+  }
+  .weekday {
+      font-size: 0.7rem;
+  }
+  .calendar-day .day-number {
+      font-size: 0.7rem;
+  }
+  .calendar-day .post-item {
+    font-size: 0.65rem;
+    padding: 2px 4px;
+  }
+  /* Постоянно показываем кнопки на мобильных */
+  .calendar-day .post-actions {
+      opacity: 1;
+  }
+   .calendar-day .post-actions .action-button {
+      padding: 2px 3px;
+      font-size: 0.65rem;
+  }
+
+  /* Улучшение галереи изображений */
+  .image-gallery {
+     grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); /* Меньше минимальный размер */
+     gap: 5px;
+  }
+
+  /* Улучшение формы редактирования */
+  .post-fields {
+     flex-direction: column; /* Поля в столбец */
+  }
+  .post-fields .form-group {
+     margin-bottom: 8px;
+  }
+  .post-text-editor textarea {
+      font-size: 0.9rem;
+  }
+  .form-actions {
+      flex-direction: column;
+      gap: 8px;
+  }
+  .form-actions .action-button {
+      width: 100%;
+  }
+  .custom-image-section .action-button { /* Для кнопки загрузки */
+       font-size: 0.8rem;
+       padding: 6px 10px;
+  }
+}
+
+/* === КОНЕЦ УЛУЧШЕНИЯ КАЛЕНДАРЯ И АДАПТИВНОСТИ === */
+
+/* Существующие стили темной темы и другие стили... */
+/* ... */
 
 /* Адаптация для Telegram Mini App */
 :root {

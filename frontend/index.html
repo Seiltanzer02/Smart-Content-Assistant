@@ -4,7 +4,24 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React</title>
+    <title>Smart Content Assistant</title>
+    <!-- Telegram WebApp JS API -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- === ДОБАВЛЕНО: Отключение свайпа для Mini App === -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            if (window.Telegram && window.Telegram.WebApp) {
+                try {
+                    window.Telegram.WebApp.disableVerticalSwipes();
+                    window.Telegram.WebApp.ready(); // Вызываем ready здесь же
+                    console.log('Telegram WebApp vertical swipes disabled.');
+                } catch (e) {
+                    console.error('Error disabling vertical swipes:', e);
+                }
+            }
+        });
+    </script>
+    <!-- === КОНЕЦ ДОБАВЛЕНИЯ === -->
   </head>
   <body>
     <div id="root"></div>
