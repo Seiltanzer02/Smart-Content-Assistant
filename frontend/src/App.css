@@ -1507,18 +1507,128 @@ h1 {
 
 /* Стили для селектора каналов */
 .channel-selector {
-  margin-bottom: 15px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  margin-bottom: 1rem;
+  width: 100%;
+  max-width: 800px;
 }
 
-.channel-select {
-  padding: 8px 12px;
+.channel-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.channel-search input {
+  flex-grow: 1;
+  padding: 0.5rem;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
-  border: 1px solid #ddd;
+}
+
+.channel-list {
+  background-color: var(--background-light);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0.75rem;
+}
+
+.channel-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.channel-bubbles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.channel-bubble {
+  background-color: var(--background-color);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 0.25rem 0.75rem;
   font-size: 0.9rem;
-  flex: 1;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.channel-bubble.selected {
+  background-color: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+.channel-bubble:hover {
+  background-color: var(--primary-color-light);
+  border-color: var(--primary-color);
+}
+
+/* Стили для выбора канала */
+.channel-selector {
+  margin-bottom: 1rem;
+  width: 100%;
+  max-width: 800px;
+}
+
+.channel-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.channel-search input {
+  flex-grow: 1;
+  padding: 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.channel-list {
+  background-color: var(--background-light);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0.75rem;
+}
+
+.channel-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.channel-bubbles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.channel-bubble {
+  background-color: var(--background-color);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.channel-bubble.selected {
+  background-color: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+.channel-bubble:hover {
+  background-color: var(--primary-color-light);
+  border-color: var(--primary-color);
 }
 
 /* Стили для календаря */
