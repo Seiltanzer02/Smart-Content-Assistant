@@ -414,7 +414,6 @@ function App() {
   const [isSavingPost, setIsSavingPost] = useState(false);
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
   const [allChannels, setAllChannels] = useState<string[]>([]);
-  const [loadingAnalyzedChannels, setLoadingAnalyzedChannels] = useState(false); // Новый стейт
 
   // Состояния для редактирования/создания поста
   const [currentPostId, setCurrentPostId] = useState<string | null>(null);
@@ -434,45 +433,45 @@ function App() {
       const channelKey = getUserSpecificKey('channelName', userId);
       if (channelKey) {
         const storedChannel = localStorage.getItem(channelKey);
-        if (storedChannel) {
-          setChannelName(storedChannel);
+    if (storedChannel) {
+      setChannelName(storedChannel);
         }
-      }
-
+    }
+    
       const selectedChannelsKey = getUserSpecificKey('selectedChannels', userId);
       if (selectedChannelsKey) {
         const storedSelectedChannels = localStorage.getItem(selectedChannelsKey);
-        if (storedSelectedChannels) {
-          try {
-            setSelectedChannels(JSON.parse(storedSelectedChannels));
-          } catch (e) {
-            console.error('Ошибка при восстановлении выбранных каналов:', e);
-          }
-        }
+    if (storedSelectedChannels) {
+      try {
+        setSelectedChannels(JSON.parse(storedSelectedChannels));
+    } catch (e) {
+        console.error('Ошибка при восстановлении выбранных каналов:', e);
+      }
+    }
       }
 
       const allChannelsKey = getUserSpecificKey('allChannels', userId);
       if (allChannelsKey) {
         const storedChannels = localStorage.getItem(allChannelsKey);
-        if (storedChannels) {
-          try {
-            setAllChannels(JSON.parse(storedChannels));
-          } catch (e) {
-            console.error('Ошибка при восстановлении списка каналов:', e);
-          }
+      if (storedChannels) {
+        try {
+          setAllChannels(JSON.parse(storedChannels));
+        } catch (e) {
+          console.error('Ошибка при восстановлении списка каналов:', e);
+        }
         }
       } else {
           // Если список каналов не найден, загружаем его из постов
           // (Это произойдет ниже в другом useEffect, зависящем от isAuthenticated)
       }
-
+      
       // Загружаем сохраненные посты (перенесено сюда для ясности, т.к. зависит от userId для заголовка)
       fetchSavedPosts();
 
       // Загрузка сохраненного анализа для ТЕКУЩЕГО выбранного канала
       if (channelName) { // channelName будет установлен выше, если есть в localStorage
         fetchSavedAnalysis(channelName);
-      }
+    }
     }
 
     // Устанавливаем флаг загрузки после попытки аутентификации/загрузки
@@ -500,7 +499,7 @@ function App() {
        }
     }
   }, [isAuthenticated, userId, allChannels.length, savedPosts]); // Добавили allChannels.length и savedPosts
-
+  
   // --- ВОССТАНОВЛЕНО: useEffect для генерации дней календаря --- 
   useEffect(() => {
     if (currentMonth && currentView === 'calendar') { // Добавляем проверку currentView
@@ -589,7 +588,7 @@ function App() {
       // --- ДОБАВЛЕНО: Также очищаем посты, если канал сброшен ---
       setSavedPosts([]); 
       // --- КОНЕЦ ДОБАВЛЕНИЯ ---
-      setSelectedIdea(null); 
+    setSelectedIdea(null); 
       // Возможно, загрузить все посты пользователя, если канал не выбран?
       fetchSavedPosts(); // Загружаем все посты пользователя
     }
@@ -677,7 +676,6 @@ function App() {
   
   // Вспомогательная функция для обновления списка каналов из постов
   const updateChannelsFromPosts = (posts: SavedPost[]) => {
-    // Фильтруем посты, принадлежащие текущему пользователю
     const currentUserPosts = posts.filter(post => String(post.user_id) === String(userId));
     if (posts.length !== currentUserPosts.length) {
         console.warn(`[updateChannelsFromPosts] Обнаружены посты (${posts.length - currentUserPosts.length} шт.), не принадлежащие текущему пользователю (${userId}). Они будут проигнорированы при обновлении списка каналов.`);
@@ -694,7 +692,7 @@ function App() {
       // --- ИЗМЕНЕНИЕ: Обновляем, беря текущее состояние и добавляя новые каналы ---
       setAllChannels(prevChannels => {
         const updatedChannels = [...new Set([...prevChannels, ...newChannels])];
-        // Сохраняем обновленный список в localStorage с привязкой к пользователю
+        // Сохраняем обновленный список в localStorage
         const key = getUserSpecificKey('allChannels', userId);
         if (key) {
           localStorage.setItem(key, JSON.stringify(updatedChannels));
@@ -818,20 +816,21 @@ function App() {
   
   // Функция для удаления поста
   const deletePost = async (postId: string) => {
-    if (!confirm('Вы уверены, что хотите удалить этот пост?')) return;
-    
     try {
-      // --- ДОБАВЛЕНО: Передача userId в заголовке --- 
-      await axios.delete(`/posts/${postId}`, {
-        headers: { 'x-telegram-user-id': userId }
+      setLoadingSavedPosts(true);
+      const response = await axios.delete(`/posts/${postId}`, {
+        headers: { 'x-telegram-user-id': userId ? Number(userId) : undefined }
       });
       
-      // Удаляем пост из списка сохраненных
-      setSavedPosts(savedPosts.filter(post => post.id !== postId));
-      setSuccess('Пост успешно удален');
+      if (response.data && response.data.success) {
+        // Удаляем пост из локального состояния
+        setSavedPosts(currentPosts => currentPosts.filter(post => post.id !== postId));
+        setSuccess('Пост успешно удален');
+      }
     } catch (err: any) {
-      console.error('Ошибка при удалении поста:', err);
       setError(err.response?.data?.detail || err.message || 'Ошибка при удалении поста');
+    } finally {
+      setLoadingSavedPosts(false);
     }
   };
   
@@ -947,7 +946,7 @@ function App() {
         ideas: ideasToSave, // Используем переданные идеи
           channel_name: channelName 
       }, {
-          headers: { 'x-telegram-user-id': userId }
+          headers: { 'x-telegram-user-id': userId ? Number(userId) : undefined }
       });
       
       if (response.data && response.data.message) {
@@ -981,7 +980,7 @@ function App() {
     
     // Просто используем основную функцию загрузки постов,
     // она сама обработает пустой selectedChannels или выбранный channelName
-    await fetchSavedPosts(); 
+    await fetchSavedPosts();
     // --- КОНЕЦ ИЗМЕНЕНИЯ ---
   };
 
@@ -990,10 +989,7 @@ function App() {
     console.log('Авторизация успешна:', authUserId);
     setUserId(authUserId);
     setIsAuthenticated(true);
-    axios.defaults.headers.common['X-Telegram-User-Id'] = authUserId;
-    // Загружаем посты после авторизации
-    fetchSavedPosts();
-    // Здесь fetchAnalyzedChannels не нужен, так как он вызовется через useEffect
+    axios.defaults.headers.common['X-Telegram-User-Id'] = Number(authUserId);
   };
 
   // Функция для анализа канала
@@ -1028,7 +1024,7 @@ function App() {
           localStorage.setItem(allKey, JSON.stringify(updatedChannels));
         }
         // --- КОНЕЦ ИЗМЕНЕНИЯ ---
-
+      
         // Добавляем канал в список выбранных, если его там нет
         if (!selectedChannels.includes(channelName)) {
           const updatedSelected = [...selectedChannels, channelName];
@@ -1135,7 +1131,7 @@ function App() {
       // --- ДОБАВЛЕНО: Передача userId в заголовке --- 
       const response = await axios.get('/ideas', {
         params: { channel_name: channelName }, // Всегда фильтруем по текущему каналу
-        headers: { 'x-telegram-user-id': userId }
+        headers: { 'x-telegram-user-id': userId ? Number(userId) : undefined }
       });
       if (response.data && Array.isArray(response.data.ideas)) {
         // --- ИЗМЕНЕНИЕ: Убедимся, что ID есть и он строковый --- 
@@ -1296,45 +1292,6 @@ function App() {
     }
   };
 
-  // Функция для загрузки всех проанализированных каналов с сервера
-  const fetchAnalyzedChannels = async () => {
-    setLoadingAnalyzedChannels(true);
-    try {
-      const response = await axios.get(`${API_BASE_URL}/analyzed-channels`, {
-        headers: { 'x-telegram-user-id': userId }
-      });
-      
-      if (response.data && Array.isArray(response.data)) {
-        // Извлекаем только имена каналов из ответа
-        const channels = response.data.map((item) => item.channel_name);
-        
-        // Обновляем список всех каналов, объединяя с текущими
-        setAllChannels((prevChannels) => {
-          const updatedChannels = [...new Set([...prevChannels, ...channels])];
-          // Сохраняем обновленный список в localStorage
-          const key = getUserSpecificKey('allChannels', userId);
-          if (key) {
-            localStorage.setItem(key, JSON.stringify(updatedChannels));
-          }
-          return updatedChannels;
-        });
-        
-        console.log(`Загружено ${channels.length} проанализированных каналов с сервера`);
-      }
-    } catch (err) {
-      console.error('Ошибка при загрузке проанализированных каналов:', err);
-    } finally {
-      setLoadingAnalyzedChannels(false);
-    }
-  };
-  
-  // Загружаем список каналов при авторизации
-  useEffect(() => {
-    if (isAuthenticated && userId) {
-      fetchAnalyzedChannels();
-    }
-  }, [isAuthenticated, userId]);
-
   // Компонент загрузки
   if (loading) {
     return (
@@ -1358,79 +1315,6 @@ function App() {
       </header>
 
       <main className="app-main">
-        <SimpleErrorBoundary>
-          <div className="channel-selector">
-            <div className="channel-search">
-              <label htmlFor="channelNameInput">Канал:</label>
-              <input
-                id="channelNameInput"
-                type="text"
-                placeholder="Имя канала"
-                value={channelName}
-                onChange={(e) => setChannelName(e.target.value)}
-              />
-              <button 
-                className="action-button small" 
-                onClick={() => fetchAnalyzedChannels()} 
-                disabled={loadingAnalyzedChannels} 
-                title="Обновить список каналов"
-              >
-                {loadingAnalyzedChannels ? '...' : '↻'}
-              </button>
-            </div>
-            {allChannels.length > 0 && (
-              <div className="channel-list">
-                <div className="channel-list-header">
-                  <span>Выбор канала:</span>
-                  <button 
-                    className="action-button clear small" 
-                    onClick={() => {
-                      setSelectedChannels([]);
-                      // Сохраняем в localStorage с привязкой к пользователю
-                      const key = getUserSpecificKey('selectedChannels', userId);
-                      if (key) localStorage.setItem(key, JSON.stringify([]));
-                    }}
-                  >
-                    Очистить
-                  </button>
-                </div>
-                <div className="channel-bubbles">
-                  {allChannels.map((channel) => (
-                    <span
-                      key={channel}
-                      className={`channel-bubble ${selectedChannels.includes(channel) ? 'selected' : ''}`}
-                      onClick={() => {
-                        // Переключаем выбор канала
-                        const isSelected = selectedChannels.includes(channel);
-                        const newSelected = isSelected 
-                          ? selectedChannels.filter(c => c !== channel) 
-                          : [...selectedChannels, channel];
-                        
-                        setSelectedChannels(newSelected);
-                        
-                        // Сохраняем в localStorage с привязкой к пользователю
-                        const key = getUserSpecificKey('selectedChannels', userId);
-                        if (key) localStorage.setItem(key, JSON.stringify(newSelected));
-                      }}
-                    >
-                      {channel}
-                    </span>
-                  ))}
-                </div>
-                {selectedChannels.length > 0 && (
-                  <button 
-                    className="action-button clear small" 
-                    onClick={filterPostsByChannels}
-                    disabled={loadingSavedPosts}
-                  >
-                    {loadingSavedPosts ? 'Загрузка...' : 'Применить фильтр'}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        </SimpleErrorBoundary>
-
         {/* Сообщения об ошибках и успешном выполнении */}
         {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
         {success && <SuccessMessage message={success} onClose={() => setSuccess(null)} />}
@@ -1474,6 +1358,21 @@ function App() {
             Посты
           </button>
     </div>
+
+        {/* Выбор канала */}
+        <div className="channel-selector">
+          <label>Каналы: </label>
+          <select 
+            value={channelName} 
+            onChange={(e) => setChannelName(e.target.value)}
+            className="channel-select"
+          >
+            <option value="">Выберите канал</option>
+            {allChannels.map(channel => (
+              <option key={channel} value={channel}>{channel}</option>
+            ))}
+          </select>
+        </div>
 
         {/* Контент */}
         <div className="view-container">
