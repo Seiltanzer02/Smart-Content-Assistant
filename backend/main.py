@@ -485,11 +485,19 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
         # Парсим JSON
         analysis_json = json.loads(analysis_text)
         
-        # Проверяем структуру JSON
-        if "themes" in analysis_json and "styles" in analysis_json:
-            analysis_result = analysis_json
+        # --- ИЗМЕНЕНИЕ: Обработка ключей themes и styles/style --- 
+        themes = analysis_json.get("themes", [])
+        # Пытаемся получить стили по ключу "styles" или "style"
+        styles = analysis_json.get("styles", analysis_json.get("style", [])) 
+        
+        if isinstance(themes, list) and isinstance(styles, list):
+            analysis_result = {"themes": themes, "styles": styles}
+            logger.info(f"Успешно извлечены темы ({len(themes)}) и стили ({len(styles)}) из JSON.")
         else:
-            logger.warning(f"Некорректная структура JSON: {analysis_json}")
+            logger.warning(f"Некорректный тип данных для тем или стилей в JSON: {analysis_json}")
+            # Оставляем analysis_result пустым или сбрасываем в дефолтное значение
+            analysis_result = {"themes": [], "styles": []}
+        # --- КОНЕЦ ИЗМЕНЕНИЯ --- 
     
     except json.JSONDecodeError as e:
         # Если не удалось распарсить JSON, используем регулярные выражения
@@ -589,16 +597,11 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         # Анализ через deepseek
         analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
         
-        # Извлечение результатов анализа
-        if isinstance(analysis_result, dict):
-            themes = analysis_result.get("themes", [])
-            styles = analysis_result.get("styles", [])
-        elif isinstance(analysis_result, tuple) and len(analysis_result) >= 2:
-            themes, styles = analysis_result[0], analysis_result[1]
-        else:
-            logger.warning(f"Неожиданный формат результата анализа: {type(analysis_result)}")
-            themes = []
-            styles = []
+        # --- ИЗМЕНЕНИЕ: Упрощенное извлечение результата --- 
+        # Теперь analyze_content_with_deepseek всегда возвращает словарь с ключами themes и styles
+        themes = analysis_result.get("themes", [])
+        styles = analysis_result.get("styles", [])
+        # --- КОНЕЦ ИЗМЕНЕНИЯ --- 
         
         # Сохранение результата анализа в базе данных (если есть telegram_user_id)
         if telegram_user_id and supabase:
