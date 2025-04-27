@@ -159,7 +159,9 @@ interface CalendarDay {
 }
 
 // Компонент загрузки изображений
-const ImageUploader = ({ onImageUploaded }: { onImageUploaded: (imageUrl: string) => void }) => {
+// --- ИЗМЕНЕНО: Добавляем userId в пропсы --- 
+// --- ИСПРАВЛЕНО: Синтаксис типа пропсов --- 
+const ImageUploader = ({ onImageUploaded, userId }: { onImageUploaded: (imageUrl: string) => void, userId: string | null }) => {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   
@@ -190,7 +192,9 @@ const ImageUploader = ({ onImageUploaded }: { onImageUploaded: (imageUrl: string
       
       const response = await axios.post(`${API_BASE_URL}/upload-image`, formData, {
         headers: {
-          'Content-Type': 'multipart/form-data'
+          'Content-Type': 'multipart/form-data',
+          // --- ДОБАВЛЕНО: Передача userId --- 
+          'x-telegram-user-id': userId
         }
       });
       
@@ -587,6 +591,17 @@ function App() {
     setLoadingSavedPosts(true);
     setError(null);
     
+    // --- ДОБАВЛЕНО: Логирование userId перед запросом --- 
+    console.log(`[fetchSavedPosts] Используемый userId для заголовка: ${userId}`);
+    if (!userId) {
+      console.error("[fetchSavedPosts] userId отсутствует, запрос постов не будет выполнен корректно.");
+      // Можно прервать выполнение или показать ошибку пользователю
+      // setError("Ошибка аутентификации: не удалось получить ID пользователя.");
+      // setLoadingSavedPosts(false);
+      // return;
+    }
+    // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
     try {
       // --- ИЗМЕНЕНИЕ: Фильтруем посты по выбранному channelName, ЕСЛИ нет активного фильтра каналов --- 
       let postsToSet: SavedPost[] = [];
@@ -779,7 +794,10 @@ function App() {
     if (!confirm('Вы уверены, что хотите удалить этот пост?')) return;
     
     try {
-      await axios.delete(`/posts/${postId}`);
+      // --- ДОБАВЛЕНО: Передача userId в заголовке --- 
+      await axios.delete(`/posts/${postId}`, {
+        headers: { 'x-telegram-user-id': userId }
+      });
       
       // Удаляем пост из списка сохраненных
       setSavedPosts(savedPosts.filter(post => post.id !== postId));
@@ -959,7 +977,10 @@ function App() {
     setAnalysisResult(null);
 
     try {
-      const response = await axios.post('/analyze', { username: channelName });
+      // --- ДОБАВЛЕНО: Передача userId в заголовке --- 
+      const response = await axios.post('/analyze', { username: channelName }, {
+        headers: { 'x-telegram-user-id': userId }
+      });
       setAnalysisResult(response.data);
       setSuccess('Анализ успешно завершен');
       
@@ -1077,8 +1098,10 @@ function App() {
     setError(null);
     
     try {
+      // --- ДОБАВЛЕНО: Передача userId в заголовке --- 
       const response = await axios.get('/ideas', {
-        params: { channel_name: channelName } // Всегда фильтруем по текущему каналу
+        params: { channel_name: channelName }, // Всегда фильтруем по текущему каналу
+        headers: { 'x-telegram-user-id': userId }
       });
       if (response.data && Array.isArray(response.data.ideas)) {
         // --- ИЗМЕНЕНИЕ: Убедимся, что ID есть и он строковый --- 
@@ -1324,7 +1347,7 @@ function App() {
         {/* Контент */}
         <div className="view-container">
           {/* Вид анализа */}
-          {currentView === 'analyze' && channelName && (
+          {currentView === 'analyze' && ( 
             <div className="view analyze-view">
       <h2>Анализ Telegram-канала</h2>
       <div className="input-container">
@@ -1781,7 +1804,8 @@ function App() {
                   <div className="custom-image-section">
                      <h4>Свое изображение:</h4>
                       {/* Показываем загрузчик */} 
-                      <ImageUploader onImageUploaded={handleCustomImageUpload} />
+                      {/* --- ИЗМЕНЕНО: Передаем userId --- */}
+                      <ImageUploader onImageUploaded={handleCustomImageUpload} userId={userId} />
                       
                       {/* Показываем превью ВЫБРАННОГО изображения (любого) и кнопку удаления */} 
                       {selectedImage && (
