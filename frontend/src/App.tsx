@@ -1021,15 +1021,15 @@ function App() {
       if (!canAnalyzeResponse.data.can_analyze) {
         setError("Для анализа канала необходима подписка или бесплатные попытки");
         setShowSubscriptionModal(true);
-        return;
-      }
-      
-      setIsAnalyzing(true);
-      // Сбрасываем флаг загрузки из БД перед новым анализом
-      setAnalysisLoadedFromDB(false);
-      setError(null);
-      setSuccess(null);
-      setAnalysisResult(null);
+      return;
+    }
+
+    setIsAnalyzing(true);
+    // Сбрасываем флаг загрузки из БД перед новым анализом
+    setAnalysisLoadedFromDB(false);
+    setError(null);
+    setSuccess(null);
+    setAnalysisResult(null);
 
       const response = await axios.post('/analyze', { username: channelName }, {
         headers: { 'x-telegram-user-id': userId }
@@ -1180,19 +1180,19 @@ function App() {
         }
         
         // Если доступ разрешен, продолжаем получение деталей
-        setSelectedIdea(idea);
-        setCurrentPostId(null);
-        setChannelName(idea.channel_name || '');
-        setCurrentPostTopic(idea.topic_idea);
-        setCurrentPostFormat(idea.format_style);
-        setCurrentPostDate(new Date().toISOString().split('T')[0]);
-        setCurrentPostText('');
-        setSelectedImage(null);
-        setSuggestedImages([]);
-        setError(null);
-        setSuccess(null);
-        
-        setCurrentView('edit');
+      setSelectedIdea(idea);
+    setCurrentPostId(null);
+    setChannelName(idea.channel_name || '');
+    setCurrentPostTopic(idea.topic_idea);
+    setCurrentPostFormat(idea.format_style);
+    setCurrentPostDate(new Date().toISOString().split('T')[0]);
+    setCurrentPostText('');
+      setSelectedImage(null);
+    setSuggestedImages([]);
+    setError(null);
+    setSuccess(null);
+    
+    setCurrentView('edit');
       })
       .catch(err => {
         console.error('Ошибка при проверке доступа к деталям поста:', err);
@@ -1214,18 +1214,18 @@ function App() {
   // Effect to fetch post details when creating a new post from an idea
   // --- ИЗМЕНЕНО: Оборачиваем логику в useCallback --- 
   const fetchDetailsCallback = useCallback(async () => {
-    // Only run if: we are in 'edit' view, creating a NEW post (no currentPostId), and an idea is selected
-    if (currentView === 'edit' && !currentPostId && selectedIdea) {
-      console.log(`Fetching details for new post based on idea: ${selectedIdea.topic_idea}`);
-      setIsGeneratingPostDetails(true);
-      setError(null);
-      setSuccess(null);
-      setSuggestedImages([]); // Clear any potentially stale images
-      setSelectedImage(null); // Ensure no image is pre-selected
+      // Only run if: we are in 'edit' view, creating a NEW post (no currentPostId), and an idea is selected
+      if (currentView === 'edit' && !currentPostId && selectedIdea) {
+        console.log(`Fetching details for new post based on idea: ${selectedIdea.topic_idea}`);
+        setIsGeneratingPostDetails(true);
+        setError(null);
+        setSuccess(null);
+        setSuggestedImages([]); // Clear any potentially stale images
+        setSelectedImage(null); // Ensure no image is pre-selected
 
-      try {
-        const response = await axios.post(`${API_BASE_URL}/generate-post-details`, {
-          topic_idea: selectedIdea.topic_idea,
+        try {
+          const response = await axios.post(`${API_BASE_URL}/generate-post-details`, {
+            topic_idea: selectedIdea.topic_idea,
           format_style: selectedIdea.format_style,
           post_samples: analysisResult?.analyzed_posts_sample || [] // Передаем примеры постов, если есть
         },
@@ -1239,13 +1239,13 @@ function App() {
         setSuggestedImages(response.data.found_images || []);
         setSuccess("Детали поста успешно сгенерированы");
 
-      } catch (err: any) {
+    } catch (err: any) {
         setError(err.response?.data?.detail || err.message || 'Ошибка при генерации деталей поста');
         console.error('Ошибка при генерации деталей поста:', err);
-      } finally {
-        setIsGeneratingPostDetails(false);
+    } finally {
+          setIsGeneratingPostDetails(false);
+        }
       }
-    }
     // Зависимости для useCallback: все внешние переменные, используемые внутри
   }, [currentView, currentPostId, selectedIdea, userId, API_BASE_URL, analysisResult, setIsGeneratingPostDetails, setError, setSuccess, setSuggestedImages, setSelectedImage, setCurrentPostText]);
 
@@ -1357,7 +1357,7 @@ function App() {
   // Основной интерфейс
   return (
     <SimpleErrorBoundary>
-      <div className="app-container">
+    <div className="app-container">
         {/* Telegram Auth component */}
         <div className="auth-container">
           {!userId ? (
@@ -1365,7 +1365,7 @@ function App() {
           ) : (
             <div className="user-info">
               <span>ID: {userId}</span>
-              <button 
+                                 <button 
                 className="subscription-button" 
                 onClick={() => setShowSubscriptionModal(true)}
               >
@@ -1374,10 +1374,10 @@ function App() {
                  (subscriptionStatus.free_analysis_count > 0 || 
                   subscriptionStatus.free_post_details_count > 0)) && 
                   ` (${subscriptionStatus.free_analysis_count}/${subscriptionStatus.free_post_details_count})`}
-              </button>
-            </div>
-          )}
-        </div>
+                                  </button>
+                  </div>
+                      )}
+                </div>
 
         {/* Остальной код интерфейса */}
         {/* ... existing JSX ... */}
@@ -1386,7 +1386,7 @@ function App() {
         {showSubscriptionModal && <SubscriptionModal />}
         
         <Toaster position="bottom-center" />
-      </div>
+    </div>
     </SimpleErrorBoundary>
   );
 }

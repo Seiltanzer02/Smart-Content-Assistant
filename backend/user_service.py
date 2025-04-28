@@ -265,4 +265,36 @@ class UserService:
         update_data = {"free_post_details_count": free_count - 1}
         updated_user = UserService.update_user(user_id, update_data)
         
-        return updated_user is not None 
+        return updated_user is not None
+    
+    @staticmethod
+    def register_subscription_request(user_id: str) -> bool:
+        """
+        Регистрирует запрос на подписку от пользователя.
+        Можно использовать для отслеживания заинтересованных пользователей.
+        
+        Args:
+            user_id: ID пользователя в Telegram
+            
+        Returns:
+            bool: True, если запрос успешно зарегистрирован
+        """
+        user = UserService.get_or_create_user(user_id)
+        if not user:
+            logger.error(f"Не удалось получить пользователя {user_id} для регистрации запроса подписки")
+            return False
+        
+        # Можно добавить дополнительные поля в запись пользователя
+        # Например, количество запросов подписки, время последнего запроса и т.д.
+        try:
+            update_data = {
+                "last_subscription_request": datetime.datetime.now().isoformat(),
+                "subscription_requests_count": user.get("subscription_requests_count", 0) + 1
+            }
+            
+            updated_user = UserService.update_user(user_id, update_data)
+            return updated_user is not None
+            
+        except Exception as e:
+            logger.error(f"Ошибка при регистрации запроса подписки: {e}")
+            return False 
