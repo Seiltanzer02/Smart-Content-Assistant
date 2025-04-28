@@ -41,6 +41,18 @@ import traceback
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
 # from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 import shutil # Добавляем импорт shutil
+from pathlib import Path
+from fastapi import FastAPI, Request, Response, HTTPException, Depends, File, UploadFile, Query
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse, HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import StreamingResponse
+from pydantic import BaseModel, Field, create_model, ValidationError
+import uvicorn
+import re
+import threading
+from telebot import types  # Импорт типов для обработки вебхуков от Telegram
+import telebot
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -2066,35 +2078,38 @@ async def fix_existing_ideas_formatting():
 # --- Запуск исправления форматирования при старте сервера ---
 @app.on_event("startup")
 async def startup_event():
-    """Запуск обслуживающих процессов при старте приложения."""
-    logger.info("Запуск обслуживающих процессов...")
+    logger.info("Запуск приложения...")
     
-    # Проверка и добавление недостающих столбцов (оставляем существующую логику)
-    if supabase:
-        if not await check_db_tables():
-            logger.error("Ошибка при проверке таблиц в базе данных!")
-            # Продолжаем работу приложения даже при ошибке
-        else:
-            logger.info("Проверка таблиц базы данных завершена успешно.")
-    else:
-        logger.warning("Клиент Supabase не инициализирован, проверка таблиц пропущена.")
-    
-    # Исправление форматирования в JSON полях
-    # await fix_formatting_in_json_fields() # Отключаем временно, если не нужно
-    
-    logger.info("Обслуживающие процессы запущены успешно")
-
-    # --- ДОБАВЛЕНО: Вызов fix_schema при старте --- 
+    # Инициализация базы данных и проверка таблиц
     try:
-        fix_result = await fix_schema()
-        logger.info(f"Результат проверки/исправления схемы при старте: {fix_result}")
-        if not fix_result.get("success"):
-            logger.error("Ошибка при проверке/исправлении схемы БД при запуске!")
-            # Решите, следует ли прерывать запуск или нет.
-            # Пока продолжаем работу.
-    except Exception as schema_fix_error:
-        logger.error(f"Исключение при вызове fix_schema во время старта: {schema_fix_error}", exc_info=True)
-    # --- КОНЕЦ ДОБАВЛЕНИЯ ---
+        await check_db_tables()
+    except Exception as e:
+        logger.error(f"Ошибка при проверке таблиц БД: {e}")
+    
+    # Запускаем Telegram-бота в отдельном потоке
+    try:
+        import threading
+        from telegram_bot import bot, setup_webhook_on_startup
+        
+        # Настраиваем вебхук при запуске
+        setup_webhook_on_startup()
+        
+        def start_telegram_bot():
+            logger.info("Запуск Telegram-бота для подписок")
+            bot.polling(none_stop=True, interval=0, timeout=20)
+        
+        # Запускаем бота в отдельном потоке, если не используется webhook
+        webhook_url = os.environ.get("WEBHOOK_URL")
+        if not webhook_url:
+            # Если webhook не настроен, используем polling
+            bot_thread = threading.Thread(target=start_telegram_bot)
+            bot_thread.daemon = True  # Поток будет завершен при завершении основной программы
+            bot_thread.start()
+            logger.info("Telegram-бот успешно запущен в отдельном потоке (режим polling)")
+        else:
+            logger.info(f"Telegram-бот настроен на работу через webhook: {webhook_url}")
+    except Exception as e:
+        logger.error(f"Ошибка при настройке Telegram-бота: {e}")
 
 # --- Функция для исправления форматирования в существующих постах ---
 async def fix_existing_posts_formatting():
@@ -3541,3 +3556,27 @@ async def process_payment_success(request: Request, req: PaymentSuccessRequest):
             success=False,
             message=f"Произошла ошибка при обработке платежа: {str(e)}"
         )
+
+@app.post("/telegram-webhook")
+async def telegram_webhook(request: Request):
+    """
+    Обработчик вебхуков от Telegram API
+    """
+    # Получаем данные из запроса
+    try:
+        update_json = await request.json()
+        logger.info(f"Получен вебхук от Telegram: {update_json}")
+        
+        # Импортируем бота и передаем ему обновление
+        from telegram_bot import bot
+        
+        # Создаем объект Update для обработки
+        update = telebot.types.Update.de_json(update_json)
+        
+        # Передаем обновление боту для обработки
+        bot.process_new_updates([update])
+        
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Ошибка при обработке вебхука от Telegram: {e}")
+        return {"ok": False, "error": str(e)}

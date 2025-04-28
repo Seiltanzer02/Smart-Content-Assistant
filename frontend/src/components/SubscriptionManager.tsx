@@ -24,6 +24,7 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ userId, onSta
     subscription_expires_at: null,
     days_left: 0
   });
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const fetchSubscriptionStatus = async () => {
     if (!userId) {
@@ -60,31 +61,21 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ userId, onSta
   const handleSubscribe = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/subscription/create-invoice?user_id=${userId}`, {
-        method: 'POST',
-      });
       
-      if (!response.ok) {
-        throw new Error(`Ошибка создания счета: ${response.statusText}`);
-      }
+      // Открываем бота для оформления подписки через Stars донат
+      const botUsername = "ваш_бот_username"; // Замените на имя вашего бота
       
-      const data = await response.json();
-      
-      if (data.success && data.invoice_url) {
-        // Открываем страницу оплаты в Telegram WebApp
-        if (window.Telegram && window.Telegram.WebApp) {
-          window.Telegram.WebApp.openInvoice(data.invoice_url, (status) => {
-            if (status === 'paid') {
-              // После успешной оплаты обновляем статус подписки
-              fetchSubscriptionStatus();
-            }
-          });
-        } else {
-          // Если нет доступа к Telegram WebApp, открываем в новой вкладке
-          window.open(data.invoice_url, '_blank');
-        }
+      if (window.Telegram && window.Telegram.WebApp) {
+        // Используем Telegram WebApp для открытия ссылки на бота
+        window.Telegram.WebApp.openTelegramLink(`https://t.me/${botUsername}?start=subscribe`);
+        
+        // Показываем сообщение пользователю о необходимости завершить подписку в боте
+        setError(null);
+        setSuccessMessage("Пожалуйста, завершите оформление подписки в боте Telegram. После оплаты вернитесь сюда и нажмите 'Обновить статус'.");
       } else {
-        throw new Error('Не удалось получить ссылку для оплаты');
+        // Резервный вариант: открываем ссылку в новой вкладке
+        window.open(`https://t.me/${botUsername}?start=subscribe`, '_blank');
+        setSuccessMessage("Пожалуйста, завершите оформление подписки в боте Telegram. После оплаты вернитесь сюда и нажмите 'Обновить статус'.");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Неизвестная ошибка');
@@ -107,6 +98,18 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ userId, onSta
 
   return (
     <div className="subscription-manager">
+      {successMessage && (
+        <div className="subscription-message success">
+          {successMessage}
+          <button 
+            className="close-message-button" 
+            onClick={() => setSuccessMessage(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
+      
       <div className="subscription-status">
         <h3>Статус подписки</h3>
         
