@@ -1164,29 +1164,28 @@ function App() {
   };
 
   // Effect to fetch post details when creating a new post from an idea
-  useEffect(() => {
-    const fetchDetailsForNewPost = async () => {
-      // Only run if: we are in 'edit' view, creating a NEW post (no currentPostId), and an idea is selected
-      if (currentView === 'edit' && !currentPostId && selectedIdea) {
-        console.log(`Fetching details for new post based on idea: ${selectedIdea.topic_idea}`);
-        setIsGeneratingPostDetails(true);
-        setError(null);
-        setSuccess(null);
-        setSuggestedImages([]); // Clear any potentially stale images
-        setSelectedImage(null); // Ensure no image is pre-selected
+  // --- ИЗМЕНЕНО: Оборачиваем логику в useCallback --- 
+  const fetchDetailsCallback = useCallback(async () => {
+    // Only run if: we are in 'edit' view, creating a NEW post (no currentPostId), and an idea is selected
+    if (currentView === 'edit' && !currentPostId && selectedIdea) {
+      console.log(`Fetching details for new post based on idea: ${selectedIdea.topic_idea}`);
+      setIsGeneratingPostDetails(true);
+      setError(null);
+      setSuccess(null);
+      setSuggestedImages([]); // Clear any potentially stale images
+      setSelectedImage(null); // Ensure no image is pre-selected
 
-        try {
-          const response = await axios.post(`${API_BASE_URL}/generate-post-details`, {
-            topic_idea: selectedIdea.topic_idea,
-            format_style: selectedIdea.format_style,
-            post_samples: analysisResult?.analyzed_posts_sample || [] // Передаем примеры постов, если есть
-          },
-          {
-            headers: {
-               // --- ИСПРАВЛЕНО: Передаем ID как строку --- 
-              'x-telegram-user-id': userId || 'unknown' // Передаем строку или 'unknown'
-            }
+      try {
+        const response = await axios.post(`${API_BASE_URL}/generate-post-details`, {
+          topic_idea: selectedIdea.topic_idea,
+          format_style: selectedIdea.format_style,
+          post_samples: analysisResult?.analyzed_posts_sample || [] // Передаем примеры постов, если есть
+        },
+        {
+          headers: {
+            'x-telegram-user-id': userId || 'unknown' // Передаем строку или 'unknown'
           }
+        }
         );
         setCurrentPostText(response.data.generated_text);
         setSuggestedImages(response.data.found_images || []);
@@ -1198,13 +1197,16 @@ function App() {
       } finally {
         setIsGeneratingPostDetails(false);
       }
-    };
+    }
+    // Зависимости для useCallback: все внешние переменные, используемые внутри
+  }, [currentView, currentPostId, selectedIdea, userId, API_BASE_URL, analysisResult, setIsGeneratingPostDetails, setError, setSuccess, setSuggestedImages, setSelectedImage, setCurrentPostText]);
 
-    fetchDetailsForNewPost();
-  // Dependencies: This effect should run when the view changes to 'edit' for a new post (currentPostId is null)
-  // and when the selectedIdea that triggers the view change is set.
-  // Also include userId and API_BASE_URL as they are used in the fetch.
-  }, [currentView, currentPostId, selectedIdea, userId, API_BASE_URL]);
+  // Вызываем useCallback-функцию внутри useEffect
+  useEffect(() => {
+    fetchDetailsCallback();
+    // Зависимость useEffect теперь - это сама useCallback-функция
+  }, [fetchDetailsCallback]);
+  // --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
   // Функция для загрузки сохраненного анализа канала
   const fetchSavedAnalysis = async (channel: string) => {
@@ -1248,7 +1250,7 @@ function App() {
     } finally {
       setLoadingAnalysis(false);
     }
-  };
+  }; // <-- ДОБАВЛЕНА ТОЧКА С ЗАПЯТОЙ
 
   // Компонент загрузки
   if (loading) {
