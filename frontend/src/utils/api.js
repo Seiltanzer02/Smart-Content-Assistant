@@ -1,10 +1,28 @@
 // API конфигурация для приложения
 export const API_BASE_URL = '';
 
-// Получение заголовков авторизации
+// Получение заголовков авторизации с улучшенной обработкой идентификатора пользователя
 export const getAuthHeaders = () => {
+  // Получаем ID пользователя из localStorage
   const telegramUserId = localStorage.getItem('telegramUserId');
   
+  // Проверяем, есть ли у нас ID пользователя и не является ли он тестовым ID
+  if (!telegramUserId) {
+    console.warn('Отсутствует идентификатор пользователя Telegram');
+    
+    // Попытка получить ID через Telegram WebApp если он доступен
+    const tgWebApp = window.Telegram?.WebApp || window.WebApp;
+    if (tgWebApp && tgWebApp.initDataUnsafe?.user?.id) {
+      const userId = String(tgWebApp.initDataUnsafe.user.id);
+      console.log('Получен идентификатор пользователя из Telegram WebApp:', userId);
+      localStorage.setItem('telegramUserId', userId);
+      return {
+        'X-Telegram-User-Id': userId
+      };
+    }
+  }
+  
+  // Возвращаем заголовок с ID пользователя или пустой заголовок
   return {
     'X-Telegram-User-Id': telegramUserId || ''
   };
