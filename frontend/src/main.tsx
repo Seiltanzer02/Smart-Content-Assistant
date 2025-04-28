@@ -1,92 +1,48 @@
 import React from 'react'
-import ReactDOM from 'react-dom/client'
+import { createRoot } from 'react-dom/client'
 import './index.css'
-import App from './App'
+import App from './App.tsx'
 import WebApp from '@twa-dev/sdk'
+
+// Добавляем определение типов для Telegram
+declare global {
+  interface Window {
+    Telegram?: {
+      WebApp?: any;
+    };
+  }
+}
 
 const container = document.getElementById('root')
 
 console.log('main.tsx: Инициализация приложения');
 
-// Инициализация Telegram WebApp
-const initTelegramApp = () => {
-  try {
-    // Проверяем, есть ли объект Telegram в window
-    if (window.Telegram?.WebApp) {
-      console.log('Telegram WebApp API доступен глобально, инициализируем...');
-      window.Telegram.WebApp.ready();
-    } 
-    // Иначе проверяем доступность WebApp из @twa-dev/sdk
-    else if (typeof (window as any).WebApp?.ready === 'function') {
-      console.log('WebApp API доступен через SDK, инициализируем...');
-      (window as any).WebApp.ready();
-    } 
-    // На случай, если @twa-dev/sdk был загружен, но объект размещен по-другому
-    else if (typeof (window as any).TelegramWebApp !== 'undefined') {
-      console.log('TelegramWebApp из SDK доступен, инициализируем...');
-      (window as any).TelegramWebApp.ready();
-    } 
-    else {
-      console.warn('Telegram WebApp API не обнаружен. Приложение будет работать в автономном режиме.');
-    }
-  } catch (e) {
-    console.error('Ошибка при инициализации Telegram WebApp:', e);
-  }
-};
-
-// Загрузка SDK Telegram Mini App
-const loadTelegramSdk = (): Promise<void> => {
-  return new Promise((resolve) => {
-    // Если SDK уже загружен, просто возвращаем resolve
-    if (window.Telegram?.WebApp || (window as any).WebApp) {
-      console.log('Telegram SDK уже загружен');
-      resolve();
-      return;
-    }
-
-    try {
-      // Динамическая загрузка SDK
-      import('@twa-dev/sdk').then(() => {
-        console.log('Telegram SDK загружен динамически');
-        resolve();
-      }).catch(error => {
-        console.error('Ошибка при динамической загрузке Telegram SDK:', error);
-        resolve(); // Продолжаем даже при ошибке
-      });
-    } catch (e) {
-      console.error('Ошибка при импорте Telegram SDK:', e);
-      resolve(); // Продолжаем даже при ошибке
-    }
-  });
-};
-
-// Запуск приложения после инициализации Telegram
-const startApp = () => {
-  const rootElement = document.getElementById('root');
-  if (rootElement) {
-    ReactDOM.createRoot(rootElement).render(
-      <React.StrictMode>
-        <App />
-      </React.StrictMode>
-    );
-  } else {
-    console.error('Элемент с id "root" не найден!');
-  }
-};
-
-// Основная функция запуска
-async function bootstrapApp() {
-  // Загружаем SDK и инициализируем Telegram
-  await loadTelegramSdk();
-  initTelegramApp();
+// Проверяем доступность Telegram WebApp - сначала нативный, потом SDK
+if (window.Telegram && window.Telegram.WebApp) {
+  console.log('main.tsx: Найден window.Telegram.WebApp - используем нативный WebApp');
   
-  // Запускаем приложение
-  startApp();
+  // Если есть нативный WebApp, вызываем его метод ready
+  if (typeof window.Telegram.WebApp.ready === 'function') {
+    console.log('main.tsx: Вызываем window.Telegram.WebApp.ready()');
+    window.Telegram.WebApp.ready();
+  }
+} else if (WebApp) {
+  console.log('main.tsx: Используем WebApp из @twa-dev/sdk');
+console.log('main.tsx: WebApp объект:', WebApp);
+  console.log('main.tsx: Вызываем WebApp.ready()');
+  WebApp.ready(); // Сообщаем Telegram, что приложение готово
+  console.log('main.tsx: WebApp.ready() вызван');
+} else {
+  console.warn('main.tsx: WebApp не найден ни в window.Telegram, ни в @twa-dev/sdk');
 }
 
-// Запускаем приложение
-bootstrapApp().catch(e => {
-  console.error('Ошибка при запуске приложения:', e);
-  // Всё равно пытаемся запустить приложение при ошибке
-  startApp();
-});
+if (container) {
+  const root = createRoot(container)
+  root.render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  )
+} else {
+  console.error('Failed to find the root element')
+}
