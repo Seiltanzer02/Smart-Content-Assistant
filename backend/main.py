@@ -233,6 +233,43 @@ async def generate_invoice(request: Request):
         logger.error(f"Ошибка при генерации инвойса: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка при генерации инвойса: {str(e)}")
 
+@app.post("/send-stars-invoice", response_model=Dict[str, Any])
+async def send_stars_invoice(request: Request):
+    """Отправляет invoice на оплату Stars через Telegram Bot API sendInvoice (provider_token='', currency='XTR')"""
+    try:
+        data = await request.json()
+        user_id = data.get("user_id")
+        amount = data.get("amount")
+        if not user_id or not amount:
+            raise HTTPException(status_code=400, detail="user_id и amount обязательны")
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        if not bot_token:
+            raise HTTPException(status_code=500, detail="TELEGRAM_BOT_TOKEN не задан в окружении")
+        url = f"https://api.telegram.org/bot{bot_token}/sendInvoice"
+        payload = {
+            "chat_id": user_id,
+            "title": "Подписка Premium",
+            "description": "Подписка Premium на 1 месяц",
+            "payload": f"stars_invoice_{user_id}_{int(time.time())}",
+            "provider_token": "",  # ПУСТОЙ для Stars
+            "currency": "XTR",
+            "prices": [{"label": "XTR", "amount": int(amount) * 100}],
+            "need_name": False,
+            "need_email": False,
+            "is_flexible": False,
+            "photo_url": "https://smart-content-assistant.onrender.com/static/premium_sub.jpg"
+        }
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload)
+            tg_data = response.json()
+            if not tg_data.get("ok"):
+                logger.error(f"Ошибка Telegram API sendInvoice: {tg_data}")
+                return {"success": False, "message": f"Ошибка Telegram API: {tg_data}"}
+        return {"success": True, "message": "Инвойс отправлен в чат с ботом. Проверьте Telegram и оплатите счёт."}
+    except Exception as e:
+        logger.error(f"Ошибка при отправке Stars-инвойса: {e}")
+        return {"success": False, "message": f"Ошибка: {str(e)}"}
+
 # --- Настройка обслуживания статических файлов ---
 import os
 from fastapi.staticfiles import StaticFiles

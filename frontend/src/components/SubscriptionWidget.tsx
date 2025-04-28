@@ -126,25 +126,28 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const handleInvoiceGeneration = async (userId: number) => {
     try {
       setIsSubscribing(true);
-      // Получаем invoice_url с backend
-      const data = await generateInvoice(userId, SUBSCRIPTION_PRICE);
-      if (data && data.invoice_url) {
-        // Открываем ссылку на оплату в новом окне
-        window.open(data.invoice_url, '_blank');
-        // Показываем popup с инструкцией
+      // Отправляем запрос на backend для отправки Stars-инвойса
+      const response = await fetch('/send-stars-invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, amount: SUBSCRIPTION_PRICE })
+      });
+      const data = await response.json();
+      if (data.success) {
         if (window.Telegram?.WebApp?.showPopup) {
           window.Telegram.WebApp.showPopup({
             title: 'Оплата',
-            message: 'После оплаты вернитесь в приложение и обновите статус подписки.',
+            message: 'Инвойс отправлен в чат с ботом. Проверьте Telegram и оплатите счёт. После оплаты вернитесь в приложение и обновите статус подписки.',
             buttons: [{ type: 'ok' }]
           });
+        } else {
+          alert('Инвойс отправлен в чат с ботом. Проверьте Telegram и оплатите счёт.');
         }
-        // Можно сразу обновить статус через fetchSubscriptionStatus, либо предложить пользователю нажать "Проверить подписку"
       } else {
-        throw new Error('Не удалось получить ссылку для оплаты');
+        setError(data.message || 'Ошибка при отправке инвойса');
       }
     } catch (error) {
-      console.error('Ошибка при генерации инвойса:', error);
+      console.error('Ошибка при отправке Stars-инвойса:', error);
       setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
     } finally {
       setIsSubscribing(false);
