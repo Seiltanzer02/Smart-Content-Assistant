@@ -218,7 +218,7 @@ async def generate_invoice(request: Request):
             "payload": payment_id,
             "provider_token": "", # Для Stars оставляем пустым
             "currency": "XTR", # XTR - код для Stars
-            "prices": [{"label": "Подписка Premium", "amount": amount * 100}],
+            "prices": [{"label": "Подписка Premium", "amount": amount}],
             "max_tip_amount": 0,
             "suggested_tip_amounts": [],
             "photo_url": "https://smart-content-assistant.onrender.com/static/premium_sub.jpg",

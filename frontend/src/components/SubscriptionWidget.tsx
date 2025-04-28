@@ -4,12 +4,13 @@ import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice } from '
 
 interface SubscriptionWidgetProps {
   userId: string | null;
+  isActive?: boolean;
 }
 
 // API_URL для относительных путей
 const API_URL = '';
 
-const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
+const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActive }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
@@ -33,7 +34,9 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
         window.Telegram.WebApp.MainButton.setText('Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars');
         window.Telegram.WebApp.MainButton.color = '#2481cc';
         window.Telegram.WebApp.MainButton.textColor = '#ffffff';
-        window.Telegram.WebApp.MainButton.hide();
+        if (isActive) {
+          window.Telegram.WebApp.MainButton.hide();
+        }
         
         // Добавляем обработчик нажатия на главную кнопку
         window.Telegram.WebApp.MainButton.onClick(handleSubscribeViaMainButton);
@@ -58,7 +61,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
         window.Telegram.WebApp.MainButton.offClick(handleSubscribeViaMainButton);
       }
     };
-  }, []);
+  }, [isActive]);
   
   useEffect(() => {
     if (userId) {
@@ -83,7 +86,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
       
       // Показываем/скрываем главную кнопку в зависимости от статуса подписки
       if (window.Telegram?.WebApp?.MainButton) {
-        if (!subscriptionData.has_subscription) {
+        if (!subscriptionData.has_subscription && !isActive) {
           window.Telegram.WebApp.MainButton.show();
         } else {
           window.Telegram.WebApp.MainButton.hide();
