@@ -126,39 +126,30 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const handleInvoiceGeneration = async (userId: number) => {
     try {
       setIsSubscribing(true);
-      
-      // Используем функцию из API вместо прямой реализации
-      const data = await generateInvoice(userId, SUBSCRIPTION_PRICE);
-      console.log('Получены данные инвойса:', data);
-      
-      // Проверяем наличие параметров для openInvoice
-      if (window.Telegram?.WebApp?.openInvoice && data) {
-        window.Telegram.WebApp.openInvoice({
-          title: data.title,
-          description: data.description,
-          payload: data.payload,
-          currency: data.currency,
-          amount: data.amount,
-          photo_url: data.photo_url
-        }, (status) => {
-          // Этот callback будет вызван после завершения платежа
-          console.log('Статус платежа:', status);
-          if (status === 'paid') {
-            fetchSubscriptionStatus();
-            if (window.Telegram?.WebApp?.showPopup) {
-              window.Telegram.WebApp.showPopup({
-                title: 'Успешная оплата',
-                message: 'Ваша подписка Premium активирована!',
-                buttons: [{ type: 'ok' }]
-              });
+
+      if (window.Telegram?.WebApp?.openInvoice) {
+        window.Telegram.WebApp.openInvoice(
+          { slug: 'stars', amount: SUBSCRIPTION_PRICE },
+          (status) => {
+            // Этот callback будет вызван после завершения платежа
+            console.log('Статус платежа:', status);
+            if (status === 'paid') {
+              fetchSubscriptionStatus();
+              if (window.Telegram?.WebApp?.showPopup) {
+                window.Telegram.WebApp.showPopup({
+                  title: 'Успешная оплата',
+                  message: 'Ваша подписка Premium активирована!',
+                  buttons: [{ type: 'ok' }]
+                });
+              }
+            } else if (status === 'failed') {
+              setError('Оплата не удалась. Пожалуйста, попробуйте позже.');
+            } else if (status === 'cancelled') {
+              setError('Платеж был отменен.');
             }
-          } else if (status === 'failed') {
-            setError('Оплата не удалась. Пожалуйста, попробуйте позже.');
-          } else if (status === 'cancelled') {
-            setError('Платеж был отменен.');
+            setIsSubscribing(false);
           }
-          setIsSubscribing(false);
-        });
+        );
       } else {
         throw new Error('Не удалось инициировать оплату через Telegram WebApp');
       }
