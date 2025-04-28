@@ -6,8 +6,8 @@ interface SubscriptionWidgetProps {
   userId: string | null;
 }
 
-// API_URL для вызовов, требующих абсолютный путь
-const API_URL = 'http://localhost:8000';
+// API_URL для относительных путей
+const API_URL = '';
 
 const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
   const [loading, setLoading] = useState<boolean>(true);
