@@ -131,18 +131,20 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       const data = await generateInvoice(userId, SUBSCRIPTION_PRICE);
       console.log('Получены данные инвойса:', data);
       
-      // Проверяем наличие URL инвойса
-      if (data.invoice_url && window.Telegram?.WebApp?.openInvoice) {
-        // Открываем инвойс прямо в Telegram WebApp
-        window.Telegram.WebApp.openInvoice(data.invoice_url, (status) => {
+      // Проверяем наличие параметров для openInvoice
+      if (window.Telegram?.WebApp?.openInvoice && data) {
+        window.Telegram.WebApp.openInvoice({
+          title: data.title,
+          description: data.description,
+          payload: data.payload,
+          currency: data.currency,
+          amount: data.amount,
+          photo_url: data.photo_url
+        }, (status) => {
           // Этот callback будет вызван после завершения платежа
           console.log('Статус платежа:', status);
-          
           if (status === 'paid') {
-            // Если платеж успешный, обновляем статус подписки
             fetchSubscriptionStatus();
-            
-            // Показываем сообщение об успешной оплате
             if (window.Telegram?.WebApp?.showPopup) {
               window.Telegram.WebApp.showPopup({
                 title: 'Успешная оплата',
@@ -155,11 +157,10 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
           } else if (status === 'cancelled') {
             setError('Платеж был отменен.');
           }
-          
           setIsSubscribing(false);
         });
       } else {
-        throw new Error('Не удалось получить URL инвойса или WebApp не поддерживает openInvoice');
+        throw new Error('Не удалось инициировать оплату через Telegram WebApp');
       }
     } catch (error) {
       console.error('Ошибка при генерации инвойса:', error);
