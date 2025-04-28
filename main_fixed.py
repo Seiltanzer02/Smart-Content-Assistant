@@ -41,6 +41,7 @@ import traceback
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
 # from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 import shutil # Добавляем импорт shutil
+import base64 # Добавляем импорт base64
 
 # Импортируем сервис подписок и константы
 from services.subscription_service import SubscriptionService, FREE_ANALYSIS_LIMIT, FREE_POST_LIMIT, SUBSCRIPTION_PRICE, SUBSCRIPTION_DURATION_MONTHS
@@ -197,6 +198,31 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Telegram-User-Id"]  # Позволяем читать этот заголовок
 )
+
+# Определение модели для данных от Telegram WebApp
+class WebAppDataRequest(BaseModel):
+    data: str  # JSON-строка с данными от Telegram
+    user: Dict[str, Any]  # Информация о пользователе
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "data": '{"type":"subscribe","tier":"premium_monthly","price":70}',
+                "user": {"id": 123456789, "first_name": "John", "last_name": "Doe"}
+            }
+        }
+        
+# Определение модели для запроса на создание подписки
+class CreateSubscriptionRequest(BaseModel):
+    user_id: int
+    payment_id: Optional[str] = None
+    
+# Определение модели для ответа о статусе подписки
+class SubscriptionStatusResponse(BaseModel):
+    has_subscription: bool
+    analysis_count: int
+    post_generation_count: int
+    subscription_end_date: Optional[str] = None
 
 # Получение сервиса подписок
 async def get_subscription_service():
@@ -2781,6 +2807,9 @@ async def telegram_webhook(
 ):
     """Обрабатывает webhook от Telegram WebApp"""
     try:
+        # Логируем полный запрос для отладки
+        logger.info(f"Получен webhook запрос: {request}")
+        
         # Получаем данные от Telegram
         data_str = request.data
         user_data = request.user
@@ -2789,28 +2818,37 @@ async def telegram_webhook(
             raise HTTPException(status_code=400, detail="Не указан ID пользователя")
         
         user_id = int(user_data["id"])
+        logger.info(f"Обработка webhook для пользователя ID: {user_id}")
         
         # Парсим JSON из data
         try:
             data = json.loads(data_str)
+            logger.info(f"Распарсены данные: {data}")
         except json.JSONDecodeError:
+            logger.error(f"Не удалось распарсить JSON: {data_str}")
             raise HTTPException(status_code=400, detail="Некорректные данные от WebApp")
         
         # Проверяем тип операции
         if data.get("type") == "subscribe":
             # Если это операция подписки
             tier = data.get("tier")
-            if tier != "premium_monthly":
-                raise HTTPException(status_code=400, detail="Неподдерживаемый тип подписки")
+            logger.info(f"Запрос на подписку типа: {tier}")
+            
+            # Временно отключаем проверку типа подписки для тестирования
+            # if tier != "premium_monthly":
+            #     raise HTTPException(status_code=400, detail="Неподдерживаемый тип подписки")
             
             # Генерируем уникальный идентификатор платежа
             payment_id = f"tg_stars_{int(time.time())}_{user_id}"
+            logger.info(f"Сгенерирован payment_id: {payment_id}")
             
             # Создаем подписку
             subscription = await subscription_service.create_subscription(
                 user_id=user_id,
                 payment_id=payment_id
             )
+            
+            logger.info(f"Подписка успешно создана: {subscription}")
             
             return {
                 "success": True,
@@ -2819,12 +2857,374 @@ async def telegram_webhook(
                 "end_date": subscription["end_date"].isoformat()
             }
         else:
+            logger.error(f"Неизвестный тип операции: {data.get('type')}")
             raise HTTPException(status_code=400, detail="Неизвестный тип операции")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Ошибка при обработке webhook: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка при обработке webhook: {str(e)}")
+
+# Обработчик telegram бота для обработки платежей
+@app.post("/bot/webhook", response_model=Dict[str, Any])
+async def bot_webhook(
+    request: Request,
+    subscription_service: SubscriptionService = Depends(get_subscription_service)
+):
+    """Обрабатывает webhook от Telegram бота"""
+    try:
+        # Получаем данные от Telegram Bot API
+        data = await request.json()
+        logger.info(f"Получен webhook от бота: {data}")
+        
+        # Проверяем, есть ли сообщение в обновлении
+        if "message" not in data:
+            return {"ok": True}
+        
+        message = data["message"]
+        
+        # Проверяем, есть ли текст сообщения и начинается ли он с команды /start
+        if "text" not in message:
+            return {"ok": True}
+        
+        text = message["text"]
+        user_id = message["from"]["id"]
+        
+        # Обрабатываем команду /start с параметром оплаты
+        if text.startswith("/start pay_"):
+            try:
+                # Извлекаем и декодируем параметр
+                param_base64 = text.replace("/start pay_", "")
+                param_json = base64.b64decode(param_base64).decode('utf-8')
+                param_data = json.loads(param_json)
+                
+                logger.info(f"Получен параметр оплаты: {param_data}")
+                
+                # Проверяем валидность параметра
+                if param_data.get("action") == "buy_subscription" and param_data.get("user_id") and param_data.get("amount"):
+                    # Создаем уникальный ID платежа
+                    payment_id = f"stars_payment_{int(time.time())}_{user_id}"
+                    
+                    # Создаем подписку для пользователя
+                    user_id_from_param = param_data.get("user_id")
+                    subscription = await subscription_service.create_subscription(
+                        user_id=int(user_id_from_param),
+                        payment_id=payment_id
+                    )
+                    
+                    logger.info(f"Подписка успешно создана через бота: {subscription}")
+                    
+                    # Отправляем ответное сообщение пользователю
+                    # Здесь должен быть код для отправки сообщения через Bot API
+                    # Например:
+                    # await send_message_to_user(user_id, "Подписка успешно активирована!")
+                    
+                    return {
+                        "success": True,
+                        "message": "Подписка успешно активирована через бота"
+                    }
+                else:
+                    logger.error(f"Некорректный параметр оплаты: {param_data}")
+                    return {"ok": True}
+            except Exception as e:
+                logger.error(f"Ошибка при обработке параметра оплаты: {e}")
+                return {"ok": True}
+        
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Ошибка при обработке webhook от бота: {e}")
+        return {"ok": True}  # Всегда возвращаем успех, чтобы избежать повторных отправок
+
+# Новый эндпоинт для прямой генерации инвойса через Bot API
+@app.post("/generate-invoice", response_model=Dict[str, Any])
+async def generate_invoice(
+    request: Request,
+    subscription_service: SubscriptionService = Depends(get_subscription_service)
+):
+    """Генерирует инвойс для оплаты подписки Stars"""
+    try:
+        # Получаем данные из запроса
+        data = await request.json()
+        
+        # Проверяем обязательные поля
+        if not data.get("user_id") or not data.get("amount"):
+            raise HTTPException(status_code=400, detail="Отсутствуют обязательные параметры")
+        
+        user_id = data["user_id"]
+        amount = int(data["amount"])
+        
+        logger.info(f"Генерация инвойса для пользователя {user_id} на сумму {amount} Stars")
+        
+        # Создаем уникальный ID платежа
+        payment_id = f"stars_invoice_{int(time.time())}_{user_id}"
+        
+        # Получаем токен бота из переменных окружения
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        if not bot_token:
+            raise HTTPException(status_code=500, detail="Отсутствует токен бота")
+        
+        # Создаем заголовок и описание товара
+        title = "Подписка Premium"
+        description = "Подписка Premium на Smart Content Assistant на 1 месяц"
+        
+        # Формируем URL для API запроса на создание инвойса
+        api_url = f"https://api.telegram.org/bot{bot_token}/createInvoiceLink"
+        
+        # Формируем параметры запроса
+        payload = {
+            "title": title,
+            "description": description,
+            "payload": payment_id,
+            "provider_token": "", # Для Stars оставляем пустым
+            "currency": "XTR", # XTR - код для Stars
+            "prices": [{"label": "Подписка Premium", "amount": amount * 100}], # В копейках (1 Star = 100 копеек)
+            "max_tip_amount": 0,
+            "suggested_tip_amounts": [],
+            "photo_url": "https://smart-content-assistant.onrender.com/static/premium_sub.jpg", # URL изображения для счета
+            "photo_width": 600,
+            "photo_height": 400,
+            "need_name": False,
+            "need_phone_number": False,
+            "need_email": False,
+            "need_shipping_address": False,
+            "send_phone_number_to_provider": False,
+            "send_email_to_provider": False,
+            "is_flexible": False
+        }
+        
+        # Отправляем запрос к Telegram Bot API
+        async with httpx.AsyncClient() as client:
+            response = await client.post(api_url, json=payload)
+            response_data = response.json()
+        
+        # Проверяем успешность запроса
+        if not response_data.get("ok"):
+            logger.error(f"Ошибка при создании инвойса: {response_data}")
+            raise HTTPException(status_code=500, detail=f"Ошибка API Telegram: {response_data.get('description')}")
+        
+        # Получаем URL инвойса
+        invoice_url = response_data.get("result")
+        
+        return {
+            "success": True,
+            "invoice_url": invoice_url,
+            "payment_id": payment_id
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка при генерации инвойса: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при генерации инвойса: {str(e)}")
+
+# Эндпоинт для подтверждения платежа и создания подписки
+@app.post("/payment/confirm", response_model=Dict[str, Any])
+async def confirm_payment(
+    request: Request,
+    subscription_service: SubscriptionService = Depends(get_subscription_service)
+):
+    """Подтверждает успешный платеж и создает подписку"""
+    try:
+        # Получаем данные из запроса
+        data = await request.json()
+        
+        # Проверяем обязательные поля
+        if not data.get("payment_id") or not data.get("user_id"):
+            raise HTTPException(status_code=400, detail="Отсутствуют обязательные параметры")
+        
+        payment_id = data["payment_id"]
+        user_id = int(data["user_id"])
+        
+        logger.info(f"Подтверждение платежа {payment_id} для пользователя {user_id}")
+        
+        # Создаем подписку на основе подтвержденного платежа
+        subscription = await subscription_service.create_subscription(
+            user_id=user_id,
+            payment_id=payment_id
+        )
+        
+        logger.info(f"Подписка успешно создана: {subscription}")
+        
+        return {
+            "success": True,
+            "subscription_id": subscription["id"],
+            "end_date": subscription["end_date"].isoformat()
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка при подтверждении платежа: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при подтверждении платежа: {str(e)}")
+
+# Обработчик входящих уведомлений о платежах от Telegram
+@app.post("/payment/webhook", response_model=Dict[str, Any])
+async def payment_webhook(
+    request: Request,
+    subscription_service: SubscriptionService = Depends(get_subscription_service)
+):
+    """Обрабатывает уведомления о платежах от Telegram"""
+    try:
+        # Получаем данные от Telegram Bot API
+        data = await request.json()
+        logger.info(f"Получено уведомление о платеже: {data}")
+        
+        # Проверяем, является ли это обновлением о платеже
+        if not data.get("update_id") or "pre_checkout_query" not in data and "message" not in data:
+            return {"ok": True}
+        
+        # Обрабатываем pre_checkout_query (предварительная проверка перед оплатой)
+        if "pre_checkout_query" in data:
+            pre_checkout_query = data["pre_checkout_query"]
+            query_id = pre_checkout_query["id"]
+            payload = pre_checkout_query["invoice_payload"]
+            
+            logger.info(f"Получен pre_checkout_query с payload: {payload}")
+            
+            # Всегда подтверждаем платеж (в реальной системе здесь может быть доп. проверка)
+            # Отправляем ответ на pre_checkout_query
+            bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+            if not bot_token:
+                logger.error("Отсутствует токен бота для ответа на pre_checkout_query")
+                return {"ok": True}
+            
+            api_url = f"https://api.telegram.org/bot{bot_token}/answerPreCheckoutQuery"
+            payload = {
+                "pre_checkout_query_id": query_id,
+                "ok": True
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(api_url, json=payload)
+                response_data = response.json()
+            
+            if not response_data.get("ok"):
+                logger.error(f"Ошибка при ответе на pre_checkout_query: {response_data}")
+            else:
+                logger.info("Успешно подтвержден pre_checkout_query")
+            
+            return {"ok": True}
+        
+        # Обрабатываем successful_payment (успешно выполненный платеж)
+        if "message" in data and "successful_payment" in data["message"]:
+            message = data["message"]
+            payment = message["successful_payment"]
+            payload = payment["invoice_payload"]
+            user_id = message["from"]["id"]
+            
+            logger.info(f"Получен successful_payment с payload: {payload} от пользователя {user_id}")
+            
+            # Создаем подписку на основе успешного платежа
+            try:
+                subscription = await subscription_service.create_subscription(
+                    user_id=user_id,
+                    payment_id=payload
+                )
+                
+                logger.info(f"Подписка успешно создана из webhook: {subscription}")
+                
+                # Отправляем уведомление пользователю о создании подписки
+                bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+                if bot_token:
+                    api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                    message_payload = {
+                        "chat_id": user_id,
+                        "text": "Ваша подписка успешно активирована! Вы можете вернуться в мини-приложение."
+                    }
+                    
+                    async with httpx.AsyncClient() as client:
+                        await client.post(api_url, json=message_payload)
+            
+            except Exception as e:
+                logger.error(f"Ошибка при создании подписки из webhook: {e}")
+        
+        return {"ok": True}
+    
+    except Exception as e:
+        logger.error(f"Ошибка при обработке webhook платежа: {e}")
+        return {"ok": True}  # Всегда возвращаем успех, чтобы избежать повторных отправок
+
+# Новый эндпоинт для прямой генерации инвойса через Bot API
+@app.post("/generate-invoice", response_model=Dict[str, Any])
+async def generate_invoice(
+    request: Request,
+    subscription_service: SubscriptionService = Depends(get_subscription_service)
+):
+    """Генерирует инвойс для оплаты подписки Stars"""
+    try:
+        # Получаем данные из запроса
+        data = await request.json()
+        
+        # Проверяем обязательные поля
+        if not data.get("user_id") or not data.get("amount"):
+            raise HTTPException(status_code=400, detail="Отсутствуют обязательные параметры")
+        
+        user_id = data["user_id"]
+        amount = int(data["amount"])
+        
+        logger.info(f"Генерация инвойса для пользователя {user_id} на сумму {amount} Stars")
+        
+        # Создаем уникальный ID платежа
+        payment_id = f"stars_invoice_{int(time.time())}_{user_id}"
+        
+        # Получаем токен бота из переменных окружения
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        if not bot_token:
+            raise HTTPException(status_code=500, detail="Отсутствует токен бота")
+        
+        # Создаем заголовок и описание товара
+        title = "Подписка Premium"
+        description = "Подписка Premium на Smart Content Assistant на 1 месяц"
+        
+        # Формируем URL для API запроса на создание инвойса
+        api_url = f"https://api.telegram.org/bot{bot_token}/createInvoiceLink"
+        
+        # Формируем параметры запроса
+        payload = {
+            "title": title,
+            "description": description,
+            "payload": payment_id,
+            "provider_token": "", # Для Stars оставляем пустым
+            "currency": "XTR", # XTR - код для Stars
+            "prices": [{"label": "Подписка Premium", "amount": amount * 100}], # В копейках (1 Star = 100 копеек)
+            "max_tip_amount": 0,
+            "suggested_tip_amounts": [],
+            "photo_url": "https://smart-content-assistant.onrender.com/static/premium_sub.jpg", # URL изображения для счета
+            "photo_width": 600,
+            "photo_height": 400,
+            "need_name": False,
+            "need_phone_number": False,
+            "need_email": False,
+            "need_shipping_address": False,
+            "send_phone_number_to_provider": False,
+            "send_email_to_provider": False,
+            "is_flexible": False
+        }
+        
+        # Отправляем запрос к Telegram Bot API
+        async with httpx.AsyncClient() as client:
+            response = await client.post(api_url, json=payload)
+            response_data = response.json()
+        
+        # Проверяем успешность запроса
+        if not response_data.get("ok"):
+            logger.error(f"Ошибка при создании инвойса: {response_data}")
+            raise HTTPException(status_code=500, detail=f"Ошибка API Telegram: {response_data.get('description')}")
+        
+        # Получаем URL инвойса
+        invoice_url = response_data.get("result")
+        
+        return {
+            "success": True,
+            "invoice_url": invoice_url,
+            "payment_id": payment_id
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка при генерации инвойса: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при генерации инвойса: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
