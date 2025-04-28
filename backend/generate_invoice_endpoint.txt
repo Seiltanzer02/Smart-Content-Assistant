@@ -1,0 +1,1 @@
+@app.post("/generate-invoice", response_model=Dict[str, Any])

@@ -195,6 +195,61 @@ app.add_middleware(
     expose_headers=["X-Telegram-User-Id"]  # Позволяем читать этот заголовок
 )
 
+@app.post("/generate-invoice", response_model=Dict[str, Any])
+async def generate_invoice(request: Request):
+    """Генерирует инвойс для оплаты подписки Stars"""
+    try:
+        data = await request.json()
+        if not data.get("user_id") or not data.get("amount"):
+            raise HTTPException(status_code=400, detail="Отсутствуют обязательные параметры")
+        user_id = data["user_id"]
+        amount = int(data["amount"])
+        logger.info(f"Генерация инвойса для пользователя {user_id} на сумму {amount} Stars")
+        payment_id = f"stars_invoice_{int(time.time())}_{user_id}"
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        if not bot_token:
+            raise HTTPException(status_code=500, detail="Отсутствует токен бота")
+        title = "Подписка Premium"
+        description = "Подписка Premium на Smart Content Assistant на 1 месяц"
+        api_url = f"https://api.telegram.org/bot{bot_token}/createInvoiceLink"
+        payload = {
+            "title": title,
+            "description": description,
+            "payload": payment_id,
+            "provider_token": "", # Для Stars оставляем пустым
+            "currency": "XTR", # XTR - код для Stars
+            "prices": [{"label": "Подписка Premium", "amount": amount * 100}],
+            "max_tip_amount": 0,
+            "suggested_tip_amounts": [],
+            "photo_url": "https://smart-content-assistant.onrender.com/static/premium_sub.jpg",
+            "photo_width": 600,
+            "photo_height": 400,
+            "need_name": False,
+            "need_phone_number": False,
+            "need_email": False,
+            "need_shipping_address": False,
+            "send_phone_number_to_provider": False,
+            "send_email_to_provider": False,
+            "is_flexible": False
+        }
+        async with httpx.AsyncClient() as client:
+            response = await client.post(api_url, json=payload)
+            response_data = response.json()
+        if not response_data.get("ok"):
+            logger.error(f"Ошибка при создании инвойса: {response_data}")
+            raise HTTPException(status_code=500, detail=f"Ошибка API Telegram: {response_data.get('description')}")
+        invoice_url = response_data.get("result")
+        return {
+            "success": True,
+            "invoice_url": invoice_url,
+            "payment_id": payment_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка при генерации инвойса: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при генерации инвойса: {str(e)}")
+
 # --- Настройка обслуживания статических файлов ---
 import os
 from fastapi.staticfiles import StaticFiles
@@ -3165,57 +3220,3 @@ if __name__ == "__main__":
     logger.info(f"Запуск сервера на порту {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
 
-@app.post("/generate-invoice", response_model=Dict[str, Any])
-async def generate_invoice(request: Request):
-    """Генерирует инвойс для оплаты подписки Stars"""
-    try:
-        data = await request.json()
-        if not data.get("user_id") or not data.get("amount"):
-            raise HTTPException(status_code=400, detail="Отсутствуют обязательные параметры")
-        user_id = data["user_id"]
-        amount = int(data["amount"])
-        logger.info(f"Генерация инвойса для пользователя {user_id} на сумму {amount} Stars")
-        payment_id = f"stars_invoice_{int(time.time())}_{user_id}"
-        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-        if not bot_token:
-            raise HTTPException(status_code=500, detail="Отсутствует токен бота")
-        title = "Подписка Premium"
-        description = "Подписка Premium на Smart Content Assistant на 1 месяц"
-        api_url = f"https://api.telegram.org/bot{bot_token}/createInvoiceLink"
-        payload = {
-            "title": title,
-            "description": description,
-            "payload": payment_id,
-            "provider_token": "", # Для Stars оставляем пустым
-            "currency": "XTR", # XTR - код для Stars
-            "prices": [{"label": "Подписка Premium", "amount": amount * 100}],
-            "max_tip_amount": 0,
-            "suggested_tip_amounts": [],
-            "photo_url": "https://smart-content-assistant.onrender.com/static/premium_sub.jpg",
-            "photo_width": 600,
-            "photo_height": 400,
-            "need_name": False,
-            "need_phone_number": False,
-            "need_email": False,
-            "need_shipping_address": False,
-            "send_phone_number_to_provider": False,
-            "send_email_to_provider": False,
-            "is_flexible": False
-        }
-        async with httpx.AsyncClient() as client:
-            response = await client.post(api_url, json=payload)
-            response_data = response.json()
-        if not response_data.get("ok"):
-            logger.error(f"Ошибка при создании инвойса: {response_data}")
-            raise HTTPException(status_code=500, detail=f"Ошибка API Telegram: {response_data.get('description')}")
-        invoice_url = response_data.get("result")
-        return {
-            "success": True,
-            "invoice_url": invoice_url,
-            "payment_id": payment_id
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Ошибка при генерации инвойса: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка при генерации инвойса: {str(e)}")
