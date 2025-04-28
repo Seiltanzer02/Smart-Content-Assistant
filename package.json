@@ -1,8 +1,6 @@
 {
   "dependencies": {
-    "@types/node": "^20.9.0",
     "@types/uuid": "^10.0.0",
-    "@twa-dev/sdk": "^6.9.0",
     "uuid": "^11.1.0"
   }
 }
