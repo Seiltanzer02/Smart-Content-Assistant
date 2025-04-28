@@ -42,6 +42,9 @@ import traceback
 # from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 import shutil # Добавляем импорт shutil
 
+# Импортируем сервис подписок и константы
+from services.subscription_service import SubscriptionService, FREE_ANALYSIS_LIMIT, FREE_POST_LIMIT, SUBSCRIPTION_PRICE, SUBSCRIPTION_DURATION_MONTHS
+
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
 from unsplash import Api as UnsplashApi # <-- ИМПОРТИРУЕМ ИЗ ПРАВИЛЬНОГО МОДУЛЯ
@@ -194,6 +197,21 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Telegram-User-Id"]  # Позволяем читать этот заголовок
 )
+
+# Получение сервиса подписок
+async def get_subscription_service():
+    """Зависимость для получения сервиса подписок"""
+    if not supabase:
+        raise HTTPException(status_code=500, detail="База данных не инициализирована")
+        
+    try:
+        # Используем существующее подключение к базе данных из supabase
+        pool = supabase.connection()
+        subscription_service = SubscriptionService(pool)
+        return subscription_service
+    except Exception as e:
+        logger.error(f"Ошибка при создании сервиса подписок: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при инициализации сервиса подписок: {str(e)}")
 
 # --- Настройка обслуживания статических файлов ---
 import os
@@ -512,552 +530,185 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
     return analysis_result
 
 @app.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_channel(request: Request, req: AnalyzeRequest):
-    """Анализ канала Telegram на основе запроса."""
-    # Получение telegram_user_id из заголовков
-    telegram_user_id = request.headers.get("X-Telegram-User-Id")
-    if telegram_user_id:
-        logger.info(f"Анализ для пользователя Telegram ID: {telegram_user_id}")
+async def analyze_channel(
+    request: Request, 
+    req: AnalyzeRequest,
+    subscription_service: SubscriptionService = Depends(get_subscription_service)
+):
+    """Анализирует Telegram канал"""
+    startTime = time.time() # Для измерения времени выполнения
     
-    # Обработка имени пользователя
-    username = req.username.replace("@", "").strip()
-    logger.info(f"Получен запрос на анализ канала @{username}")
+    # Получаем идентификатор пользователя из заголовка
+    user_id_str = request.headers.get("x-telegram-user-id")
+    if not user_id_str:
+        raise HTTPException(status_code=401, detail="Требуется авторизация")
     
-    posts = []
-    errors_list = []
-    error_message = None
-    
-    # --- НАЧАЛО: ПОПЫТКА ПОЛУЧЕНИЯ ЧЕРЕЗ HTTP (ПЕРВЫЙ ПРИОРИТЕТ) ---
     try:
-        logger.info(f"Пытаемся получить посты канала @{username} через HTTP парсинг")
-        http_posts = await get_telegram_posts_via_http(username)
-        
-        if http_posts and len(http_posts) > 0:
-            posts = [{"text": post} for post in http_posts]
-            logger.info(f"Успешно получено {len(posts)} постов через HTTP парсинг")
-        else:
-            logger.warning(f"HTTP парсинг не вернул постов для канала @{username}, пробуем Telethon")
-            errors_list.append("HTTP: Не получены посты, пробуем Telethon")
-    except Exception as http_error:
-        logger.error(f"Ошибка при HTTP парсинге для канала @{username}: {http_error}")
-        errors_list.append(f"HTTP: {str(http_error)}")
-        logger.info("Переключаемся на метод Telethon")
+        user_id = int(user_id_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Некорректный идентификатор пользователя")
     
-    # --- НАЧАЛО: ПОПЫТКА ПОЛУЧЕНИЯ ЧЕРЕЗ TELETHON (ВТОРОЙ ПРИОРИТЕТ) ---
-    # Только если HTTP метод не дал результатов
-    if not posts:
+    # Проверяем, может ли пользователь анализировать каналы
+    can_analyze = await subscription_service.can_analyze_channel(user_id)
+    if not can_analyze:
+        raise HTTPException(
+            status_code=403, 
+            detail=f"Достигнут лимит бесплатных анализов ({FREE_ANALYSIS_LIMIT}). Приобретите подписку."
+        )
+    
+    # Get username from request
+    username = req.username
+    
+    # Remove @ if present
+    if username.startswith('@'):
+        username = username[1:]
+    
+    # Используем Mock если запуск на localhost без Telegram API
+    is_mock = not TELEGRAM_API_ID or not TELEGRAM_API_HASH
+    
+    if is_mock:
+        logger.warning("Используется MOCK для Telegram API (нет доступа к Telegram API)")
+        
+    try:
+        logger.info(f"Запрос на анализ канала: {username}")
+        
+        # Проверяем, был ли канал уже проанализирован
+        channel_data = None
         try:
-            logger.info(f"Пытаемся получить посты канала @{username} через Telethon")
-            telethon_posts, telethon_error = get_telegram_posts(username)
-            
-            if telethon_error:
-                logger.warning(f"Ошибка Telethon для канала @{username}: {telethon_error}")
-                errors_list.append(f"Telethon: {telethon_error}")
-            else:
-                # Если Telethon успешно получил посты
-                posts = telethon_posts
-                logger.info(f"Успешно получено {len(posts)} постов через Telethon")
+            if supabase:
+                # Получаем существующий анализ из Supabase
+                result = await _execute_sql_direct(
+                    f"""
+                    SELECT * FROM channel_analysis 
+                    WHERE channel_name = '{username}' 
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """
+                )
+                
+                if result.get("status_code") == 200 and result.get("data") and len(result["data"]) > 0:
+                    channel_data = result["data"][0]
+                    
+                    # Если данные не пустые, возвращаем их
+                    if (
+                        channel_data and 
+                        channel_data.get("themes") and 
+                        channel_data.get("styles") and
+                        len(channel_data.get("themes", [])) > 0 and 
+                        len(channel_data.get("styles", [])) > 0
+                    ):
+                        logger.info(f"Найден существующий анализ для канала {username}")
+                        
+                        # Форматируем ответ согласно модели AnalyzeResponse 
+                        response = {
+                            "themes": channel_data.get("themes", []),
+                            "styles": channel_data.get("styles", []),
+                            "analyzed_posts_sample": channel_data.get("analyzed_posts_sample", []),
+                            "best_posting_time": channel_data.get("best_posting_time", ""),
+                            "analyzed_posts_count": channel_data.get("analyzed_posts_count", 0),
+                            "message": "Данные загружены из базы"
+                        }
+                        return response
         except Exception as e:
-            logger.error(f"Непредвиденная ошибка при получении постов канала @{username} через Telethon: {e}")
-            errors_list.append(f"Ошибка Telethon: {str(e)}")
-    
-    # --- НАЧАЛО: ИСПОЛЬЗУЕМ ПРИМЕРЫ КАК ПОСЛЕДНИЙ ВАРИАНТ ---
-    # Если не удалось получить посты ни через HTTP, ни через Telethon
-    sample_data_used = False
-    if not posts:
-        logger.warning(f"Используем примеры постов для канала {username}")
-        sample_posts = get_sample_posts(username)
-        posts = [{"text": post} for post in sample_posts]
-        error_message = "Не удалось получить реальные посты. Используются примеры для демонстрации."
-        errors_list.append(error_message)
-        sample_data_used = True
-        logger.info(f"Используем примеры постов для канала {username}")
-    
-    # Ограничиваем анализ первыми 20 постами
-    posts = posts[:20]
-    logger.info(f"Анализируем {len(posts)} постов")
-    
-    # Анализ контента
-    themes = []
-    styles = []
-    sample_posts = []
-    
-    try:
-        # Подготовка списка текстов для анализа
-        texts = [post.get("text", "") for post in posts if post.get("text")]
+            logger.error(f"Ошибка при проверке существующего анализа: {e}")
+            # Продолжаем выполнение и пробуем выполнить анализ
         
-        # Анализ через deepseek
-        analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
-        
-        # Извлечение результатов анализа
-        if isinstance(analysis_result, dict):
-            themes = analysis_result.get("themes", [])
-            styles = analysis_result.get("styles", [])
-        elif isinstance(analysis_result, tuple) and len(analysis_result) >= 2:
-            themes, styles = analysis_result[0], analysis_result[1]
+        # Сюда попадаем, если нет существующего анализа или возникла ошибка при его получении
+        # Получаем последние посты
+        if is_mock:
+            posts = get_mock_telegram_posts(username)
         else:
-            logger.warning(f"Неожиданный формат результата анализа: {type(analysis_result)}")
-            themes = []
-            styles = []
+            posts = await get_telegram_posts(username)
         
-        # Сохранение результата анализа в базе данных (если есть telegram_user_id)
-        if telegram_user_id and supabase:
-            try:
-                # Перед сохранением результатов анализа вызываем функцию исправления схемы
-                try:
-                    logger.info("Вызов функции fix_schema перед сохранением результатов анализа")
-                    schema_fix_result = await fix_schema()
-                    logger.info(f"Результат исправления схемы: {schema_fix_result}")
-                except Exception as schema_error:
-                    logger.warning(f"Ошибка при исправлении схемы: {schema_error}")
-                
-                # Проверяем, существует ли уже запись для этого пользователя и канала
-                analysis_check = supabase.table("channel_analysis").select("id").eq("user_id", telegram_user_id).eq("channel_name", username).execute()
-                
-                # Получение текущей даты-времени в ISO формате для updated_at
-                current_datetime = datetime.now().isoformat()
-                
-                # Создаем словарь с данными анализа
-                analysis_data = {
-                    "user_id": telegram_user_id,  # User ID is TEXT
+        if not posts:
+            raise HTTPException(
+                status_code=404, 
+                detail="Не удалось получить посты для анализа. Проверьте корректность имени канала."
+            )
+        
+        # Превращаем список постов в список текстов для анализа
+        post_texts = [post["text"] for post in posts if post.get("text")]
+        
+        if not post_texts:
+            raise HTTPException(
+                status_code=404, 
+                detail="Не найдено текстовых постов для анализа"
+            )
+        
+        # Используем LLM для анализа текстов
+        openai_response = await analyze_content_with_deepseek(post_texts[:20], OPENROUTER_API_KEY)
+        
+        if not openai_response:
+            raise HTTPException(
+                status_code=500, 
+                detail="Ошибка при анализе контента с помощью AI"
+            )
+        
+        themes = openai_response.get("themes", [])
+        styles = openai_response.get("styles", [])
+        
+        # Сохраняем результаты анализа
+        # После успешной генерации увеличиваем счетчик использования
+        await subscription_service.increment_analysis_usage(user_id)
+        
+        # Формируем ответ
+        response = {
+            "themes": themes,
+            "styles": styles,
+            "analyzed_posts_sample": post_texts[:5],  # Возвращаем первые 5 постов как примеры
+            "best_posting_time": "Не определено", # В этой версии пока не реализован анализ времени
+            "analyzed_posts_count": len(post_texts),
+            "message": f"Анализ выполнен за {round(time.time() - startTime, 2)} секунд"
+        }
+        
+        # Сохраняем результаты анализа в Supabase
+        try:
+            if supabase:
+                channel_analysis = {
                     "channel_name": username,
                     "themes": themes,
                     "styles": styles,
-                    "analyzed_posts_count": len(posts),
-                    "sample_posts": sample_posts[:5] if len(sample_posts) > 5 else sample_posts,
-                    "best_posting_time": "18:00 - 20:00 МСК",  # Временная заглушка
-                    "is_sample_data": sample_data_used,
-                    "updated_at": current_datetime
+                    "analyzed_posts_sample": post_texts[:5],
+                    "best_posting_time": "Не определено",
+                    "analyzed_posts_count": len(post_texts),
+                    "user_id": user_id
                 }
                 
-                # Попробуем прямой SQL запрос для вставки/обновления данных, если обычный метод не сработает
-                try:
-                    # Если запись существует, обновляем ее, иначе создаем новую
-                    if hasattr(analysis_check, 'data') and len(analysis_check.data) > 0:
-                        # Обновляем существующую запись
-                        result = supabase.table("channel_analysis").update(analysis_data).eq("user_id", telegram_user_id).eq("channel_name", username).execute()
-                        logger.info(f"Обновлен результат анализа для канала @{username} пользователя {telegram_user_id}")
-                    else:
-                        # Создаем новую запись
-                        result = supabase.table("channel_analysis").insert(analysis_data).execute()
-                        logger.info(f"Сохранен новый результат анализа для канала @{username} пользователя {telegram_user_id}")
-                except Exception as api_error:
-                    logger.warning(f"Ошибка при сохранении через API: {api_error}. Пробуем прямой SQL запрос.")
-                    
-                    # Получаем URL и ключ Supabase
-                    supabase_url = os.getenv('SUPABASE_URL')
-                    supabase_key = os.getenv('SUPABASE_ANON_KEY')
-                    
-                    if supabase_url and supabase_key:
-                        # Прямой запрос через SQL
-                        url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
-                        headers = {
-                            "apikey": supabase_key,
-                            "Authorization": f"Bearer {supabase_key}",
-                            "Content-Type": "application/json"
-                        }
-                        
-                        # Сериализуем JSON данные для SQL запроса
-                        themes_json = json.dumps(themes)
-                        styles_json = json.dumps(styles)
-                        sample_posts_json = json.dumps(sample_posts[:5] if len(sample_posts) > 5 else sample_posts)
-                        
-                        # SQL запрос для вставки/обновления
-                        sql_query = f"""
-                        INSERT INTO channel_analysis 
-                        (user_id, channel_name, themes, styles, analyzed_posts_count, sample_posts, best_posting_time, is_sample_data, updated_at)
-                        VALUES 
-                        ('{telegram_user_id}', '{username}', '{themes_json}'::jsonb, '{styles_json}'::jsonb, {len(posts)}, 
-                         '{sample_posts_json}'::jsonb, '18:00 - 20:00 МСК', {sample_data_used}, '{current_datetime}')
-                        ON CONFLICT (user_id, channel_name) 
-                        DO UPDATE SET 
-                        themes = '{themes_json}'::jsonb,
-                        styles = '{styles_json}'::jsonb,
-                        analyzed_posts_count = {len(posts)},
-                        sample_posts = '{sample_posts_json}'::jsonb,
-                        best_posting_time = '18:00 - 20:00 МСК',
-                        is_sample_data = {sample_data_used},
-                        updated_at = '{current_datetime}';
-                        """
-                        
-                        response = requests.post(url, json={"query": sql_query}, headers=headers)
-                        
-                        if response.status_code in [200, 204]:
-                            logger.info(f"Результат анализа для канала @{username} сохранен через прямой SQL запрос")
-                        else:
-                            logger.error(f"Ошибка при выполнении прямого SQL запроса: {response.status_code} - {response.text}")
+                result = await _execute_sql_direct(
+                    f"""
+                    INSERT INTO channel_analysis (
+                        channel_name, themes, styles, analyzed_posts_sample, 
+                        best_posting_time, analyzed_posts_count, user_id
+                    ) 
+                    VALUES (
+                        '{username}', 
+                        '{json.dumps(themes)}', 
+                        '{json.dumps(styles)}', 
+                        '{json.dumps(post_texts[:5])}',
+                        'Не определено', 
+                        {len(post_texts)},
+                        {user_id}
+                    )
+                    """
+                )
                 
-            except Exception as db_error:
-                logger.error(f"Ошибка при сохранении результатов анализа в БД: {db_error}")
-                errors_list.append(f"Ошибка БД: {str(db_error)}")
+                if result.get("status_code") not in [200, 201, 204]:
+                    logger.error(f"Ошибка при сохранении анализа: {result}")
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении анализа: {e}")
+            # Продолжаем выполнение, так как основная функциональность уже выполнена
         
-        # Подготовка образцов постов для ответа
-        sample_texts = [post.get("text", "") for post in posts[:5] if post.get("text")]
-        sample_posts = sample_texts
+        return response
         
+    except HTTPException:
+        # Пробрасываем HTTPException дальше
+        raise
     except Exception as e:
-        logger.error(f"Ошибка при анализе контента: {e}")
-        # Если произошла ошибка при анализе, возвращаем ошибку 500
-        raise HTTPException(status_code=500, detail=f"Ошибка при анализе контента: {str(e)}")
-    
-    # Временная заглушка для лучшего времени постинга
-    best_posting_time = "18:00 - 20:00 МСК"
-    
-    return AnalyzeResponse(
-        themes=themes,
-        styles=styles,
-        analyzed_posts_sample=sample_posts,
-        best_posting_time=best_posting_time,
-        analyzed_posts_count=len(posts),
-        message=error_message
-    )
-
-# --- Маршрут для получения сохраненного анализа канала ---
-@app.get("/channel-analysis", response_model=Dict[str, Any])
-async def get_channel_analysis(request: Request, channel_name: str):
-    """Получение сохраненного анализа канала."""
-    try:
-        # Получение telegram_user_id из заголовков
-        telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            return {"error": "Для получения анализа необходимо авторизоваться через Telegram"}
-        
-        if not supabase:
-            return {"error": "База данных недоступна"}
-        
-        # Запрос данных из базы
-        result = supabase.table("channel_analysis").select("*").eq("user_id", telegram_user_id).eq("channel_name", channel_name).execute()
-        
-        # Проверка результата
-        if not hasattr(result, 'data') or len(result.data) == 0:
-            return {"error": f"Анализ для канала @{channel_name} не найден"}
-        
-        # Возвращаем данные
-        return result.data[0]
-        
-    except Exception as e:
-        logger.error(f"Ошибка при получении анализа канала: {e}")
-        return {"error": str(e)}
-
-# --- Маршрут для получения списка всех проанализированных каналов ---
-@app.get("/analyzed-channels", response_model=List[Dict[str, Any]])
-async def get_analyzed_channels(request: Request):
-    """Получение списка всех проанализированных каналов пользователя."""
-    try:
-        # Получение telegram_user_id из заголовков
-        telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            return []
-        
-        if not supabase:
-            return []
-        
-        # Запрос данных из базы
-        result = supabase.table("channel_analysis").select("channel_name,updated_at").eq("user_id", telegram_user_id).order("updated_at", desc=True).execute()
-        
-        # Проверка результата
-        if not hasattr(result, 'data'):
-            return []
-        
-        # Возвращаем данные
-        return result.data
-        
-    except Exception as e:
-        logger.error(f"Ошибка при получении списка проанализированных каналов: {e}")
-        return []
-
-# --- Модель для ответа от /ideas ---
-class SuggestedIdeasResponse(BaseModel):
-    ideas: List[Dict[str, Any]] = []
-    message: Optional[str] = None
-
-# --- Маршрут для получения ранее сохраненных результатов анализа ---
-@app.get("/ideas", response_model=SuggestedIdeasResponse)
-async def get_saved_ideas(request: Request, channel_name: Optional[str] = None):
-    """Получение ранее сохраненных результатов анализа."""
-    try:
-        telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            logger.warning("Запрос идей без идентификации пользователя Telegram")
-            return SuggestedIdeasResponse(
-                message="Для доступа к идеям необходимо авторизоваться через Telegram",
-                ideas=[]
-            )
-        
-        if not supabase:
-            logger.error("Клиент Supabase не инициализирован")
-            return SuggestedIdeasResponse(
-                message="Ошибка: не удалось подключиться к базе данных",
-                ideas=[]
-            )
-        
-        # Строим запрос к базе данных
-        query = supabase.table("suggested_ideas").select("*").eq("user_id", telegram_user_id)
-        
-        # Если указано имя канала, фильтруем по нему
-        if channel_name:
-            query = query.eq("channel_name", channel_name)
-            
-        # Выполняем запрос
-        result = query.order("created_at", desc=True).execute()
-        
-        # Обрабатываем результат
-        if not hasattr(result, 'data'):
-            logger.error(f"Ошибка при получении идей из БД: {result}")
-            return SuggestedIdeasResponse(
-                message="Не удалось получить сохраненные идеи",
-                ideas=[]
-            )
-            
-        # === ИЗМЕНЕНИЕ: Корректное формирование ответа ===
-        ideas = []
-        for item in result.data:
-            # Просто берем нужные поля напрямую из ответа БД
-            idea = {
-                "id": item.get("id"),
-                "channel_name": item.get("channel_name"),
-                "topic_idea": item.get("topic_idea"),  # Берем напрямую
-                "format_style": item.get("format_style"),  # Берем напрямую
-                "relative_day": item.get("relative_day"),
-                "is_detailed": item.get("is_detailed"),
-                "created_at": item.get("created_at")
-                # Убрана ненужная обработка themes_json/styles_json
-            }
-            # Добавляем только если есть тема
-            if idea["topic_idea"]:
-                ideas.append(idea)
-            else:
-                logger.warning(f"Пропущена идея без topic_idea: ID={idea.get('id', 'N/A')}")  # Добавил .get для безопасности
-        # === КОНЕЦ ИЗМЕНЕНИЯ ===
-                
-        logger.info(f"Получено {len(ideas)} идей для пользователя {telegram_user_id}")
-        return SuggestedIdeasResponse(ideas=ideas)
-        
-    except Exception as e:
-        logger.error(f"Ошибка при получении идей: {e}")
-        return SuggestedIdeasResponse(
-            message=f"Ошибка при получении идей: {str(e)}",
-            ideas=[]
-        )
-
-# --- Модель ответа для генерации плана ---
-class PlanGenerationResponse(BaseModel):
-    plan: List[PlanItem] = []
-    message: Optional[str] = None
-
-# Функция для очистки текста от маркеров форматирования
-def clean_text_formatting(text):
-    """Очищает текст от форматирования маркдауна и прочего."""
-    if not text:
-        return ""
-    
-    # Удаляем заголовки типа "### **День 1**", "### **1 день**", "### **ДЕНЬ 1**" и другие вариации
-    text = re.sub(r'#{1,6}\s*\*?\*?(?:[Дд]ень|ДЕНЬ)?\s*\d+\s*(?:[Дд]ень|ДЕНЬ)?\*?\*?', '', text)
-    
-    # Удаляем числа и слово "день" в начале строки (без символов #)
-    text = re.sub(r'^(?:\*?\*?(?:[Дд]ень|ДЕНЬ)?\s*\d+\s*(?:[Дд]ень|ДЕНЬ)?\*?\*?)', '', text)
-    
-    # Удаляем символы маркдауна
-    text = re.sub(r'\*\*|\*|__|_|#{1,6}', '', text)
-    
-    # Очищаем начальные и конечные пробелы
-    text = text.strip()
-    
-    # Делаем первую букву заглавной, если строка не пустая
-    if text and len(text) > 0:
-        text = text[0].upper() + text[1:] if len(text) > 1 else text.upper()
-    
-    return text
-
-# --- Маршрут для генерации плана публикаций ---
-@app.post("/generate-plan", response_model=PlanGenerationResponse)
-async def generate_content_plan(request: Request, req: PlanGenerationRequest):
-    """Генерация и сохранение плана контента на основе тем и стилей."""
-    try:
-        # Получение telegram_user_id из заголовков
-        telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            logger.warning("Запрос генерации плана без идентификации пользователя Telegram")
-            return PlanGenerationResponse(
-                message="Для генерации плана необходимо авторизоваться через Telegram",
-                plan=[]
-            )
-            
-        themes = req.themes
-        styles = req.styles
-        period_days = req.period_days
-        channel_name = req.channel_name
-        
-        if not themes or not styles:
-            logger.warning(f"Запрос с пустыми темами или стилями: themes={themes}, styles={styles}")
-            return PlanGenerationResponse(
-                message="Необходимо указать темы и стили для генерации плана",
-                plan=[]
-            )
-            
-        # Проверяем наличие API ключа
-        if not OPENROUTER_API_KEY:
-            logger.warning("Генерация плана невозможна: отсутствует OPENROUTER_API_KEY")
-            # Генерируем простой план без использования API
-            plan_items = []
-            for day in range(1, period_days + 1):
-                random_theme = random.choice(themes)
-                random_style = random.choice(styles)
-                plan_items.append(PlanItem(
-                    day=day,
-                    topic_idea=f"Пост о {random_theme}",
-                    format_style=random_style
-                ))
-            logger.info(f"Создан базовый план из {len(plan_items)} идей (без использования API)")
-            return PlanGenerationResponse(
-                plan=plan_items,
-                message="План сгенерирован с базовыми идеями (API недоступен)"
-            )
-            
-        # --- ИЗМЕНЕНИЕ НАЧАЛО: Уточненные промпты ---
-        system_prompt = f"""Ты - опытный контент-маркетолог. Твоя задача - сгенерировать план публикаций для Telegram-канала на {period_days} дней.
-Используй только следующие темы: {', '.join(themes)}.
-Используй **ТОЛЬКО** стили из этого списка: {', '.join(styles)}.
-
-Для каждого дня предложи ОДНУ идею поста (конкретный заголовок/концепцию) и выбери ОДИН стиль из списка выше.
-Формат КАЖДОЙ строки ответа ДОЛЖЕН БЫТЬ ТОЧНО таким:
-День <номер_дня>:: <Идея поста>:: <Стиль из списка>
-
-Пример:
-День 1:: Как начать инвестировать с нуля:: Рекомендации и советы
-День 2:: Обзор нового гаджета X:: Аналитический разбор сделок
-
-ВАЖНО:
-- Используй разделитель '::' между днем, идеей и стилем.
-- НЕ ИСПОЛЬЗУЙ markdown (**, ##, *, _).
-- НЕ добавляй никаких пояснений или лишнего текста. Только строки в указанном формате."""
-
-        user_prompt = f"""Сгенерируй план контента для Telegram-канала "{channel_name}" на {period_days} дней.
-Темы: {', '.join(themes)}
-Стили (используй ТОЛЬКО их): {', '.join(styles)}
-
-Выдай ровно {period_days} строк в формате:
-День <номер_дня>:: <Идея поста>:: <Стиль из списка>"""
-        # --- ИЗМЕНЕНИЕ КОНЕЦ ---
-
-        # Настройка клиента OpenAI для использования OpenRouter
-        client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=OPENROUTER_API_KEY
-        )
-        
-        # Запрос к API
-        logger.info(f"Отправка запроса на генерацию плана контента для канала @{channel_name} с уточненным промптом")
-        response = await client.chat.completions.create(
-            model="deepseek/deepseek-chat", # Или другая подходящая модель
-            messages=[
-                # {"role": "system", "content": system_prompt}, # Системный промпт может конфликтовать с некоторыми моделями, тестируем без него или с ним
-                {"role": "user", "content": user_prompt} # Помещаем все инструкции в user_prompt
-            ],
-            temperature=0.7, # Немного снижаем температуру для строгости формата
-            max_tokens=150 * period_days, # Примерно 150 токенов на идею
-            timeout=120,
-            extra_headers={
-                "HTTP-Referer": "https://content-manager.onrender.com",
-                "X-Title": "Smart Content Assistant"
-            }
-        )
-        
-        plan_text = response.choices[0].message.content.strip()
-        logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
-        
-        plan_items = []
-        lines = plan_text.split('\n')
-
-        # --- ИЗМЕНЕНИЕ НАЧАЛО: Улучшенный парсинг с новым разделителем ---
-        expected_style_set = set(s.lower() for s in styles) # Для быстрой проверки
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            parts = line.split('::')
-            if len(parts) == 3:
-                # === ИСПРАВЛЕНО: Выровнен отступ для try ===
-                try:
-                    day_part = parts[0].lower().replace('день', '').strip()
-                    day = int(day_part)
-                    topic_idea = clean_text_formatting(parts[1].strip())
-                    format_style = clean_text_formatting(parts[2].strip())
-
-                    # Проверяем, входит ли стиль в запрошенный список (без учета регистра)
-                    if format_style.lower() not in expected_style_set:
-                        logger.warning(f"Стиль '{format_style}' из ответа LLM не найден в запрошенных стилях. Выбираем случайный.")
-                        format_style = random.choice(styles) if styles else "Без указания стиля"
-
-                    if topic_idea: # Пропускаем, если тема пустая
-                        plan_items.append(PlanItem(
-                            day=day,
-                            topic_idea=topic_idea,
-                            format_style=format_style
-                        ))
-                    else:
-                        logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
-                # === ИСПРАВЛЕНО: Выровнен отступ для except ===
-                except ValueError:
-                    logger.warning(f"Не удалось извлечь номер дня из строки плана: {line}")
-                except Exception as parse_err:
-                    logger.warning(f"Ошибка парсинга строки плана '{line}': {parse_err}")
-            # === ИСПРАВЛЕНО: Выровнен отступ для else ===
-            else:
-                logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
-        # --- ИЗМЕНЕНИЕ КОНЕЦ ---
-
-        # ... (остальная логика обработки plan_items: сортировка, дополнение, проверка пустого плана) ...
-        # Если и сейчас нет идей, генерируем вручную
-        if not plan_items:
-            logger.warning("Не удалось извлечь идеи из ответа LLM или все строки были некорректными, генерируем базовый план.")
-            for day in range(1, period_days + 1):
-                random_theme = random.choice(themes) if themes else "Общая тема"
-                random_style = random.choice(styles) if styles else "Общий стиль"
-                plan_items.append(PlanItem(
-                    day=day,
-                    topic_idea=f"Пост о {random_theme}",
-                    format_style=random_style
-                ))
-                
-        # Сортируем по дням
-        plan_items.sort(key=lambda x: x.day)
-        
-        # Обрезаем до запрошенного количества дней (на случай, если LLM выдал больше)
-        plan_items = plan_items[:period_days]
-        
-        # Если план получился короче запрошенного периода, дополняем (возможно, из-за ошибок парсинга)
-        if len(plan_items) < period_days:
-            existing_days = {item.day for item in plan_items}
-            needed_days = period_days - len(plan_items)
-            logger.warning(f"План короче запрошенного ({len(plan_items)}/{period_days}), дополняем {needed_days} идеями.")
-            # Находим максимальный существующий день или начинаем с 1
-            start_day = max(existing_days) + 1 if existing_days else 1
-            for i in range(needed_days):
-                current_day = start_day + i
-                # Проверяем, что такого дня еще нет (на всякий случай)
-                if current_day not in existing_days:
-                    random_theme = random.choice(themes) if themes else "Дополнительная тема"
-                    random_style = random.choice(styles) if styles else "Дополнительный стиль"
-                    plan_items.append(PlanItem(
-                        day=current_day,
-                        topic_idea=f"(Дополнено) Пост о {random_theme}",
-                        format_style=random_style
-                    ))
-        
-            # Сортируем по дням еще раз после возможного дополнения
-            plan_items.sort(key=lambda x: x.day)
-        
-        logger.info(f"Сгенерирован и обработан план из {len(plan_items)} идей для канала @{channel_name}")
-        return PlanGenerationResponse(plan=plan_items)
-                
-    except Exception as e:
-        logger.error(f"Ошибка при генерации плана: {e}\\n{traceback.format_exc()}") # Добавляем traceback
-        return PlanGenerationResponse(
-            message=f"Ошибка при генерации плана: {str(e)}",
-            plan=[]
+        logger.error(f"Ошибка при анализе канала: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Произошла ошибка при анализе канала: {str(e)}"
         )
 
 # --- Настройка обработки корневого маршрута для обслуживания статических файлов ---
@@ -1768,220 +1419,198 @@ async def search_unsplash_images(query: str, count: int = 5, topic: str = "", fo
 
 # --- Endpoint для генерации деталей поста ---
 @app.post("/generate-post-details", response_model=PostDetailsResponse)
-async def generate_post_details(request: Request, req: GeneratePostDetailsRequest):
-    """Генерация детального поста на основе идеи, с текстом и релевантными изображениями."""
-    # === ИЗМЕНЕНО: Инициализация found_images в начале ===
-    found_images = [] 
-    channel_name = req.channel_name if hasattr(req, 'channel_name') else ""
-    api_error_message = None # Добавляем переменную для хранения ошибки API
+async def generate_post_details(
+    request: Request, 
+    req: GeneratePostDetailsRequest,
+    subscription_service: SubscriptionService = Depends(get_subscription_service)
+):
+    """Генерирует детали поста по указанной теме и формату"""
+    # Получаем идентификатор пользователя из заголовка
+    user_id_str = request.headers.get("x-telegram-user-id")
+    if not user_id_str:
+        raise HTTPException(status_code=401, detail="Требуется авторизация")
+    
     try:
-        # Получение telegram_user_id из заголовков
-        telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            logger.warning("Запрос генерации поста без идентификации пользователя Telegram")
-            # Используем HTTPException для корректного ответа
-            raise HTTPException(
-                status_code=401, 
-                detail="Для генерации постов необходимо авторизоваться через Telegram"
-            )
-            
-        topic_idea = req.topic_idea
-        format_style = req.format_style
-        # channel_name уже определен выше
-        
-        # Проверка наличия API ключа
-        if not OPENROUTER_API_KEY:
-            logger.warning("Генерация деталей поста невозможна: отсутствует OPENROUTER_API_KEY")
-            raise HTTPException(
-                status_code=503, # Service Unavailable
-                detail="API для генерации текста недоступен"
-            )
-            
-        # Проверка наличия имени канала для получения примеров постов
-        post_samples = []
-        if channel_name:
-            try:
-                # Пытаемся получить примеры постов из имеющегося анализа канала
-                channel_data = await get_channel_analysis(request, channel_name)
-                if channel_data and "analyzed_posts_sample" in channel_data:
-                    post_samples = channel_data["analyzed_posts_sample"]
-                    logger.info(f"Получено {len(post_samples)} примеров постов для канала @{channel_name}")
-            except Exception as e:
-                logger.warning(f"Не удалось получить примеры постов для канала @{channel_name}: {e}")
-                # Продолжаем без примеров
-                pass
-                
-        # Формируем системный промпт
-        system_prompt = """Ты - опытный контент-маркетолог для Telegram-каналов.
-Твоя задача - сгенерировать текст поста на основе идеи и формата, который будет готов к публикации.
-
-Пост должен быть:
-1. Хорошо структурированным и легко читаемым
-2. Соответствовать указанной теме/идее
-3. Соответствовать указанному формату/стилю
-4. Иметь правильное форматирование для Telegram (если нужно - с эмодзи, абзацами, списками)
-
-Не используй хэштеги, если это не является частью формата.
-Сделай пост уникальным и интересным, учитывая специфику Telegram-аудитории.
-Используй примеры постов канала, если они предоставлены, чтобы сохранить стиль."""
-
-        # Формируем запрос пользователя
-        user_prompt = f"""Создай пост для Telegram-канала "@{channel_name}" на тему:
-"{topic_idea}"
-
-Формат поста: {format_style}
-
-Напиши полный текст поста, который будет готов к публикации.
-"""
-
-        # Если есть примеры постов канала, добавляем их
-        if post_samples:
-            sample_text = "\n\n".join(post_samples[:3])  # Берем до 3 примеров, чтобы не превышать токены
-            user_prompt += f"""
-            
-Вот несколько примеров постов из этого канала для сохранения стиля:
-
-{sample_text}
-"""
-
-        # Настройка клиента OpenAI для использования OpenRouter
-        client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=OPENROUTER_API_KEY
+        user_id = int(user_id_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Некорректный идентификатор пользователя")
+    
+    # Проверяем, может ли пользователь генерировать посты
+    can_generate = await subscription_service.can_generate_post(user_id)
+    if not can_generate:
+        raise HTTPException(
+            status_code=403, 
+            detail=f"Достигнут лимит бесплатных генераций постов ({FREE_POST_LIMIT}). Приобретите подписку."
         )
+    
+    try:
+        logger.info(f"Запрос на генерацию деталей поста: тема={req.topic_idea}, формат={req.format_style}")
         
-        # === ИЗМЕНЕНО: Добавлена обработка ошибок API ===
-        post_text = ""
+        # Извлекаем параметры запроса
+        topic = req.topic_idea
+        format_style = req.format_style
+        
+        # Очищаем входные данные от потенциально опасных символов
+        topic = clean_text_formatting(topic)
+        format_style = clean_text_formatting(format_style)
+        
+        keywords = req.keywords or []
+        post_samples = req.post_samples or []
+        
+        # Если нет ключевых слов, извлекаем их из темы
+        if not keywords and topic:
+            # Пытаемся получить ключевые слова из темы
+            ai_keywords = await generate_image_keywords(topic, topic, format_style)
+            if ai_keywords:
+                keywords = ai_keywords
+                
+        start_time = time.time()
+        
+        # 1. Генерация текста ===============
+        # Формируем промпт для генерации текста
+        system_prompt = """
+        Ты - копирайтер Telegram канала, эксперт по созданию качественных постов. 
+        Твоя задача - создать пост на указанную тему, в указанном формате/стиле.
+        Текст должен быть привлекательным, информативным и соответствовать стилю канала.
+        Используй эмодзи для оживления текста, но умеренно.
+        Используй форматирование текста (жирный, курсив) где уместно.
+        Пост должен быть не слишком длинным (до 2000 символов) и хорошо структурированным.
+        Обязательно напиши заголовок и разбей текст на абзацы для лучшего восприятия.
+        """
+        
+        # Подготавливаем примеры постов канала
+        examples_text = ""
+        if post_samples and len(post_samples) > 0:
+            # Ограничиваем количество и размер примеров
+            limited_samples = post_samples[:2]  # не более 2 примеров
+            limited_samples = [sample[:1000] for sample in limited_samples]  # не более 1000 символов в каждом
+            
+            examples_text = "ПРИМЕРЫ ПОСТОВ КАНАЛА (для подражания стилю):\n\n"
+            for i, sample in enumerate(limited_samples, 1):
+                examples_text += f"Пример {i}:\n{sample}\n\n"
+        
+        # Формируем запрос к модели
+        user_prompt = f"""
+        ТЕМА: {topic}
+        ФОРМАТ/СТИЛЬ: {format_style}
+        
+        {examples_text if examples_text else ""}
+        
+        Создай пост для Telegram канала на указанную тему в указанном формате/стиле.
+        """
+        
+        # Делаем запрос к OpenAI API
         try:
-            # Запрос к API
-            logger.info(f"Отправка запроса на генерацию поста по идее: {topic_idea}")
+            # Создаем клиента OpenAI с настройкой на OpenRouter
+            client = AsyncOpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=OPENROUTER_API_KEY,
+                http_client=httpx.AsyncClient(timeout=60.0)
+            )
+            
             response = await client.chat.completions.create(
-                model="deepseek/deepseek-chat",
+                model="deepseek-ai/deepseek-coder-33b-instruct",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
+                max_tokens=1000,
                 temperature=0.7,
-                max_tokens=850, # === ИЗМЕНЕНО: Уменьшен лимит токенов с 1000 до 850 ===
-                timeout=60,
-                extra_headers={
-                    "HTTP-Referer": "https://content-manager.onrender.com",
+                headers={
+                    "HTTP-Referer": "https://t.me/content_manager", # Помогает с квотами
                     "X-Title": "Smart Content Assistant"
                 }
             )
             
-            # Проверка ответа и извлечение текста
-            if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-                post_text = response.choices[0].message.content.strip()
-                logger.info(f"Получен текст поста ({len(post_text)} символов)")
-            # === ДОБАВЛЕНО: Явная проверка на ошибку в ответе ===
-            elif response and hasattr(response, 'error') and response.error:
-                err_details = response.error
-                # Пытаемся получить сообщение об ошибке
-                api_error_message = getattr(err_details, 'message', str(err_details)) 
-                logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
-                post_text = "[Текст не сгенерирован из-за ошибки API]"
-            # === КОНЕЦ ДОБАВЛЕНИЯ ===
+            # Извлекаем сгенерированный текст
+            generated_text = response.choices[0].message.content
+            
+            # Очищаем текст от возможных маркеров Markdown и других артефактов
+            generated_text = re.sub(r'^```.*$', '', generated_text, flags=re.MULTILINE)
+            generated_text = re.sub(r'^```$', '', generated_text, flags=re.MULTILINE)
+            generated_text = generated_text.strip()
+            
+            logger.info(f"Текст успешно сгенерирован, длина: {len(generated_text)} символов")
+            
+        except OpenAIError as e:
+            logger.error(f"Ошибка OpenAI при генерации текста: {e}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Ошибка AI при генерации текста: {str(e)}"
+            )
+        except Exception as e:
+            logger.error(f"Неожиданная ошибка при генерации текста: {e}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Ошибка при генерации текста: {str(e)}"
+            )
+            
+        # 2. Поиск изображений ===============
+        try:
+            # Ищем изображения на основе ключевых слов
+            found_images = []
+            
+            # Формируем поисковый запрос
+            if keywords and len(keywords) > 0:
+                # Сокращаем список ключевых слов до 3 для более точного поиска
+                search_keywords = keywords[:3]
+                search_query = " ".join(search_keywords)
             else:
-                # Общий случай некорректного ответа
-                api_error_message = "API вернул некорректный или пустой ответ"
-                logger.error(f"Некорректный или пустой ответ от OpenRouter API. Ответ: {response}")
-                post_text = "[Текст не сгенерирован из-за ошибки API]"
-                
-        except Exception as api_error:
-            # Ловим ошибки HTTP запроса или другие исключения
-            api_error_message = f"Ошибка соединения с API: {str(api_error)}"
-            logger.error(f"Ошибка при запросе к OpenRouter API: {api_error}", exc_info=True)
-            post_text = "[Текст не сгенерирован из-за ошибки API]"
-        # === КОНЕЦ ИЗМЕНЕНИЯ ===
-
-        # Генерируем ключевые слова для поиска изображений на основе темы и текста
-        image_keywords = await generate_image_keywords(post_text, topic_idea, format_style)
-        logger.info(f"Сгенерированы ключевые слова для поиска изображений: {image_keywords}")
-        
-        # Поиск изображений по ключевым словам
-        # found_images инициализирован в начале
-        for keyword in image_keywords[:3]:  # Ограничиваем до 3 ключевых слов для поиска
-            try:
-                # Получаем не более 5 изображений
-                image_count = min(5 - len(found_images), 3)
-                if image_count <= 0:
-                    break
-                    
-                images = await search_unsplash_images(
-                    keyword, 
-                    count=image_count,
-                    topic=topic_idea,
+                # Если ключевые слова не были предоставлены или сгенерированы, используем тему
+                search_query = topic
+            
+            # Очищаем запрос от ненужных символов
+            search_query = search_query.strip()
+            search_query = re.sub(r'[^\w\s\-\']', ' ', search_query)
+            search_query = re.sub(r'\s+', ' ', search_query).strip()
+            
+            # Проверяем, что запрос не пустой
+            if search_query:
+                # Ищем изображения на Unsplash
+                unsplash_images = await search_unsplash_images(
+                    search_query, 
+                    count=IMAGE_SEARCH_COUNT,  # константа определена в начале файла
+                    topic=topic,
                     format_style=format_style,
-                    post_text=post_text
+                    post_text=generated_text
                 )
                 
-                # Добавляем только уникальные изображения
-                existing_ids = {img.id for img in found_images}
-                unique_images = [img for img in images if img.id not in existing_ids]
-                found_images.extend(unique_images)
-                
-                # Ограничиваем до 5 изображений всего
-                if len(found_images) >= 5:
-                    found_images = found_images[:5]
-                    break
+                if unsplash_images:
+                    found_images.extend(unsplash_images)
                     
-                logger.info(f"Найдено {len(unique_images)} уникальных изображений по ключевому слову '{keyword}'")
-            except Exception as e:
-                logger.error(f"Ошибка при поиске изображений для ключевого слова '{keyword}': {e}")
-                continue
+                logger.info(f"Найдено {len(found_images)} изображений")
+            else:
+                logger.warning("Пустой поисковый запрос для изображений, поиск пропущен")
+        except Exception as e:
+            logger.error(f"Ошибка при поиске изображений: {e}")
+            # Продолжаем выполнение, так как изображения не критичны
+            
+        # Формируем ответ
+        end_time = time.time()
         
-        # Если изображения не найдены, повторяем поиск с общей идеей
-        if not found_images:
-            try:
-                found_images = await search_unsplash_images(
-                    topic_idea, 
-                    count=5,
-                    topic=topic_idea,
-                    format_style=format_style
-                )
-                logger.info(f"Найдено {len(found_images)} изображений по основной теме")
-            except Exception as e:
-                logger.error(f"Ошибка при поиске изображений по основной теме: {e}")
-                found_images = []
+        # После успешной генерации увеличиваем счетчик использования
+        await subscription_service.increment_post_usage(user_id)
         
-        # Просто возвращаем найденные изображения без сохранения
-        logger.info(f"Подготовлено {len(found_images)} предложенных изображений")
+        # Ограничиваем количество изображений в ответе
+        limited_images = found_images[:IMAGE_RESULTS_COUNT] if found_images else []
         
-        # === ИЗМЕНЕНО: Передача сообщения об ошибке в ответе ===
-        response_message = f"Сгенерирован пост с {len(found_images[:IMAGE_RESULTS_COUNT])} предложенными изображениями"
-        if api_error_message:
-            # Если была ошибка API, добавляем ее в сообщение ответа
-            response_message = f"Ошибка генерации текста: {api_error_message}. Изображений найдено: {len(found_images[:IMAGE_RESULTS_COUNT])}"
+        return {
+            "generated_text": generated_text,
+            "found_images": limited_images,
+            "message": f"Текст и изображения сгенерированы за {round(end_time - start_time, 2)} секунд",
+            "channel_name": None  # Может быть заполнено в приложении на стороне клиента
+        }
         
-        return PostDetailsResponse(
-            generated_text=post_text, # Будет пустым или '[...]' при ошибке
-            found_images=found_images[:IMAGE_RESULTS_COUNT],
-            message=response_message, # <--- Сообщение включает ошибку API
-            channel_name=channel_name,
-            selected_image_data=PostImage(
-                url=found_images[0].regular_url if found_images else "",
-                id=found_images[0].id if found_images else None,
-                preview_url=found_images[0].preview_url if found_images else "",
-                alt=found_images[0].description if found_images else "",
-                author=found_images[0].author_name if found_images else "",
-                author_url=found_images[0].author_url if found_images else ""
-            ) if found_images else None
-        )
-        # === КОНЕЦ ИЗМЕНЕНИЯ ===
-                
-    except HTTPException as http_err:
-        # Перехватываем HTTPException, чтобы они не попадали в общий Exception
-        raise http_err
+    except HTTPException:
+        # Пробрасываем HTTPException напрямую
+        raise
     except Exception as e:
-        logger.error(f"Ошибка при генерации деталей поста: {e}")
-        traceback.print_exc() # Печатаем traceback для диагностики
-        # === ИЗМЕНЕНО: Используем HTTPException для ответа ===
+        logger.error(f"Неожиданная ошибка при генерации деталей поста: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=500,
-            detail=f"Внутренняя ошибка сервера при генерации деталей поста: {str(e)}"
+            detail=f"Произошла ошибка при генерации деталей поста: {str(e)}"
         )
-        # === КОНЕЦ ИЗМЕНЕНИЯ ===
 
 # --- Функция для исправления форматирования в существующих идеях ---
 async def fix_existing_ideas_formatting():
@@ -3088,3 +2717,114 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     logger.info(f"Запуск сервера на порту {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
+
+# Эндпоинты для работы с подписками
+@app.get("/subscription/status", response_model=SubscriptionStatusResponse)
+async def get_subscription_status(
+    request: Request,
+    subscription_service: SubscriptionService = Depends(get_subscription_service)
+):
+    """Получает статус подписки пользователя"""
+    # Получаем идентификатор пользователя из заголовка
+    user_id_str = request.headers.get("x-telegram-user-id")
+    if not user_id_str:
+        raise HTTPException(status_code=401, detail="Требуется авторизация")
+    
+    try:
+        user_id = int(user_id_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Некорректный идентификатор пользователя")
+    
+    try:
+        # Получаем активную подписку пользователя
+        subscription = await subscription_service.get_subscription(user_id)
+        
+        # Получаем статистику использования
+        usage = await subscription_service.get_user_usage(user_id)
+        
+        return {
+            "has_subscription": subscription is not None,
+            "analysis_count": usage["analysis_count"] if usage else 0,
+            "post_generation_count": usage["post_generation_count"] if usage else 0,
+            "subscription_end_date": subscription["end_date"].isoformat() if subscription else None
+        }
+    except Exception as e:
+        logger.error(f"Ошибка при получении статуса подписки: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при получении статуса подписки: {str(e)}")
+
+@app.post("/subscription/create", response_model=Dict[str, Any])
+async def create_subscription(
+    request: CreateSubscriptionRequest,
+    subscription_service: SubscriptionService = Depends(get_subscription_service)
+):
+    """Создает новую подписку пользователя"""
+    try:
+        # Создаем подписку
+        subscription = await subscription_service.create_subscription(
+            user_id=request.user_id,
+            payment_id=request.payment_id
+        )
+        
+        return {
+            "success": True,
+            "subscription_id": subscription["id"],
+            "end_date": subscription["end_date"].isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Ошибка при создании подписки: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при создании подписки: {str(e)}")
+
+@app.post("/telegram/webhook", response_model=Dict[str, Any])
+async def telegram_webhook(
+    request: WebAppDataRequest,
+    subscription_service: SubscriptionService = Depends(get_subscription_service)
+):
+    """Обрабатывает webhook от Telegram WebApp"""
+    try:
+        # Получаем данные от Telegram
+        data_str = request.data
+        user_data = request.user
+        
+        if not user_data or not user_data.get("id"):
+            raise HTTPException(status_code=400, detail="Не указан ID пользователя")
+        
+        user_id = int(user_data["id"])
+        
+        # Парсим JSON из data
+        try:
+            data = json.loads(data_str)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Некорректные данные от WebApp")
+        
+        # Проверяем тип операции
+        if data.get("type") == "subscribe":
+            # Если это операция подписки
+            tier = data.get("tier")
+            if tier != "premium_monthly":
+                raise HTTPException(status_code=400, detail="Неподдерживаемый тип подписки")
+            
+            # Генерируем уникальный идентификатор платежа
+            payment_id = f"tg_stars_{int(time.time())}_{user_id}"
+            
+            # Создаем подписку
+            subscription = await subscription_service.create_subscription(
+                user_id=user_id,
+                payment_id=payment_id
+            )
+            
+            return {
+                "success": True,
+                "message": "Подписка успешно активирована",
+                "subscription_id": subscription["id"],
+                "end_date": subscription["end_date"].isoformat()
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Неизвестный тип операции")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка при обработке webhook: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при обработке webhook: {str(e)}")
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

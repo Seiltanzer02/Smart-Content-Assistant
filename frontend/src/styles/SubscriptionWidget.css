@@ -1,0 +1,110 @@
+.subscription-widget {
+  background-color: #f5f5f5;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 15px 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.subscription-widget h3 {
+  margin-top: 0;
+  margin-bottom: 16px;
+  font-size: 18px;
+  color: #333;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.status-badge.premium {
+  background-color: #8774e1;
+  color: white;
+}
+
+.status-badge.free {
+  background-color: #62b0ff;
+  color: white;
+}
+
+.subscription-active {
+  border-left: 4px solid #8774e1;
+  padding-left: 12px;
+}
+
+.subscription-free {
+  border-left: 4px solid #62b0ff;
+  padding-left: 12px;
+}
+
+.subscription-offer {
+  background-color: white;
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 12px;
+}
+
+.subscription-offer h4 {
+  margin-top: 0;
+  color: #333;
+}
+
+.subscription-offer ul {
+  padding-left: 20px;
+  margin-bottom: 16px;
+}
+
+.subscription-offer li {
+  margin-bottom: 6px;
+}
+
+.subscribe-button {
+  background-color: #8774e1;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-weight: bold;
+  cursor: pointer;
+  width: 100%;
+  transition: background-color 0.2s;
+}
+
+.subscribe-button:hover {
+  background-color: #7964d3;
+}
+
+.subscribe-button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+.subscription-widget.loading {
+  text-align: center;
+  padding: 24px;
+  color: #666;
+}
+
+.subscription-widget.error {
+  border-left: 4px solid #ff6262;
+  color: #d32f2f;
+}
+
+.subscription-widget.error button {
+  background-color: #f5f5f5;
+  border: 1px solid #d32f2f;
+  color: #d32f2f;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.subscription-widget.error button:hover {
+  background-color: #fff0f0;
+} 
