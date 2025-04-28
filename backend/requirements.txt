@@ -1,13 +1,14 @@
-fastapi==0.97.0
-fastapi-cors==0.0.6
-supabase==1.0.3
-uvicorn==0.22.0
-python-dotenv==1.0.0
-requests==2.31.0
-telethon==1.27.0
-websockets==11.0.3
-asyncio==3.4.3
-openai==0.27.8
-openrouter==0.0.12
-python-multipart==0.0.6
-pyTelegramBotAPI==4.12.0  # Библиотека для работы с Telegram Bot API
+fastapi
+uvicorn[standard]
+python-dotenv
+requests
+huggingface_hub # Для Inference API
+openai
+supabase
+telethon # Добавляем Telethon
+httpx # Добавляем httpx 
+python-multipart
+beautifulsoup4
+python-unsplash
+gunicorn
+python-telegram-bot
