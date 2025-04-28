@@ -1,23 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import '../styles/SubscriptionWidget.css';
-import Loader from './Loader';
-import styles from '../styles/SubscriptionWidget.module.css';
-import { getUserSubscriptionStatus, SubscriptionStatus } from '../api/subscription';
+import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice } from '../api/subscription';
 
 interface SubscriptionWidgetProps {
   userId: string | null;
 }
 
-interface SubscriptionStatus {
-  has_subscription: boolean;
-  analysis_count: number;
-  post_generation_count: number;
-  subscription_end_date?: string;
-}
-
-// Добавляем константу API_URL
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+// API_URL для вызовов, требующих абсолютный путь
+const API_URL = 'http://localhost:8000';
 
 const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
   const [loading, setLoading] = useState<boolean>(true);
@@ -87,21 +77,20 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
     setLoading(true);
     try {
-      const response = await axios.get('/subscription/status', {
-        headers: { 'x-telegram-user-id': userId }
-      });
-      setStatus(response.data);
+      // Используем функцию из API вместо прямого запроса
+      const subscriptionData = await getUserSubscriptionStatus(userId);
+      setStatus(subscriptionData);
       
       // Показываем/скрываем главную кнопку в зависимости от статуса подписки
       if (window.Telegram?.WebApp?.MainButton) {
-        if (!response.data.has_subscription) {
+        if (!subscriptionData.has_subscription) {
           window.Telegram.WebApp.MainButton.show();
         } else {
           window.Telegram.WebApp.MainButton.hide();
         }
       }
       
-      return response.data.has_subscription;
+      return subscriptionData.has_subscription;
     } catch (err: any) {
       console.error('Ошибка при получении статуса подписки:', err);
       setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке статуса подписки');
@@ -131,29 +120,12 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
     }
   };
   
-  // Функция для генерации инвойса напрямую через Telegram Bot API
-  const generateInvoice = async (userId: number) => {
+  const handleInvoiceGeneration = async (userId: number) => {
     try {
       setIsSubscribing(true);
       
-      // Делаем запрос к серверу для получения invoice_url
-      const response = await fetch(`${API_URL}/generate-invoice`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          user_id: userId,
-          amount: 70 // Фиксированная сумма 70 Stars
-        }),
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Не удалось создать инвойс');
-      }
-      
-      const data = await response.json();
+      // Используем функцию из API вместо прямой реализации
+      const data = await generateInvoice(userId, SUBSCRIPTION_PRICE);
       console.log('Получены данные инвойса:', data);
       
       // Проверяем наличие URL инвойса
@@ -204,7 +176,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
       }
       
       // Генерируем инвойс для оплаты
-      await generateInvoice(userId);
+      await handleInvoiceGeneration(userId);
     } catch (error) {
       console.error('Ошибка при подписке:', error);
       setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
