@@ -95,7 +95,7 @@ async def get_subscription_service():
 # ... (остальная часть кода до первого определения /generate-invoice остается неизменной) ...
 
 # Первое определение эндпоинта /generate-invoice остается неизменным
-@app.post("/generate-invoice", response_model=Dict[str, Any])
+@app.post("/generate-invoice", response_model=Dict[str, Any], methods=["POST"])
 async def generate_invoice(
     request: Request,
     subscription_service: SubscriptionService = Depends(get_subscription_service)
