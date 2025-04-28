@@ -5,6 +5,7 @@ import { TelegramAuth } from './components/TelegramAuth';
 import { v4 as uuidv4 } from 'uuid';
 import { Toaster, toast } from 'react-hot-toast';
 import { ClipLoader } from 'react-spinners';
+import SubscriptionWidget from './components/SubscriptionWidget';
 
 // Определяем базовый URL API
 // Так как фронтенд и API на одном домене, используем пустую строку
@@ -422,9 +423,11 @@ function App() {
   const [currentPostFormat, setCurrentPostFormat] = useState('');
   const [currentPostText, setCurrentPostText] = useState('');
 
+  // Добавляем состояние для подписки
+  const [showSubscription, setShowSubscription] = useState<boolean>(false);
+
   // --- ВОССТАНОВЛЕНО: Состояние для текущего месяца календаря --- 
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
-  // --- КОНЕЦ ВОССТАНОВЛЕНИЯ ---
 
   // --- ИЗМЕНЕНИЕ: Загрузка состояния ИЗ localStorage ПОСЛЕ аутентификации ---
   useEffect(() => {
@@ -1271,8 +1274,52 @@ function App() {
   return (
     <div className="app-container">
       <header className="app-header">
-        <h1>Smart Content Assistant</h1>
+        <div className="logo">Smart Content Assistant</div>
+        <div className="header-icons">
+          {/* Кнопка для управления подпиской */}
+          <button
+            className="icon-button"
+            onClick={() => setShowSubscription(!showSubscription)}
+            title="Управление подпиской"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+            </svg>
+          </button>
+          <button
+            className={`icon-button ${currentView === 'analyze' ? 'active' : ''}`}
+            onClick={() => {setCurrentView('analyze'); setShowSubscription(false);}}
+            title="Анализ канала"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M10 20H14V4H10V20ZM4 20H8V12H4V20ZM16 9V20H20V9H16Z" fill="currentColor"/>
+            </svg>
+          </button>
+          <button
+            className={`icon-button ${currentView === 'suggestions' ? 'active' : ''}`}
+            onClick={() => {setCurrentView('suggestions'); setShowSubscription(false);}}
+            title="Идеи для постов"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 22C6.477 22 2 17.523 2 12C2 6.477 6.477 2 12 2C17.523 2 22 6.477 22 12C22 17.523 17.523 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 7H13V9H11V7ZM11 11H13V17H11V11Z" fill="currentColor"/>
+            </svg>
+          </button>
+          <button
+            className={`icon-button ${currentView === 'calendar' ? 'active' : ''}`}
+            onClick={() => {setCurrentView('calendar'); setShowSubscription(false);}}
+            title="Календарь"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M17 3H21C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H7V1H9V3H15V1H17V3ZM4 9V19H20V9H4ZM4 5V7H20V5H4ZM6 11H8V13H6V11ZM10 11H12V13H10V11ZM14 11H16V13H14V11Z" fill="currentColor"/>
+            </svg>
+          </button>
+        </div>
       </header>
+      
+      {/* Блок подписки */}
+      {showSubscription && (
+        <SubscriptionWidget userId={userId} />
+      )}
 
       <main className="app-main">
         {/* Сообщения об ошибках и успешном выполнении */}
