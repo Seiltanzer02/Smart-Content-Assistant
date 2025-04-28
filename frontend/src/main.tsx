@@ -14,6 +14,96 @@ declare global {
   }
 }
 
+// Инициализация Telegram WebApp
+const initTelegramWebApp = () => {
+  console.log('Инициализация Telegram WebApp...');
+  
+  // Проверяем доступность Telegram WebApp - сначала нативный, потом SDK
+  if (window.Telegram && window.Telegram.WebApp) {
+    console.log('Найден window.Telegram.WebApp - используем нативный WebApp');
+    
+    // Сообщаем Telegram, что приложение готово
+    if (typeof window.Telegram.WebApp.ready === 'function') {
+      console.log('Вызываем window.Telegram.WebApp.ready()');
+      window.Telegram.WebApp.ready();
+    }
+    
+    // Расширяем функционал приложения
+    if (typeof window.Telegram.WebApp.expand === 'function') {
+      console.log('Расширяем WebApp на весь экран');
+      window.Telegram.WebApp.expand();
+    }
+    
+    // Настраиваем цвет верхней панели
+    if (window.Telegram.WebApp.setHeaderColor) {
+      window.Telegram.WebApp.setHeaderColor('#2481cc');
+    }
+    
+    // Устанавливаем обработчик получения данных от Telegram
+    if (typeof window.Telegram.WebApp.onEvent === 'function') {
+      // Обработка события изменения размера экрана
+      window.Telegram.WebApp.onEvent('viewportChanged', () => {
+        console.log('Viewport изменился');
+      });
+      
+      // Слушаем событие mainButtonClicked для обработки платежей
+      window.Telegram.WebApp.onEvent('mainButtonClicked', () => {
+        console.log('Клик по главной кнопке');
+      });
+      
+      // Важно: добавляем слушателя для обработки данных от Telegram
+      window.Telegram.WebApp.onEvent('data', (data: string) => {
+        console.log('Получены данные от Telegram:', data);
+        initDataHandler(data);
+      });
+      
+      // Обработка события popup_closed для обновления данных
+      window.Telegram.WebApp.onEvent('popup_closed', () => {
+        console.log('Popup закрыт, возможно требуется обновить данные');
+      });
+      
+      // Отслеживаем изменение темы
+      window.Telegram.WebApp.onEvent('themeChanged', () => {
+        console.log('Тема изменилась');
+      });
+    }
+  } else if (WebApp) {
+    console.log('Используем WebApp из @twa-dev/sdk');
+    console.log('WebApp объект:', WebApp);
+    
+    // Сообщаем Telegram, что приложение готово
+    WebApp.ready();
+    console.log('WebApp.ready() вызван');
+    
+    // Расширяем функционал приложения
+    WebApp.expand();
+    
+    // Устанавливаем обработчик событий для SDK версии
+    WebApp.onEvent('viewportChanged', () => {
+      console.log('Viewport изменился (SDK)');
+    });
+    
+    WebApp.onEvent('mainButtonClicked', () => {
+      console.log('Клик по главной кнопке (SDK)');
+    });
+    
+    // Слушаем событие data для SDK версии
+    // @ts-ignore - событие data может быть недоступно в типах, но поддерживается в SDK
+    WebApp.onEvent('data', (data: string) => {
+      console.log('Получены данные от Telegram (SDK):', data);
+      initDataHandler(data);
+    });
+    
+    // Обработка события popup_closed для обновления данных
+    // @ts-ignore - событие popup_closed может быть недоступно в типах, но поддерживается в SDK
+    WebApp.onEvent('popup_closed', () => {
+      console.log('Popup закрыт (SDK), возможно требуется обновить данные');
+    });
+  } else {
+    console.warn('WebApp не найден ни в window.Telegram, ни в @twa-dev/sdk');
+  }
+};
+
 // Инициализация обработчика данных для получения платежей
 const initDataHandler = async (data: string) => {
   console.log('initDataHandler: Вызван с данными:', data);
@@ -57,62 +147,10 @@ const initDataHandler = async (data: string) => {
   }
 };
 
+// Инициализируем Telegram WebApp
+initTelegramWebApp();
+
 const container = document.getElementById('root')
-
-console.log('main.tsx: Инициализация приложения');
-
-// Проверяем доступность Telegram WebApp - сначала нативный, потом SDK
-if (window.Telegram && window.Telegram.WebApp) {
-  console.log('main.tsx: Найден window.Telegram.WebApp - используем нативный WebApp');
-  
-  // Если есть нативный WebApp, вызываем его метод ready
-  if (typeof window.Telegram.WebApp.ready === 'function') {
-    console.log('main.tsx: Вызываем window.Telegram.WebApp.ready()');
-    window.Telegram.WebApp.ready();
-  }
-  
-  // Устанавливаем обработчик получения данных от Telegram
-  if (typeof window.Telegram.WebApp.onEvent === 'function') {
-    window.Telegram.WebApp.onEvent('viewportChanged', () => {
-      console.log('Viewport изменился');
-    });
-    
-    // Слушаем событие mainButtonClicked для обработки платежей
-    window.Telegram.WebApp.onEvent('mainButtonClicked', () => {
-      console.log('Клик по главной кнопке');
-    });
-    
-    // Важно: добавляем слушателя для обработки данных от Telegram
-    window.Telegram.WebApp.onEvent('data', (data: string) => {
-      console.log('Получены данные от Telegram:', data);
-      initDataHandler(data);
-    });
-  }
-} else if (WebApp) {
-  console.log('main.tsx: Используем WebApp из @twa-dev/sdk');
-  console.log('main.tsx: WebApp объект:', WebApp);
-  console.log('main.tsx: Вызываем WebApp.ready()');
-  WebApp.ready(); // Сообщаем Telegram, что приложение готово
-  console.log('main.tsx: WebApp.ready() вызван');
-  
-  // Устанавливаем обработчик событий для SDK версии
-  WebApp.onEvent('viewportChanged', () => {
-    console.log('Viewport изменился (SDK)');
-  });
-  
-  WebApp.onEvent('mainButtonClicked', () => {
-    console.log('Клик по главной кнопке (SDK)');
-  });
-  
-  // Слушаем событие data для SDK версии
-  // @ts-ignore - событие data может быть недоступно в типах, но поддерживается в SDK
-  WebApp.onEvent('data', (data: string) => {
-    console.log('Получены данные от Telegram (SDK):', data);
-    initDataHandler(data);
-  });
-} else {
-  console.warn('main.tsx: WebApp не найден ни в window.Telegram, ни в @twa-dev/sdk');
-}
 
 if (container) {
   const root = createRoot(container)
