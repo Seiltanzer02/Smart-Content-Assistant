@@ -126,36 +126,27 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const handleInvoiceGeneration = async (userId: number) => {
     try {
       setIsSubscribing(true);
-
-      if (window.Telegram?.WebApp?.openInvoice) {
-        window.Telegram.WebApp.openInvoice(
-          { slug: 'stars', amount: SUBSCRIPTION_PRICE },
-          (status) => {
-            // Этот callback будет вызван после завершения платежа
-            console.log('Статус платежа:', status);
-            if (status === 'paid') {
-              fetchSubscriptionStatus();
-              if (window.Telegram?.WebApp?.showPopup) {
-                window.Telegram.WebApp.showPopup({
-                  title: 'Успешная оплата',
-                  message: 'Ваша подписка Premium активирована!',
-                  buttons: [{ type: 'ok' }]
-                });
-              }
-            } else if (status === 'failed') {
-              setError('Оплата не удалась. Пожалуйста, попробуйте позже.');
-            } else if (status === 'cancelled') {
-              setError('Платеж был отменен.');
-            }
-            setIsSubscribing(false);
-          }
-        );
+      // Получаем invoice_url с backend
+      const data = await generateInvoice(userId, SUBSCRIPTION_PRICE);
+      if (data && data.invoice_url) {
+        // Открываем ссылку на оплату в новом окне
+        window.open(data.invoice_url, '_blank');
+        // Показываем popup с инструкцией
+        if (window.Telegram?.WebApp?.showPopup) {
+          window.Telegram.WebApp.showPopup({
+            title: 'Оплата',
+            message: 'После оплаты вернитесь в приложение и обновите статус подписки.',
+            buttons: [{ type: 'ok' }]
+          });
+        }
+        // Можно сразу обновить статус через fetchSubscriptionStatus, либо предложить пользователю нажать "Проверить подписку"
       } else {
-        throw new Error('Не удалось инициировать оплату через Telegram WebApp');
+        throw new Error('Не удалось получить ссылку для оплаты');
       }
     } catch (error) {
       console.error('Ошибка при генерации инвойса:', error);
       setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
+    } finally {
       setIsSubscribing(false);
     }
   };
