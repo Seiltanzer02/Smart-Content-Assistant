@@ -16,6 +16,7 @@ declare global {
 
 // Инициализация обработчика данных для получения платежей
 const initDataHandler = async (data: string) => {
+  console.log('initDataHandler: Вызван с данными:', data);
   try {
     // Предполагаем, что data - это JSON-строка, переданная от Telegram WebApp
     const parsedData = JSON.parse(data);
