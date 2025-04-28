@@ -42,14 +42,18 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
   
   const handleSubscribe = () => {
     // Проверяем наличие Telegram WebApp
+    console.log('handleSubscribe: Проверка наличия Telegram WebApp...');
     if (window.Telegram?.WebApp) {
+      console.log('handleSubscribe: Telegram WebApp найден. Отправка данных...');
       // Отправляем данные о подписке в Telegram
       window.Telegram.WebApp.sendData(JSON.stringify({
         type: "subscribe",
         tier: "premium_monthly",
         price: SUBSCRIPTION_PRICE
       }));
+      console.log('handleSubscribe: Данные отправлены.');
     } else {
+      console.error('handleSubscribe: Telegram WebApp не доступен!');
       setError('Telegram WebApp не доступен. Убедитесь, что вы открыли приложение в Telegram.');
     }
   };
