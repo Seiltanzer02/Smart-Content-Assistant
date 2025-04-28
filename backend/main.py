@@ -33,26 +33,14 @@ import requests
 from bs4 import BeautifulSoup
 import telethon
 import aiohttp
-from telegram_utils import get_telegram_posts, get_mock_telegram_posts, TelegramBotPaymentAPI, initialize_payment_bot
+from telegram_utils import get_telegram_posts, get_mock_telegram_posts
 import move_temp_files
-from datetime import datetime, timedelta
+from datetime import datetime
 import traceback
 # Убираем неиспользуемые импорты psycopg2
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
 # from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 import shutil # Добавляем импорт shutil
-from pathlib import Path
-from fastapi import FastAPI, Request, Response, HTTPException, Depends, File, UploadFile, Query
-from fastapi.responses import JSONResponse, FileResponse, RedirectResponse, HTMLResponse
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from starlette.responses import StreamingResponse
-from pydantic import BaseModel, Field, create_model, ValidationError
-import uvicorn
-import re
-import threading
-from telebot import types  # Импорт типов для обработки вебхуков от Telegram
-import telebot
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -2078,38 +2066,35 @@ async def fix_existing_ideas_formatting():
 # --- Запуск исправления форматирования при старте сервера ---
 @app.on_event("startup")
 async def startup_event():
-    logger.info("Запуск приложения...")
+    """Запуск обслуживающих процессов при старте приложения."""
+    logger.info("Запуск обслуживающих процессов...")
     
-    # Инициализация базы данных и проверка таблиц
-    try:
-        await check_db_tables()
-    except Exception as e:
-        logger.error(f"Ошибка при проверке таблиц БД: {e}")
-    
-    # Запускаем Telegram-бота в отдельном потоке
-    try:
-        import threading
-        from telegram_bot import bot, setup_webhook_on_startup
-        
-        # Настраиваем вебхук при запуске
-        setup_webhook_on_startup()
-        
-        def start_telegram_bot():
-            logger.info("Запуск Telegram-бота для подписок")
-            bot.polling(none_stop=True, interval=0, timeout=20)
-        
-        # Запускаем бота в отдельном потоке, если не используется webhook
-        webhook_url = os.environ.get("WEBHOOK_URL")
-        if not webhook_url:
-            # Если webhook не настроен, используем polling
-            bot_thread = threading.Thread(target=start_telegram_bot)
-            bot_thread.daemon = True  # Поток будет завершен при завершении основной программы
-            bot_thread.start()
-            logger.info("Telegram-бот успешно запущен в отдельном потоке (режим polling)")
+    # Проверка и добавление недостающих столбцов (оставляем существующую логику)
+    if supabase:
+        if not await check_db_tables():
+            logger.error("Ошибка при проверке таблиц в базе данных!")
+            # Продолжаем работу приложения даже при ошибке
         else:
-            logger.info(f"Telegram-бот настроен на работу через webhook: {webhook_url}")
-    except Exception as e:
-        logger.error(f"Ошибка при настройке Telegram-бота: {e}")
+            logger.info("Проверка таблиц базы данных завершена успешно.")
+    else:
+        logger.warning("Клиент Supabase не инициализирован, проверка таблиц пропущена.")
+    
+    # Исправление форматирования в JSON полях
+    # await fix_formatting_in_json_fields() # Отключаем временно, если не нужно
+    
+    logger.info("Обслуживающие процессы запущены успешно")
+
+    # --- ДОБАВЛЕНО: Вызов fix_schema при старте --- 
+    try:
+        fix_result = await fix_schema()
+        logger.info(f"Результат проверки/исправления схемы при старте: {fix_result}")
+        if not fix_result.get("success"):
+            logger.error("Ошибка при проверке/исправлении схемы БД при запуске!")
+            # Решите, следует ли прерывать запуск или нет.
+            # Пока продолжаем работу.
+    except Exception as schema_fix_error:
+        logger.error(f"Исключение при вызове fix_schema во время старта: {schema_fix_error}", exc_info=True)
+    # --- КОНЕЦ ДОБАВЛЕНИЯ ---
 
 # --- Функция для исправления форматирования в существующих постах ---
 async def fix_existing_posts_formatting():
@@ -3179,404 +3164,3 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     logger.info(f"Запуск сервера на порту {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
-
-# Модель запроса на создание подписки
-class SubscriptionRequest(BaseModel):
-    user_id: str
-
-# Модель ответа на создание подписки
-class SubscriptionResponse(BaseModel):
-    success: bool
-    message: str
-    invoice_url: Optional[str] = None
-
-# Модель запроса на проверку статуса подписки
-class SubscriptionStatusRequest(BaseModel):
-    user_id: str
-
-# Модель ответа на проверку статуса подписки
-class SubscriptionStatusResponse(BaseModel):
-    has_subscription: bool
-    expires_at: Optional[str] = None
-    free_analysis_count: Optional[int] = None
-    free_post_details_count: Optional[int] = None
-    message: Optional[str] = None
-
-# Эндпоинт для создания подписки
-@app.post("/create-subscription", response_model=SubscriptionResponse)
-async def create_subscription(request: Request, req: SubscriptionRequest):
-    """
-    Создание и получение ссылки на оплату подписки через Telegram Stars.
-    """
-    try:
-        # Получение telegram_user_id из заголовков
-        telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            logger.warning("Запрос создания подписки без идентификации пользователя Telegram")
-            return SubscriptionResponse(
-                success=False,
-                message="Для оформления подписки необходимо авторизоваться через Telegram"
-            )
-        
-        # Проверяем, совпадает ли ID в запросе с ID в заголовке
-        if telegram_user_id != req.user_id:
-            logger.warning(f"Несоответствие ID пользователя: в заголовке {telegram_user_id}, в запросе {req.user_id}")
-            return SubscriptionResponse(
-                success=False,
-                message="Несоответствие ID пользователя"
-            )
-        
-        # Инициализируем клиент для работы с API Telegram
-        payment_api = initialize_payment_bot()
-        if not payment_api:
-            return SubscriptionResponse(
-                success=False,
-                message="Не удалось инициализировать API для платежей"
-            )
-        
-        # Создаем описание цены подписки
-        prices = [{"label": "Подписка на 1 месяц", "amount": 7000}]  # 70 Stars
-        
-        # Создаем ссылку на инвойс для подписки
-        invoice_url = payment_api.create_invoice_link(
-            title="Подписка на Smart Content Assistant",
-            description="Доступ к полному функционалу сервиса на 1 месяц",
-            payload=f"sub_{telegram_user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
-            currency="XTR",
-            prices=prices,
-            subscription_period_days=30
-        )
-        
-        if not invoice_url:
-            return SubscriptionResponse(
-                success=False,
-                message="Не удалось создать ссылку на оплату. Пожалуйста, попробуйте позже."
-            )
-        
-        return SubscriptionResponse(
-            success=True,
-            message="Ссылка на оплату подписки успешно создана",
-            invoice_url=invoice_url
-        )
-    
-    except Exception as e:
-        logger.error(f"Ошибка при создании подписки: {str(e)}")
-        return SubscriptionResponse(
-            success=False,
-            message=f"Произошла ошибка при создании подписки: {str(e)}"
-        )
-
-# Эндпоинт для проверки статуса подписки
-@app.post("/check-subscription", response_model=SubscriptionStatusResponse)
-async def check_subscription(request: Request, req: SubscriptionStatusRequest):
-    """
-    Проверка текущего статуса подписки и лимитов пользователя.
-    """
-    try:
-        # Получение telegram_user_id из заголовков
-        telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            logger.warning("Запрос проверки подписки без идентификации пользователя Telegram")
-            return SubscriptionStatusResponse(
-                has_subscription=False,
-                message="Для проверки подписки необходимо авторизоваться через Telegram"
-            )
-        
-        # Проверяем, совпадает ли ID в запросе с ID в заголовке
-        if telegram_user_id != req.user_id:
-            logger.warning(f"Несоответствие ID пользователя: в заголовке {telegram_user_id}, в запросе {req.user_id}")
-            return SubscriptionStatusResponse(
-                has_subscription=False,
-                message="Несоответствие ID пользователя"
-            )
-        
-        # Проверка наличия таблицы app_users
-        try:
-            if not supabase:
-                logger.error("Клиент Supabase не инициализирован")
-                return SubscriptionStatusResponse(
-                    has_subscription=False,
-                    message="Ошибка подключения к базе данных"
-                )
-            
-            # Получаем данные о подписке пользователя
-            user_query = supabase.table("app_users").select("*").eq("user_id", telegram_user_id).execute()
-            
-            if not hasattr(user_query, 'data') or len(user_query.data) == 0:
-                # Пользователь не найден, создаем запись с дефолтными значениями
-                new_user = {
-                    "user_id": telegram_user_id,
-                    "free_analysis_count": 2,
-                    "free_post_details_count": 2
-                }
-                
-                insert_result = supabase.table("app_users").insert(new_user).execute()
-                
-                # Возвращаем информацию о новом пользователе без подписки
-                return SubscriptionStatusResponse(
-                    has_subscription=False,
-                    free_analysis_count=2,
-                    free_post_details_count=2,
-                    message="Пользователь создан с начальными лимитами"
-                )
-            
-            # Пользователь найден, проверяем его подписку
-            user_data = user_query.data[0]
-            
-            # Проверяем, активна ли подписка
-            now = datetime.now()
-            has_active_subscription = False
-            expires_at = None
-            
-            if user_data.get("subscription_expires_at"):
-                # Преобразуем строку в дату, если она не в datetime формате
-                if isinstance(user_data["subscription_expires_at"], str):
-                    subscription_expires_at = datetime.fromisoformat(user_data["subscription_expires_at"].replace("Z", "+00:00"))
-                else:
-                    subscription_expires_at = user_data["subscription_expires_at"]
-                
-                expires_at = subscription_expires_at.isoformat()
-                has_active_subscription = subscription_expires_at > now
-            
-            return SubscriptionStatusResponse(
-                has_subscription=has_active_subscription,
-                expires_at=expires_at,
-                free_analysis_count=user_data.get("free_analysis_count", 0),
-                free_post_details_count=user_data.get("free_post_details_count", 0),
-                message="Информация о подписке получена успешно"
-            )
-            
-        except Exception as db_error:
-            logger.error(f"Ошибка при проверке подписки в базе данных: {str(db_error)}")
-            return SubscriptionStatusResponse(
-                has_subscription=False,
-                message=f"Ошибка при проверке подписки в базе данных: {str(db_error)}"
-            )
-    
-    except Exception as e:
-        logger.error(f"Ошибка при проверке статуса подписки: {str(e)}")
-        return SubscriptionStatusResponse(
-            has_subscription=False,
-            message=f"Произошла ошибка при проверке подписки: {str(e)}"
-        )
-
-# Модель запроса на обновление лимитов
-class UpdateLimitsRequest(BaseModel):
-    user_id: str
-    action_type: str  # 'analysis' или 'post_details'
-
-# Модель ответа на обновление лимитов
-class UpdateLimitsResponse(BaseModel):
-    success: bool
-    message: str
-    remaining_count: Optional[int] = None
-
-# Эндпоинт для уменьшения счетчика бесплатных действий
-@app.post("/decrease-free-action", response_model=UpdateLimitsResponse)
-async def decrease_free_action(request: Request, req: UpdateLimitsRequest):
-    """
-    Уменьшение счетчика бесплатных действий после использования.
-    """
-    try:
-        # Получение telegram_user_id из заголовков
-        telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            logger.warning("Запрос уменьшения счетчика без идентификации пользователя Telegram")
-            return UpdateLimitsResponse(
-                success=False,
-                message="Для уменьшения счетчика необходимо авторизоваться через Telegram"
-            )
-        
-        # Проверяем, совпадает ли ID в запросе с ID в заголовке
-        if telegram_user_id != req.user_id:
-            logger.warning(f"Несоответствие ID пользователя: в заголовке {telegram_user_id}, в запросе {req.user_id}")
-            return UpdateLimitsResponse(
-                success=False,
-                message="Несоответствие ID пользователя"
-            )
-        
-        if req.action_type not in ["analysis", "post_details"]:
-            return UpdateLimitsResponse(
-                success=False,
-                message="Недопустимый тип действия. Допустимые значения: 'analysis', 'post_details'"
-            )
-        
-        # Проверка наличия записи пользователя и подписки
-        if not supabase:
-            logger.error("Клиент Supabase не инициализирован")
-            return UpdateLimitsResponse(
-                success=False,
-                message="Ошибка подключения к базе данных"
-            )
-        
-        # Получаем данные пользователя
-        user_query = supabase.table("app_users").select("*").eq("user_id", telegram_user_id).execute()
-        
-        if not hasattr(user_query, 'data') or len(user_query.data) == 0:
-            # Пользователь не найден, создаем с дефолтными значениями
-            new_user = {
-                "user_id": telegram_user_id,
-                "free_analysis_count": 2,
-                "free_post_details_count": 2
-            }
-            
-            insert_result = supabase.table("app_users").insert(new_user).execute()
-            user_data = new_user
-        else:
-            user_data = user_query.data[0]
-        
-        # Проверяем наличие активной подписки
-        now = datetime.now()
-        has_active_subscription = False
-        
-        if user_data.get("subscription_expires_at"):
-            # Преобразуем строку в дату, если она не в datetime формате
-            if isinstance(user_data["subscription_expires_at"], str):
-                subscription_expires_at = datetime.fromisoformat(user_data["subscription_expires_at"].replace("Z", "+00:00"))
-            else:
-                subscription_expires_at = user_data["subscription_expires_at"]
-            
-            has_active_subscription = subscription_expires_at > now
-        
-        # Если у пользователя активная подписка, не уменьшаем счетчик
-        if has_active_subscription:
-            return UpdateLimitsResponse(
-                success=True,
-                message="У пользователя активная подписка, счетчик не уменьшен",
-                remaining_count=-1  # -1 означает безлимитное использование
-            )
-        
-        # Уменьшаем соответствующий счетчик
-        field_name = f"free_{req.action_type}_count"
-        current_count = user_data.get(field_name, 0)
-        
-        if current_count <= 0:
-            return UpdateLimitsResponse(
-                success=False,
-                message=f"Достигнут лимит бесплатных действий типа '{req.action_type}'",
-                remaining_count=0
-            )
-        
-        # Уменьшаем счетчик
-        new_count = current_count - 1
-        update_data = {field_name: new_count}
-        
-        update_result = supabase.table("app_users").update(update_data).eq("user_id", telegram_user_id).execute()
-        
-        return UpdateLimitsResponse(
-            success=True,
-            message=f"Счетчик бесплатных действий типа '{req.action_type}' уменьшен",
-            remaining_count=new_count
-        )
-    
-    except Exception as e:
-        logger.error(f"Ошибка при уменьшении счетчика бесплатных действий: {str(e)}")
-        return UpdateLimitsResponse(
-            success=False,
-            message=f"Произошла ошибка при уменьшении счетчика: {str(e)}"
-        )
-
-# Модель запроса на обработку успешного платежа
-class PaymentSuccessRequest(BaseModel):
-    user_id: str
-    charge_id: str
-
-# Модель ответа на обработку успешного платежа
-class PaymentSuccessResponse(BaseModel):
-    success: bool
-    message: str
-    subscription_expires_at: Optional[str] = None
-
-# Эндпоинт для обработки успешного платежа
-@app.post("/process-payment-success", response_model=PaymentSuccessResponse)
-async def process_payment_success(request: Request, req: PaymentSuccessRequest):
-    """
-    Обработка успешного платежа за подписку и обновление статуса пользователя.
-    """
-    try:
-        # Получение telegram_user_id из заголовков
-        telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            logger.warning("Запрос обработки платежа без идентификации пользователя Telegram")
-            return PaymentSuccessResponse(
-                success=False,
-                message="Для обработки платежа необходимо авторизоваться через Telegram"
-            )
-        
-        # Проверяем, совпадает ли ID в запросе с ID в заголовке
-        if telegram_user_id != req.user_id:
-            logger.warning(f"Несоответствие ID пользователя: в заголовке {telegram_user_id}, в запросе {req.user_id}")
-            return PaymentSuccessResponse(
-                success=False,
-                message="Несоответствие ID пользователя"
-            )
-        
-        if not supabase:
-            logger.error("Клиент Supabase не инициализирован")
-            return PaymentSuccessResponse(
-                success=False,
-                message="Ошибка подключения к базе данных"
-            )
-        
-        # Получаем текущую дату и вычисляем дату окончания подписки (30 дней)
-        now = datetime.now()
-        subscription_expires_at = now + timedelta(days=30)
-        
-        # Проверяем, существует ли запись пользователя
-        user_query = supabase.table("app_users").select("*").eq("user_id", telegram_user_id).execute()
-        
-        if not hasattr(user_query, 'data') or len(user_query.data) == 0:
-            # Пользователь не найден, создаем новую запись с подпиской
-            new_user = {
-                "user_id": telegram_user_id,
-                "subscription_expires_at": subscription_expires_at.isoformat(),
-                "free_analysis_count": 2,
-                "free_post_details_count": 2
-            }
-            
-            insert_result = supabase.table("app_users").insert(new_user).execute()
-        else:
-            # Пользователь найден, обновляем дату окончания подписки
-            update_data = {
-                "subscription_expires_at": subscription_expires_at.isoformat()
-            }
-            
-            update_result = supabase.table("app_users").update(update_data).eq("user_id", telegram_user_id).execute()
-        
-        # Возвращаем успешный результат
-        return PaymentSuccessResponse(
-            success=True,
-            message="Подписка успешно активирована",
-            subscription_expires_at=subscription_expires_at.isoformat()
-        )
-    
-    except Exception as e:
-        logger.error(f"Ошибка при обработке успешного платежа: {str(e)}")
-        return PaymentSuccessResponse(
-            success=False,
-            message=f"Произошла ошибка при обработке платежа: {str(e)}"
-        )
-
-@app.post("/telegram-webhook")
-async def telegram_webhook(request: Request):
-    """
-    Обработчик вебхуков от Telegram API
-    """
-    # Получаем данные из запроса
-    try:
-        update_json = await request.json()
-        logger.info(f"Получен вебхук от Telegram: {update_json}")
-        
-        # Импортируем бота и передаем ему обновление
-        from telegram_bot import bot
-        
-        # Создаем объект Update для обработки
-        update = telebot.types.Update.de_json(update_json)
-        
-        # Передаем обновление боту для обработки
-        bot.process_new_updates([update])
-        
-        return {"ok": True}
-    except Exception as e:
-        logger.error(f"Ошибка при обработке вебхука от Telegram: {e}")
-        return {"ok": False, "error": str(e)}
