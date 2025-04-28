@@ -25,6 +25,18 @@ from dateutil.relativedelta import relativedelta
 # Загружаем переменные окружения
 load_dotenv()  # Загружаем переменные окружения из .env файла
 
+# Инициализация FastAPI приложения
+app = FastAPI()
+
+# Настройка CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 from services.subscription_service import SubscriptionService, FREE_ANALYSIS_LIMIT, FREE_POST_LIMIT, SUBSCRIPTION_PRICE, SUBSCRIPTION_DURATION_MONTHS
 
 # Настройка логирования
