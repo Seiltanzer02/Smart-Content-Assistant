@@ -197,14 +197,14 @@ app.add_middleware(
 
 @app.post("/generate-invoice", response_model=Dict[str, Any])
 async def generate_invoice(request: Request):
-    """Генерирует invoice_url через Telegram Bot API createInvoiceLink"""
+    """Генерирует invoice_url через Telegram Bot API createInvoiceLink (обычные платежи, не Stars)"""
     try:
         data = await request.json()
         if not data.get("user_id") or not data.get("amount"):
             raise HTTPException(status_code=400, detail="Отсутствуют обязательные параметры")
         user_id = data["user_id"]
         amount = int(data["amount"])
-        payment_id = f"stars_invoice_{int(time.time())}_{user_id}"
+        payment_id = f"invoice_{int(time.time())}_{user_id}"
         title = "Подписка Premium"
         description = "Подписка Premium на Smart Content Assistant на 1 месяц"
         bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
