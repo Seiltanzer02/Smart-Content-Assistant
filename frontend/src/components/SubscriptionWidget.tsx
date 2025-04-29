@@ -128,8 +128,8 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const handleInvoiceGeneration = async (userId: number) => {
     try {
       setIsSubscribing(true);
-      setShowManualPayButton(false);
       setInvoiceUrl(null);
+      setShowManualPayButton(false);
       // Запрашиваем invoice_url у backend
       const response = await fetch('/generate-invoice-link', {
         method: 'POST',
@@ -139,32 +139,15 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       const data = await response.json();
       if (data.success && data.invoice_url) {
         setInvoiceUrl(data.invoice_url);
-        let win: Window | null = null;
-        // Пробуем открыть окно оплаты
-        try {
-          win = window.open(data.invoice_url, '_blank');
-        } catch (e) {
-          // ignore
-        }
-        // Fallback для мобильных: если окно не открылось, пробуем через location.href
-        setTimeout(() => {
-          const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-          if (!win || win.closed || typeof win.closed === 'undefined') {
-            if (isMobile) {
-              window.location.href = data.invoice_url;
-            } else {
-              setShowManualPayButton(true);
-            }
-          }
-        }, 1200);
+        setShowManualPayButton(true);
         if (window.Telegram?.WebApp?.showPopup) {
           window.Telegram.WebApp.showPopup({
             title: 'Оплата',
-            message: 'Окно оплаты открыто. Если оно не появилось — нажмите кнопку ниже.',
+            message: 'Нажмите кнопку ниже, чтобы открыть окно оплаты.',
             buttons: [{ type: 'ok' }]
           });
         } else {
-          alert('Окно оплаты открыто. Если оно не появилось — нажмите кнопку ниже.');
+          alert('Нажмите кнопку ниже, чтобы открыть окно оплаты.');
         }
       } else {
         setError(data.message || 'Ошибка при генерации ссылки на оплату');
@@ -265,7 +248,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       {showManualPayButton && invoiceUrl && (
         <div className="manual-pay-block">
           <button className="subscribe-button" onClick={() => window.open(invoiceUrl, '_blank')}>
-            Открыть оплату вручную
+            Открыть оплату
           </button>
         </div>
       )}
