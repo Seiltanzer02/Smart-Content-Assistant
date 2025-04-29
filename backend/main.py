@@ -235,7 +235,7 @@ async def generate_invoice(request: Request):
 
 @app.post("/send-stars-invoice", response_model=Dict[str, Any])
 async def send_stars_invoice(request: Request):
-    """Отправляет invoice на оплату Stars через Telegram Bot API sendInvoice (provider_token='', currency='XTR')"""
+    """Отправляет invoice на оплату Stars через Telegram Bot API sendInvoice (provider_token='', currency='XTR'). amount — это количество Stars (целое число)."""
     try:
         data = await request.json()
         user_id = data.get("user_id")
@@ -245,6 +245,8 @@ async def send_stars_invoice(request: Request):
         bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
         if not bot_token:
             raise HTTPException(status_code=500, detail="TELEGRAM_BOT_TOKEN не задан в окружении")
+        # amount — это количество Stars, Telegram требует amount*100
+        stars_amount = int(amount)
         url = f"https://api.telegram.org/bot{bot_token}/sendInvoice"
         payload = {
             "chat_id": user_id,
@@ -253,7 +255,7 @@ async def send_stars_invoice(request: Request):
             "payload": f"stars_invoice_{user_id}_{int(time.time())}",
             "provider_token": "",  # ПУСТОЙ для Stars
             "currency": "XTR",
-            "prices": [{"label": "XTR", "amount": int(amount) * 100}],
+            "prices": [{"label": "XTR", "amount": stars_amount * 100}],
             "need_name": False,
             "need_email": False,
             "is_flexible": False,
