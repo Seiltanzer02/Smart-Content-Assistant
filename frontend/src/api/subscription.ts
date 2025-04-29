@@ -55,4 +55,24 @@ export const createSubscription = async (userId: string | null, paymentId?: stri
     console.error('Ошибка при создании подписки:', error);
     throw error;
   }
+};
+
+/**
+ * Генерирует инвойс для оплаты через Telegram
+ * @param userId ID пользователя Telegram
+ * @param amount Сумма платежа в Stars
+ * @returns Promise с данными инвойса, включая URL
+ */
+export const generateInvoice = async (userId: number, amount: number = 70) => {
+  try {
+    const response = await axios.post(`${API_URL}/generate-invoice`, {
+      user_id: userId,
+      amount
+    });
+    
+    return response.data;
+  } catch (error) {
+    console.error('Ошибка при генерации инвойса:', error);
+    throw error;
+  }
 }; 
