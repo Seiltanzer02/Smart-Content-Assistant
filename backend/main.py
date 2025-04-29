@@ -255,7 +255,7 @@ async def send_stars_invoice(request: Request):
             "payload": f"stars_invoice_{user_id}_{int(time.time())}",
             "provider_token": "",  # ПУСТОЙ для Stars
             "currency": "XTR",
-            "prices": [{"label": "XTR", "amount": stars_amount * 100}],
+            "prices": [{"label": "XTR", "amount": stars_amount}],  # <--- БЕЗ *100!
             "need_name": False,
             "need_email": False,
             "is_flexible": False,
