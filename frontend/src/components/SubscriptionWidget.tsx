@@ -130,7 +130,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       const response = await fetch('/send-stars-invoice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, amount: SUBSCRIPTION_PRICE })
+        body: JSON.stringify({ user_id: userId, amount: 70 })
       });
       const data = await response.json();
       if (data.success) {
@@ -143,6 +143,12 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
         } else {
           alert('Инвойс отправлен в чат с ботом. Проверьте Telegram и оплатите счёт.');
         }
+        // Свернуть WebApp после popup
+        setTimeout(() => {
+          if (window.Telegram?.WebApp?.close) {
+            window.Telegram.WebApp.close();
+          }
+        }, 300); // небольшая задержка чтобы popup успел показаться
       } else {
         setError(data.message || 'Ошибка при отправке инвойса');
       }
