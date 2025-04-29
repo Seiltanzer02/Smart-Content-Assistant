@@ -130,30 +130,35 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       setIsSubscribing(true);
       setInvoiceUrl(null);
       setShowManualPayButton(false);
-      // Запрашиваем invoice_url у backend
-      const response = await fetch('/generate-invoice-link', {
+      // Отправляем запрос на backend для отправки инвойса в чат
+      const response = await fetch('/send-stars-invoice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, amount: SUBSCRIPTION_PRICE })
       });
       const data = await response.json();
-      if (data.success && data.invoice_url) {
-        setInvoiceUrl(data.invoice_url);
-        setShowManualPayButton(true);
+      if (data.success) {
         if (window.Telegram?.WebApp?.showPopup) {
           window.Telegram.WebApp.showPopup({
             title: 'Оплата',
-            message: 'Нажмите кнопку ниже, чтобы открыть окно оплаты.',
+            message: 'Инвойс отправлен в чат с ботом. Откройте чат и оплатите подписку.',
             buttons: [{ type: 'ok' }]
+          }, () => {
+            if (window.Telegram?.WebApp?.close) {
+              window.Telegram.WebApp.close();
+            }
           });
         } else {
-          alert('Нажмите кнопку ниже, чтобы открыть окно оплаты.');
+          alert('Инвойс отправлен в чат с ботом. Откройте чат и оплатите подписку.');
+          if (window.Telegram?.WebApp?.close) {
+            window.Telegram.WebApp.close();
+          }
         }
       } else {
-        setError(data.message || 'Ошибка при генерации ссылки на оплату');
+        setError(data.message || 'Ошибка при отправке инвойса');
       }
     } catch (error) {
-      console.error('Ошибка при генерации invoice_url:', error);
+      console.error('Ошибка при отправке инвойса:', error);
       setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
     } finally {
       setIsSubscribing(false);
