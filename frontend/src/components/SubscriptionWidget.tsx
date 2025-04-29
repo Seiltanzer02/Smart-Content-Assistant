@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/SubscriptionWidget.css';
-import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice } from '../api/subscription';
+import { getUserSubscriptionStatus, SubscriptionStatus } from '../api/subscription';
 
 interface SubscriptionWidgetProps {
   userId: string | null;
@@ -17,8 +17,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 70; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
-  const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
-  const [showManualPayButton, setShowManualPayButton] = useState(false);
   
   // Инициализация и настройка Telegram WebApp
   useEffect(() => {
@@ -128,8 +126,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const handleInvoiceGeneration = async (userId: number) => {
     try {
       setIsSubscribing(true);
-      setInvoiceUrl(null);
-      setShowManualPayButton(false);
       // Отправляем запрос на backend для отправки инвойса в чат
       const response = await fetch('/send-stars-invoice', {
         method: 'POST',
@@ -248,13 +244,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
               </button>
             </div>
           )}
-        </div>
-      )}
-      {showManualPayButton && invoiceUrl && (
-        <div className="manual-pay-block">
-          <button className="subscribe-button" onClick={() => window.open(invoiceUrl, '_blank')}>
-            Открыть оплату
-          </button>
         </div>
       )}
     </div>
