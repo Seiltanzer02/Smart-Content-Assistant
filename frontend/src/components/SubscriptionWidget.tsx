@@ -17,6 +17,8 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 70; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
+  const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
+  const [showManualPayButton, setShowManualPayButton] = useState(false);
   
   // Инициализация и настройка Telegram WebApp
   useEffect(() => {
@@ -126,6 +128,8 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const handleInvoiceGeneration = async (userId: number) => {
     try {
       setIsSubscribing(true);
+      setShowManualPayButton(false);
+      setInvoiceUrl(null);
       // Запрашиваем invoice_url у backend
       const response = await fetch('/generate-invoice-link', {
         method: 'POST',
@@ -134,15 +138,33 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       });
       const data = await response.json();
       if (data.success && data.invoice_url) {
-        window.open(data.invoice_url, '_blank');
+        setInvoiceUrl(data.invoice_url);
+        let win: Window | null = null;
+        // Пробуем открыть окно оплаты
+        try {
+          win = window.open(data.invoice_url, '_blank');
+        } catch (e) {
+          // ignore
+        }
+        // Fallback для мобильных: если окно не открылось, пробуем через location.href
+        setTimeout(() => {
+          const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+          if (!win || win.closed || typeof win.closed === 'undefined') {
+            if (isMobile) {
+              window.location.href = data.invoice_url;
+            } else {
+              setShowManualPayButton(true);
+            }
+          }
+        }, 1200);
         if (window.Telegram?.WebApp?.showPopup) {
           window.Telegram.WebApp.showPopup({
             title: 'Оплата',
-            message: 'Окно оплаты открыто. После оплаты вернитесь в приложение и обновите статус подписки.',
+            message: 'Окно оплаты открыто. Если оно не появилось — нажмите кнопку ниже.',
             buttons: [{ type: 'ok' }]
           });
         } else {
-          alert('Окно оплаты открыто. После оплаты вернитесь в приложение и обновите статус подписки.');
+          alert('Окно оплаты открыто. Если оно не появилось — нажмите кнопку ниже.');
         }
       } else {
         setError(data.message || 'Ошибка при генерации ссылки на оплату');
@@ -238,6 +260,13 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
               </button>
             </div>
           )}
+        </div>
+      )}
+      {showManualPayButton && invoiceUrl && (
+        <div className="manual-pay-block">
+          <button className="subscribe-button" onClick={() => window.open(invoiceUrl, '_blank')}>
+            Открыть оплату вручную
+          </button>
         </div>
       )}
     </div>
