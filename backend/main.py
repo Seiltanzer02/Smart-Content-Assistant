@@ -195,9 +195,9 @@ app.add_middleware(
     expose_headers=["X-Telegram-User-Id"]  # Позволяем читать этот заголовок
 )
 
-@app.post("/generate-invoice", response_model=Dict[str, Any])
-async def generate_invoice(request: Request):
-    """Генерирует invoice на Stars (XTR) через sendInvoice, provider_token пустой, amount без умножения на 1000"""
+@app.post("/generate-invoice-link", response_model=Dict[str, Any])
+async def generate_invoice_link(request: Request):
+    """Генерирует invoice_url через Telegram Bot API createInvoiceLink для Stars (provider_token='', currency='XTR')"""
     try:
         data = await request.json()
         user_id = data.get("user_id")
@@ -206,32 +206,29 @@ async def generate_invoice(request: Request):
             raise HTTPException(status_code=400, detail="user_id и amount обязательны")
         bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
         if not bot_token:
-            raise HTTPException(status_code=500, detail="TELEGRAM_BOT_TOKEN не задан")
-        url = f"https://api.telegram.org/bot{bot_token}/sendInvoice"
+            raise HTTPException(status_code=500, detail="TELEGRAM_BOT_TOKEN не задан в окружении")
+        url = f"https://api.telegram.org/bot{bot_token}/createInvoiceLink"
         payload = {
-            "chat_id": user_id,
             "title": "Подписка Premium",
             "description": "Подписка Premium на 1 месяц",
             "payload": f"stars_invoice_{user_id}_{int(time.time())}",
             "provider_token": "",  # ПУСТОЙ для Stars
             "currency": "XTR",
-            # amount указываем БЕЗ умножения на 1000 (Telegram сам ожидает количество Stars)
+            # amount — количество Stars (без умножения на 1000)
             "prices": [{"label": "XTR", "amount": int(amount)}],
-            "need_name": False,
-            "need_email": False,
-            "is_flexible": False,
             "photo_url": "https://smart-content-assistant.onrender.com/static/premium_sub.jpg"
         }
         async with httpx.AsyncClient() as client:
             response = await client.post(url, json=payload)
             tg_data = response.json()
             if not tg_data.get("ok"):
-                logger.error(f"Ошибка Telegram API: {tg_data}")
-                raise HTTPException(status_code=500, detail=f"Ошибка Telegram API: {tg_data}")
-        return {"success": True, "message": "Инвойс отправлен в чат с ботом. Проверьте Telegram и оплатите счёт."}
+                logger.error(f"Ошибка Telegram API createInvoiceLink: {tg_data}")
+                return {"success": False, "message": f"Ошибка Telegram API: {tg_data}"}
+            invoice_url = tg_data["result"]
+        return {"success": True, "invoice_url": invoice_url}
     except Exception as e:
-        logger.error(f"Ошибка при генерации инвойса: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка при генерации инвойса: {str(e)}")
+        logger.error(f"Ошибка при генерации invoice_url: {e}")
+        return {"success": False, "message": f"Ошибка: {str(e)}"}
 
 @app.post("/send-stars-invoice", response_model=Dict[str, Any])
 async def send_stars_invoice(request: Request):
