@@ -3296,8 +3296,6 @@ async def start_aiogram_bot():
 # --- Запуск FastAPI и aiogram вместе ---
 if __name__ == "__main__":
     import uvicorn
-    loop = asyncio.get_event_loop()
-    loop.create_task(start_aiogram_bot())
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
 
 @app.post("/webhook")
