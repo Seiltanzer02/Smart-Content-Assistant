@@ -41,6 +41,7 @@ import traceback
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
 # from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 import shutil # Добавляем импорт shutil
+import inspect
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -3300,9 +3301,22 @@ if __name__ == "__main__":
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
-    update = types.Update.model_validate_json(await request.body())
-    await dp.feed_update(bot, update)
-    return {"ok": True}
+    logger.info(f"[WEBHOOK] Вызван endpoint /webhook! method={request.method}, url={request.url}, headers={dict(request.headers)}")
+    try:
+        update = types.Update.model_validate_json(await request.body())
+        await dp.feed_update(bot, update)
+        logger.info("[WEBHOOK] Update успешно обработан aiogram!")
+        return {"ok": True, "message": "Webhook endpoint вызван и обработан!"}
+    except Exception as e:
+        logger.error(f"[WEBHOOK] Ошибка при обработке webhook: {e}")
+        return {"ok": False, "error": str(e)}
+
+# --- Логируем все зарегистрированные маршруты при старте ---
+@app.on_event("startup")
+async def log_routes_on_startup():
+    logger.info("[STARTUP] Приложение запущено. Список зарегистрированных маршрутов:")
+    for route in app.routes:
+        logger.info(f"[ROUTE] {route.path} | methods={getattr(route, 'methods', None)} | name={route.name}")
 
 # --- Монтирование статики и SPA catch-all ---
 # Оставляем только один app.mount("/", ...), если static_folder существует
