@@ -3293,11 +3293,18 @@ async def bot_webhook(request: Request):
     return {"ok": True}
 
 @app.get("/subscription/status")
-async def subscription_status(user_id: int):
+async def subscription_status(request: Request):
     """
     Проверка статуса подписки пользователя.
     Возвращает: {is_active: bool, end_date: str | None, has_subscription: bool}
     """
+    telegram_user_id = request.headers.get("X-Telegram-User-Id")
+    if not telegram_user_id:
+        return {"is_active": False, "end_date": None, "has_subscription": False}
+    try:
+        user_id = int(telegram_user_id)
+    except Exception:
+        return {"is_active": False, "end_date": None, "has_subscription": False}
     try:
         if not supabase:
             return {"is_active": False, "end_date": None, "has_subscription": False}
