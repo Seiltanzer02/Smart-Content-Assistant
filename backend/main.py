@@ -1689,17 +1689,15 @@ async def delete_post(post_id: str, request: Request):
 # --- Настраиваем обработку всех путей SPA для обслуживания статических файлов (в конце файла) ---
 @app.get("/{rest_of_path:path}")
 async def serve_spa(rest_of_path: str):
-    """Обслуживает все запросы к путям SPA, возвращая index.html"""
-    # Проверяем, есть ли запрошенный файл
-    if SHOULD_MOUNT_STATIC:
-        file_path = os.path.join(static_folder, rest_of_path)
-        if os.path.exists(file_path) and os.path.isfile(file_path):
-            return FileResponse(file_path)
-        
-        # Если файл не найден, возвращаем index.html для поддержки SPA-роутинга
-        return FileResponse(os.path.join(static_folder, "index.html"))
+    """
+    Обслуживает все запросы к путям SPA, возвращая index.html
+    """
+    static_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
+    index_path = os.path.join(static_folder, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
     else:
-        return {"message": "API работает, но статические файлы не настроены. Обратитесь к API напрямую."}
+        return {"message": "Index file not found"}
 
 # --- Функция для генерации ключевых слов для поиска изображений ---
 async def generate_image_keywords(text: str, topic: str, format_style: str) -> List[str]:
