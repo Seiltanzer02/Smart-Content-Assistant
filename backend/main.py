@@ -3304,3 +3304,35 @@ async def telegram_webhook(request: Request):
     await dp.feed_update(bot, update)
     return {"ok": True}
 
+# --- Монтирование статики и SPA catch-all ---
+# Оставляем только один app.mount("/", ...), если static_folder существует
+if SHOULD_MOUNT_STATIC:
+    logger.info(f"Статические файлы SPA будут обслуживаться из папки: {static_folder}")
+    try:
+        app.mount("/", StaticFiles(directory=static_folder, html=True), name="static-spa")
+        logger.info(f"Статические файлы SPA успешно смонтированы в корневом пути '/' (после всех API endpoints)")
+
+        # Catch-all роут для SPA (после всех API endpoints и /webhook)
+        @app.get("/{rest_of_path:path}")
+        async def serve_spa_catch_all(request: Request, rest_of_path: str):
+            if rest_of_path.startswith("api/") or \
+               rest_of_path.startswith("docs") or \
+               rest_of_path.startswith("openapi.json") or \
+               rest_of_path.startswith("uploads/") or \
+               rest_of_path == "webhook":
+                raise HTTPException(status_code=404, detail="Not Found (SPA Catch-all exclusion)")
+            index_path = os.path.join(static_folder, "index.html")
+            if os.path.exists(index_path):
+                return FileResponse(index_path)
+            else:
+                logger.error(f"Файл index.html не найден в {static_folder} для пути {rest_of_path}")
+                raise HTTPException(status_code=404, detail="Index file not found")
+        logger.info("Обработчики для SPA настроены.")
+    except RuntimeError as mount_error:
+        logger.error(f"Ошибка при монтировании статических файлов SPA: {mount_error}. Возможно, имя 'static-spa' уже используется или путь '/' занят.")
+    except Exception as e:
+        logger.error(f"Непредвиденная ошибка при монтировании статических файлов SPA: {e}")
+else:
+    logger.warning(f"Папка статических файлов SPA не найдена: {static_folder}")
+    logger.warning("Обслуживание SPA фронтенда не настроено. Только API endpoints доступны.")
+
