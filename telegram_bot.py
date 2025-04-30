@@ -87,10 +87,11 @@ app = web.Application()
 app.on_startup.append(on_startup)
 SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/bot")
 
-if __name__ == "__main__":
-    # Для запуска на Render используйте тот же порт, что и FastAPI (например, через gunicorn/uvicorn)
-    # aiohttp web app можно смонтировать в FastAPI через ASGI/WSGI bridge, если нужно
-    web.run_app(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+# --- В КОНЦЕ ФАЙЛА ---
+# УДАЛЯЕМ:
+# if __name__ == "__main__":
+#     web.run_app(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+# Теперь telegram_bot.py просто экспортирует app
 
 # ---
 # Требуемая зависимость:
