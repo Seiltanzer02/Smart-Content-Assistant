@@ -12,4 +12,3 @@ beautifulsoup4
 python-unsplash
 gunicorn
 python-telegram-bot
-aiogram==3.7.0
