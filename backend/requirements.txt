@@ -7,8 +7,10 @@ openai
 supabase
 telethon # Добавляем Telethon
 httpx # Добавляем httpx 
+aiohttp
 python-multipart
 beautifulsoup4
 python-unsplash
 gunicorn
 python-telegram-bot
+aiogram
