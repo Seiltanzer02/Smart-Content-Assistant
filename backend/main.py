@@ -42,7 +42,7 @@ import traceback
 # from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 import shutil # Добавляем импорт shutil
 from fastapi.middleware.wsgi import WSGIMiddleware
-from telegram_bot import app as telegram_aiohttp_app
+# from telegram_bot import app as telegram_aiohttp_app
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
