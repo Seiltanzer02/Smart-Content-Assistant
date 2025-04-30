@@ -35,7 +35,7 @@ import telethon
 import aiohttp
 from telegram_utils import get_telegram_posts, get_mock_telegram_posts
 import move_temp_files
-from datetime import datetime
+from datetime import datetime, timedelta
 import traceback
 # Убираем неиспользуемые импорты psycopg2
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
@@ -3241,4 +3241,54 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     logger.info(f"Запуск сервера на порту {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
+
+@app.post("/bot/webhook")
+async def bot_webhook(request: Request):
+    data = await request.json()
+    logger.info(f"Получен webhook от бота: {data}")
+
+    # Проверяем успешный платеж
+    if "message" in data and "successful_payment" in data["message"]:
+        message = data["message"]
+        payment = message["successful_payment"]
+        payload = payment["invoice_payload"]
+        user_id = message["from"]["id"]
+
+        # Проверяем, что это наш инвойс Stars
+        if payload.startswith("stars_invoice_"):
+            try:
+                now = datetime.utcnow()
+                new_end = now + timedelta(days=30)
+                # Деактивируем старые активные подписки
+                if supabase:
+                    supabase.table("user_subscription").update({
+                        "is_active": False,
+                        "updated_at": now.isoformat()
+                    }).eq("user_id", user_id).eq("is_active", True).execute()
+                    # Создаём новую активную подписку
+                    supabase.table("user_subscription").insert({
+                        "user_id": user_id,
+                        "start_date": now.isoformat(),
+                        "end_date": new_end.isoformat(),
+                        "payment_id": payload,
+                        "is_active": True,
+                        "created_at": now.isoformat(),
+                        "updated_at": now.isoformat()
+                    }).execute()
+                    logger.info(f"Подписка успешно активирована/продлена для пользователя {user_id}")
+                else:
+                    logger.error("Supabase не инициализирован, не удалось активировать подписку!")
+                # Отправляем сообщение пользователю
+                bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+                if bot_token:
+                    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                    payload_msg = {
+                        "chat_id": user_id,
+                        "text": "Спасибо за оплату! Ваша подписка активирована на 30 дней."
+                    }
+                    async with httpx.AsyncClient() as client:
+                        await client.post(url, json=payload_msg)
+            except Exception as e:
+                logger.error(f"Ошибка при активации подписки: {e}")
+    return {"ok": True}
 
