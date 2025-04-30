@@ -3300,7 +3300,7 @@ if __name__ == "__main__":
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
-    body = await request.body()
-    await dp.feed_webhook_update(bot, body, request.headers)
+    update = types.Update.model_validate_json(await request.body())
+    await dp.feed_update(bot, update)
     return {"ok": True}
 
