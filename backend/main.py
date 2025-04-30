@@ -281,7 +281,7 @@ from fastapi.staticfiles import StaticFiles
 static_folder = os.path.join(os.path.dirname(__file__), "static")
 
 # ФЛАГ для монтирования статики в конце файла
-SHOULD_MOUNT_STATIC = os.path.exists(static_folder)
+SHOULD_MOUNT_STATIC = os.path.exists(static_folder) and os.path.isdir(static_folder)
 # НОВЫЙ ФЛАГ, указывающий, что мы уже настроили маршруты SPA
 SPA_ROUTES_CONFIGURED = False
 
@@ -1183,13 +1183,7 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
         )
 
 # --- Настройка обработки корневого маршрута для обслуживания статических файлов ---
-@app.get("/")
-async def root():
-    """Обслуживание корневого маршрута - возвращает index.html"""
-    if SHOULD_MOUNT_STATIC:
-        return FileResponse(os.path.join(static_folder, "index.html"))
-    else:
-        return {"message": "API работает, но статические файлы не настроены. Обратитесь к API напрямую."}
+
 
 # --- ДОБАВЛЯЕМ API ЭНДПОИНТЫ ДЛЯ РАБОТЫ С ПОСТАМИ ---
 @app.get("/posts", response_model=List[SavedPostResponse])
@@ -1686,21 +1680,6 @@ async def delete_post(post_id: str, request: Request):
     except Exception as e:
         logger.error(f"Ошибка при удалении поста: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера при удалении поста: {str(e)}")
-
-# --- Настраиваем обработку всех путей SPA для обслуживания статических файлов (в конце файла) ---
-@app.get("/{rest_of_path:path}")
-async def serve_spa(rest_of_path: str):
-    """Обслуживает все запросы к путям SPA, возвращая index.html"""
-    # Проверяем, есть ли запрошенный файл
-    if SHOULD_MOUNT_STATIC:
-        file_path = os.path.join(static_folder, rest_of_path)
-        if os.path.exists(file_path) and os.path.isfile(file_path):
-            return FileResponse(file_path)
-        
-        # Если файл не найден, возвращаем index.html для поддержки SPA-роутинга
-        return FileResponse(os.path.join(static_folder, "index.html"))
-    else:
-        return {"message": "API работает, но статические файлы не настроены. Обратитесь к API напрямую."}
 
 # --- Функция для генерации ключевых слов для поиска изображений ---
 async def generate_image_keywords(text: str, topic: str, format_style: str) -> List[str]:
@@ -3185,58 +3164,6 @@ static_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fronte
 # ФЛАГ для монтирования статики в конце файла
 SHOULD_MOUNT_STATIC = os.path.exists(static_folder) and os.path.isdir(static_folder)
 
-if SHOULD_MOUNT_STATIC:
-    logger.info(f"Статические файлы SPA будут обслуживаться из папки: {static_folder}")
-    try: # ИСПРАВЛЕНО: Добавлен блок try...except
-        app.mount("/", StaticFiles(directory=static_folder, html=True), name="static-spa") # ИСПРАВЛЕНО: Убраны лишние `\`
-        logger.info(f"Статические файлы SPA успешно смонтированы в корневом пути '/'")
-
-        # Явно добавим обработчик для корневого пути, если StaticFiles не справляется
-        @app.get("/") # ИСПРАВЛЕНО: Убраны лишние `\`
-        async def serve_index():
-            index_path = os.path.join(static_folder, "index.html")
-            if os.path.exists(index_path):
-                 return FileResponse(index_path)
-            else:
-                 logger.error(f"Файл index.html не найден в {static_folder}")
-                 raise HTTPException(status_code=404, detail="Index file not found")
-
-        # Обработчик для всех остальных путей SPA (если StaticFiles(html=True) недостаточно)
-        # Этот обработчик ПЕРЕХВАТИТ все, что не было перехвачено ранее (/api, /uploads, etc.)
-        @app.get("/{rest_of_path:path}") # ИСПРАВЛЕНО: Убраны лишние `\`
-        async def serve_spa_catch_all(request: Request, rest_of_path: str):
-            # Исключаем API пути, чтобы избежать конфликтов (на всякий случай)
-            # Проверяем, не начинается ли путь с /api/, /docs, /openapi.json или /uploads/
-            if rest_of_path.startswith("api/") or \
-               rest_of_path.startswith("docs") or \
-               rest_of_path.startswith("openapi.json") or \
-               rest_of_path.startswith("uploads/"):
-                 # Этот код не должен выполняться, т.к. роуты API/docs/uploads определены выше, но для надежности
-                 # Логируем попытку доступа к API через SPA catch-all
-                 logger.debug(f"Запрос к '{rest_of_path}' перехвачен SPA catch-all, но проигнорирован (API/Docs/Uploads).")
-                 # Важно вернуть 404, чтобы FastAPI мог найти правильный обработчик, если он есть
-                 raise HTTPException(status_code=404, detail="Not Found (SPA Catch-all exclusion)")
-
-
-            index_path = os.path.join(static_folder, "index.html")
-            if os.path.exists(index_path):
-                # Логируем возврат index.html для SPA пути
-                logger.debug(f"Возвращаем index.html для SPA пути: '{rest_of_path}'")
-                return FileResponse(index_path)
-            else:
-                logger.error(f"Файл index.html не найден в {static_folder} для пути {rest_of_path}")
-                raise HTTPException(status_code=404, detail="Index file not found")
-
-        logger.info("Обработчики для SPA настроены.")
-
-    except RuntimeError as mount_error: # ИСПРАВЛЕНО: Добавлен блок except
-        logger.error(f"Ошибка при монтировании статических файлов SPA: {mount_error}. Возможно, имя 'static-spa' уже используется или путь '/' занят.")
-    except Exception as e: # ИСПРАВЛЕНО: Добавлен блок except
-        logger.error(f"Непредвиденная ошибка при монтировании статических файлов SPA: {e}")
-else:
-    logger.warning(f"Папка статических файлов SPA не найдена: {static_folder}")
-    logger.warning("Обслуживание SPA фронтенда не настроено. Только API endpoints доступны.")
-
 # --- Запуск сервера (обычно в конце файла) ---
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
@@ -3293,12 +3220,7 @@ async def start_aiogram_bot():
     import logging
     logging.basicConfig(level=logging.INFO)
     await dp.start_polling(bot)
-
-# --- Запуск FastAPI и aiogram вместе ---
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
-
+    
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     logger.info(f"[WEBHOOK] Вызван endpoint /webhook! method={request.method}, url={request.url}, headers={dict(request.headers)}")
@@ -3310,6 +3232,13 @@ async def telegram_webhook(request: Request):
     except Exception as e:
         logger.error(f"[WEBHOOK] Ошибка при обработке webhook: {e}")
         return {"ok": False, "error": str(e)}
+
+# --- Запуск FastAPI и aiogram вместе ---
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
+
+
 
 # --- Логируем все зарегистрированные маршруты при старте ---
 @app.on_event("startup")
