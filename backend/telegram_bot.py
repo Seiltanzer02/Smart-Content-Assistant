@@ -3,8 +3,6 @@ import asyncio
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, PreCheckoutQuery, LabeledPrice
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiohttp import web
 import httpx
 from datetime import datetime, timedelta
 
@@ -77,21 +75,9 @@ async def success_payment_handler(message: Message):
         return
     await message.answer("🥳 Спасибо за покупку подписки! Ваш Premium активирован.")
 
-# --- Запуск через webhook (на одном сервере с FastAPI) ---
-async def on_startup(app):
-    # Установите webhook Telegram на https://smart-content-assistant.onrender.com/bot
-    webhook_url = "https://smart-content-assistant.onrender.com/bot"
-    await bot.set_webhook(webhook_url)
-
-app = web.Application()
-app.on_startup.append(on_startup)
-SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/bot")
-
-# --- В КОНЦЕ ФАЙЛА ---
-# УДАЛЯЕМ:
-# if __name__ == "__main__":
-#     web.run_app(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
-# Теперь telegram_bot.py просто экспортирует app
+# --- Запуск long polling ---
+if __name__ == "__main__":
+    asyncio.run(dp.start_polling(bot))
 
 # ---
 # Требуемая зависимость:
