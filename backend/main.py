@@ -3300,3 +3300,9 @@ if __name__ == "__main__":
     loop.create_task(start_aiogram_bot())
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
 
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    body = await request.body()
+    await dp.feed_webhook_update(bot, body, request.headers)
+    return {"ok": True}
+
