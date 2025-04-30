@@ -3293,22 +3293,31 @@ async def bot_webhook(request: Request):
     return {"ok": True}
 
 @app.get("/subscription/status")
-async def subscription_status(request: Request):
+async def subscription_status(request: Request, user_id: int = None):
     """
     Проверка статуса подписки пользователя.
-    Возвращает: {is_active: bool, end_date: str | None, has_subscription: bool}
+    user_id можно передать либо как query (?user_id=), либо через заголовок X-Telegram-User-Id.
+    Всегда возвращает корректный JSON.
     """
-    telegram_user_id = request.headers.get("X-Telegram-User-Id")
-    if not telegram_user_id:
-        return {"is_active": False, "end_date": None, "has_subscription": False}
-    try:
-        user_id = int(telegram_user_id)
-    except Exception:
-        return {"is_active": False, "end_date": None, "has_subscription": False}
+    # 1. Пробуем взять user_id из query
+    if user_id is not None:
+        try:
+            user_id = int(user_id)
+        except Exception:
+            return {"is_active": False, "end_date": None, "has_subscription": False, "error": "Некорректный user_id в query"}
+    else:
+        # 2. Пробуем взять user_id из заголовка
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if telegram_user_id:
+            try:
+                user_id = int(telegram_user_id)
+            except Exception:
+                return {"is_active": False, "end_date": None, "has_subscription": False, "error": "Некорректный user_id в заголовке"}
+        else:
+            return {"is_active": False, "end_date": None, "has_subscription": False, "error": "user_id не передан ни в query, ни в заголовке"}
     try:
         if not supabase:
-            return {"is_active": False, "end_date": None, "has_subscription": False}
-        # Получаем активную подписку
+            return {"is_active": False, "end_date": None, "has_subscription": False, "error": "БД недоступна"}
         result = supabase.table("user_subscription")\
             .select("end_date, is_active")\
             .eq("user_id", user_id)\
