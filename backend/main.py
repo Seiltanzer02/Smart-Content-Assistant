@@ -3292,3 +3292,43 @@ async def bot_webhook(request: Request):
                 logger.error(f"Ошибка при активации подписки: {e}")
     return {"ok": True}
 
+@app.get("/subscription/status")
+async def subscription_status(user_id: int):
+    """
+    Проверка статуса подписки пользователя.
+    Возвращает: {is_active: bool, end_date: str | None, has_subscription: bool}
+    """
+    try:
+        if not supabase:
+            return {"is_active": False, "end_date": None, "has_subscription": False}
+        # Получаем активную подписку
+        result = supabase.table("user_subscription")\
+            .select("end_date, is_active")\
+            .eq("user_id", user_id)\
+            .eq("is_active", True)\
+            .order("end_date", desc=True)\
+            .limit(1)\
+            .execute()
+        if hasattr(result, 'data') and result.data:
+            sub = result.data[0]
+            is_active = sub.get("is_active", False)
+            end_date = sub.get("end_date")
+            return {
+                "is_active": is_active,
+                "end_date": end_date,
+                "has_subscription": True
+            }
+        else:
+            return {
+                "is_active": False,
+                "end_date": None,
+                "has_subscription": False
+            }
+    except Exception as e:
+        return {
+            "is_active": False,
+            "end_date": None,
+            "has_subscription": False,
+            "error": str(e)
+        }
+
