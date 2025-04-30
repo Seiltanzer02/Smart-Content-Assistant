@@ -35,7 +35,7 @@ import telethon
 import aiohttp
 from telegram_utils import get_telegram_posts, get_mock_telegram_posts
 import move_temp_files
-from datetime import datetime, timedelta
+from datetime import datetime
 import traceback
 # Убираем неиспользуемые импорты psycopg2
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
@@ -1689,15 +1689,17 @@ async def delete_post(post_id: str, request: Request):
 # --- Настраиваем обработку всех путей SPA для обслуживания статических файлов (в конце файла) ---
 @app.get("/{rest_of_path:path}")
 async def serve_spa(rest_of_path: str):
-    """
-    Обслуживает все запросы к путям SPA, возвращая index.html
-    """
-    static_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
-    index_path = os.path.join(static_folder, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
+    """Обслуживает все запросы к путям SPA, возвращая index.html"""
+    # Проверяем, есть ли запрошенный файл
+    if SHOULD_MOUNT_STATIC:
+        file_path = os.path.join(static_folder, rest_of_path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        
+        # Если файл не найден, возвращаем index.html для поддержки SPA-роутинга
+        return FileResponse(os.path.join(static_folder, "index.html"))
     else:
-        return {"message": "Index file not found"}
+        return {"message": "API работает, но статические файлы не настроены. Обратитесь к API напрямую."}
 
 # --- Функция для генерации ключевых слов для поиска изображений ---
 async def generate_image_keywords(text: str, topic: str, format_style: str) -> List[str]:
@@ -3240,119 +3242,61 @@ if __name__ == "__main__":
     logger.info(f"Запуск сервера на порту {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
 
-@app.post("/bot/webhook")
-async def bot_webhook(request: Request):
-    data = await request.json()
-    logger.info(f"Получен webhook от бота: {data}")
+# === AIogram интеграция для оплаты Stars ===
+import asyncio
+from datetime import datetime, timedelta
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import PreCheckoutQuery, Message
+from aiogram.filters import Command
+from supabase import create_client
 
-    # Проверяем успешный платеж
-    if "message" in data and "successful_payment" in data["message"]:
-        message = data["message"]
-        payment = message["successful_payment"]
-        payload = payment["invoice_payload"]
-        user_id = message["from"]["id"]
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 
-        # Проверяем, что это наш инвойс Stars
-        if payload.startswith("stars_invoice_"):
-            try:
-                now = datetime.utcnow()
-                new_end = now + timedelta(days=30)
-                # Деактивируем старые активные подписки
-                if supabase:
-                    supabase.table("user_subscription").update({
-                        "is_active": False,
-                        "updated_at": now.isoformat()
-                    }).eq("user_id", user_id).eq("is_active", True).execute()
-                    # Создаём новую активную подписку
-                    supabase.table("user_subscription").insert({
-                        "user_id": user_id,
-                        "start_date": now.isoformat(),
-                        "end_date": new_end.isoformat(),
-                        "payment_id": payload,
-                        "is_active": True,
-                        "created_at": now.isoformat(),
-                        "updated_at": now.isoformat()
-                    }).execute()
-                    logger.info(f"Подписка успешно активирована/продлена для пользователя {user_id}")
-                else:
-                    logger.error("Supabase не инициализирован, не удалось активировать подписку!")
-                # Отправляем сообщение пользователю
-                bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-                if bot_token:
-                    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-                    payload_msg = {
-                        "chat_id": user_id,
-                        "text": "Спасибо за оплату! Ваша подписка активирована на 30 дней."
-                    }
-                    async with httpx.AsyncClient() as client:
-                        await client.post(url, json=payload_msg)
-            except Exception as e:
-                logger.error(f"Ошибка при активации подписки: {e}")
-    return {"ok": True}
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
+dp = Dispatcher()
+supabase_aiogram = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-@app.get("/subscription/status")
-async def subscription_status(request: Request, user_id: int = None):
-    """
-    Проверка статуса подписки пользователя.
-    user_id можно передать либо как query (?user_id=), либо через заголовок X-Telegram-User-Id.
-    Всегда возвращает корректный JSON.
-    """
-    # 1. Пробуем взять user_id из query
-    if user_id is not None:
-        try:
-            user_id = int(user_id)
-        except Exception:
-            return {"is_active": False, "end_date": None, "has_subscription": False, "error": "Некорректный user_id в query"}
-    else:
-        # 2. Пробуем взять user_id из заголовка
-        telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if telegram_user_id:
-            try:
-                user_id = int(telegram_user_id)
-            except Exception:
-                return {"is_active": False, "end_date": None, "has_subscription": False, "error": "Некорректный user_id в заголовке"}
-        else:
-            return {"is_active": False, "end_date": None, "has_subscription": False, "error": "user_id не передан ни в query, ни в заголовке"}
-    try:
-        if not supabase:
-            return {"is_active": False, "end_date": None, "has_subscription": False, "error": "БД недоступна"}
-        result = supabase.table("user_subscription")\
-            .select("end_date, is_active")\
-            .eq("user_id", user_id)\
-            .eq("is_active", True)\
-            .order("end_date", desc=True)\
-            .limit(1)\
-            .execute()
-        if hasattr(result, 'data') and result.data:
-            sub = result.data[0]
-            is_active = sub.get("is_active", False)
-            end_date = sub.get("end_date")
-            return {
-                "is_active": is_active,
-                "end_date": end_date,
-                "has_subscription": True
-            }
-        else:
-            return {
-                "is_active": False,
-                "end_date": None,
-                "has_subscription": False
-            }
-    except Exception as e:
-        return {
-            "is_active": False,
-            "end_date": None,
-            "has_subscription": False,
-            "error": str(e)
-        }
+@dp.pre_checkout_query()
+async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
+    await pre_checkout_query.answer(ok=True)
 
-# Удаляем все ручные обработчики SPA и FileResponse для index.html
-# Оставляем только это:
-from fastapi.staticfiles import StaticFiles
-import os
+@dp.message(lambda message: message.successful_payment is not None)
+async def process_successful_payment(message: Message):
+    user_id = message.from_user.id
+    payment_id = message.successful_payment.telegram_payment_charge_id
+    now = datetime.utcnow()
+    start_date = now.isoformat()
+    end_date = (now + timedelta(days=30)).isoformat()
+    # Деактивируем старые подписки
+    supabase_aiogram.table("user_subscription").update({"is_active": False}).eq("user_id", user_id).execute()
+    # Создаём новую подписку
+    sub_data = {
+        "user_id": user_id,
+        "start_date": start_date,
+        "end_date": end_date,
+        "payment_id": payment_id,
+        "is_active": True,
+        "created_at": start_date,
+        "updated_at": start_date,
+    }
+    supabase_aiogram.table("user_subscription").insert(sub_data).execute()
+    await message.answer("Спасибо за оплату! Ваша подписка Premium активирована на 30 дней.")
 
-static_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
-app.mount("/", StaticFiles(directory=static_folder, html=True), name="static")
+@dp.message(Command("start"))
+async def cmd_start(message: Message):
+    await message.answer("Бот для оплаты Stars работает!")
 
-# --- Больше никаких ручных SPA-catch-all, serve_index и FileResponse для index.html ---
+async def start_aiogram_bot():
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    await dp.start_polling(bot)
+
+# --- Запуск FastAPI и aiogram вместе ---
+if __name__ == "__main__":
+    import uvicorn
+    loop = asyncio.get_event_loop()
+    loop.create_task(start_aiogram_bot())
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
 

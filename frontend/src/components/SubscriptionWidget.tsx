@@ -13,11 +13,10 @@ const API_URL = '';
 const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActive }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<'active' | 'inactive' | 'loading'>('loading');
+  const [status, setStatus] = useState<SubscriptionStatus | null>(null);
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 70; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
-  const [endDate, setEndDate] = useState<string | null>(null);
   
   // Инициализация и настройка Telegram WebApp
   useEffect(() => {
@@ -81,31 +80,23 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
     setLoading(true);
     try {
-      const response = await fetch(`/subscription/status?user_id=${userId}`);
-      const data = await response.json();
-      if (data.is_active && data.end_date) {
-        setStatus('active');
-        setEndDate(data.end_date);
-      } else {
-        setStatus('inactive');
-        setEndDate(null);
-      }
+      // Используем функцию из API вместо прямого запроса
+      const subscriptionData = await getUserSubscriptionStatus(userId);
+      setStatus(subscriptionData);
       
       // Показываем/скрываем главную кнопку в зависимости от статуса подписки
       if (window.Telegram?.WebApp?.MainButton) {
-        if (!data.has_subscription && !isActive) {
+        if (!subscriptionData.has_subscription && !isActive) {
           window.Telegram.WebApp.MainButton.show();
         } else {
           window.Telegram.WebApp.MainButton.hide();
         }
       }
       
-      return data.has_subscription;
+      return subscriptionData.has_subscription;
     } catch (err: any) {
       console.error('Ошибка при получении статуса подписки:', err);
       setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке статуса подписки');
-      setStatus('inactive');
-      setEndDate(null);
       return false;
     } finally {
       setLoading(false);
@@ -133,10 +124,9 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   };
   
   const handleInvoiceGeneration = async (userId: number) => {
-    if (typeof window === 'undefined' || !('Telegram' in window) || !window.Telegram) return;
-    const telegramWebApp = window.Telegram;
     try {
       setIsSubscribing(true);
+      // Отправляем запрос на backend для отправки Stars-инвойса
       const response = await fetch('/send-stars-invoice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -144,21 +134,27 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       });
       const data = await response.json();
       if (data.success) {
-        if (telegramWebApp.WebApp?.showPopup) {
-          telegramWebApp.WebApp.showPopup({
+        if (window.Telegram?.WebApp?.showPopup) {
+          window.Telegram.WebApp.showPopup({
             title: 'Оплата',
-            message: 'Инвойс отправлен в чат с ботом. После оплаты вернитесь и обновите статус.',
+            message: 'Инвойс отправлен в чат с ботом. Проверьте Telegram и оплатите счёт. После оплаты вернитесь в приложение и обновите статус подписки.',
+            buttons: [{ type: 'ok' }]
           });
+        } else {
+          alert('Инвойс отправлен в чат с ботом. Проверьте Telegram и оплатите счёт.');
         }
-        if (telegramWebApp.WebApp?.close) {
-          setTimeout(() => telegramWebApp.WebApp.close(), 1000);
-        }
-        setTimeout(fetchSubscriptionStatus, 5000);
+        // Свернуть WebApp после popup
+        setTimeout(() => {
+          if (window.Telegram?.WebApp?.close) {
+            window.Telegram.WebApp.close();
+          }
+        }, 300); // небольшая задержка чтобы popup успел показаться
       } else {
-        alert(data.message || 'Ошибка при отправке инвойса');
+        setError(data.message || 'Ошибка при отправке инвойса');
       }
-    } catch (e) {
-      alert('Ошибка при отправке инвойса');
+    } catch (error) {
+      console.error('Ошибка при отправке Stars-инвойса:', error);
+      setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
     } finally {
       setIsSubscribing(false);
     }
@@ -175,7 +171,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       }
       
       // Генерируем инвойс для оплаты
-      await handleInvoiceGeneration(Number(userId));
+      await handleInvoiceGeneration(userId);
     } catch (error) {
       console.error('Ошибка при подписке:', error);
       setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
@@ -199,21 +195,55 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     <div className="subscription-widget">
       <h3>Статус подписки</h3>
       
-      {status === 'loading' && <div>Загрузка статуса подписки...</div>}
-      {status === 'active' && endDate && (
-        <div style={{ color: 'green', marginBottom: 12 }}>
-          Ваша подписка активна до {new Date(endDate).toLocaleString('ru-RU')}
+      {status?.has_subscription ? (
+        <div className="subscription-active">
+          <div className="status-badge premium">Premium</div>
+          <p>У вас активная подписка{status.subscription_end_date ? ` до ${new Date(status.subscription_end_date).toLocaleDateString()}` : ''}</p>
+          <p>Все функции доступны без ограничений</p>
         </div>
-      )}
-      {status === 'inactive' && userId != null && (
-        <button onClick={() => handleInvoiceGeneration(Number(userId))} disabled={isSubscribing}>
-          Подписаться за 70 Stars
-        </button>
-      )}
-      {status === 'active' && (
-        <button onClick={fetchSubscriptionStatus} style={{ marginTop: 8 }}>
-          Обновить статус
-        </button>
+      ) : (
+        <div className="subscription-free">
+          <div className="status-badge free">Бесплатный план</div>
+          <p>Использовано анализов: {status?.analysis_count || 0}/2</p>
+          <p>Использовано генераций постов: {status?.post_generation_count || 0}/2</p>
+          
+          {showPaymentInfo ? (
+            <div className="payment-info">
+              <h4>Процесс оплаты</h4>
+              <p>Для оплаты подписки выполните следующие шаги:</p>
+              <ol>
+                <li>Нажмите кнопку "Оплатить" выше</li>
+                <li>Откроется чат с нашим ботом</li>
+                <li>Нажмите кнопку "Оплатить {SUBSCRIPTION_PRICE} Stars" в боте</li>
+                <li>Подтвердите платеж</li>
+                <li>Вернитесь в это приложение</li>
+              </ol>
+              <p>После успешной оплаты ваша подписка активируется автоматически!</p>
+              <button 
+                className="cancel-button"
+                onClick={() => setShowPaymentInfo(false)}
+              >
+                Отменить
+              </button>
+            </div>
+          ) : (
+            <div className="subscription-offer">
+              <h4>Получите безлимитный доступ</h4>
+              <ul>
+                <li>Неограниченный анализ каналов</li>
+                <li>Неограниченная генерация постов</li>
+                <li>Сохранение данных в облаке</li>
+              </ul>
+              <button 
+                className="subscribe-button"
+                onClick={handleSubscribe}
+                disabled={isSubscribing}
+              >
+                {isSubscribing ? 'Создание платежа...' : 'Подписаться за 70 Stars'}
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
