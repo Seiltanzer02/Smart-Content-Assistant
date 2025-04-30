@@ -3346,3 +3346,13 @@ async def subscription_status(request: Request, user_id: int = None):
             "error": str(e)
         }
 
+# Удаляем все ручные обработчики SPA и FileResponse для index.html
+# Оставляем только это:
+from fastapi.staticfiles import StaticFiles
+import os
+
+static_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
+app.mount("/", StaticFiles(directory=static_folder, html=True), name="static")
+
+# --- Больше никаких ручных SPA-catch-all, serve_index и FileResponse для index.html ---
+
