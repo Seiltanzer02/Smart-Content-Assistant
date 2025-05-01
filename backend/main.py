@@ -272,6 +272,40 @@ async def send_stars_invoice(request: Request):
         logger.error(f"Ошибка при отправке Stars-инвойса: {e}")
         return {"success": False, "message": f"Ошибка: {str(e)}"}
 
+@app.post("/generate-stars-invoice-link", response_model=Dict[str, Any])
+async def generate_stars_invoice_link(request: Request):
+    """Генерирует invoice_link для оплаты Stars через Telegram Bot API createInvoiceLink (provider_token='', currency='XTR')."""
+    try:
+        data = await request.json()
+        user_id = data.get("user_id")
+        amount = data.get("amount")
+        if not user_id or not amount:
+            raise HTTPException(status_code=400, detail="user_id и amount обязательны")
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        if not bot_token:
+            raise HTTPException(status_code=500, detail="TELEGRAM_BOT_TOKEN не задан в окружении")
+        url = f"https://api.telegram.org/bot{bot_token}/createInvoiceLink"
+        payload = {
+            "title": "Подписка Premium",
+            "description": "Подписка Premium на 1 месяц",
+            "payload": f"stars_invoice_{user_id}_{int(time.time())}",
+            "provider_token": "",
+            "currency": "XTR",
+            "prices": [{"label": "XTR", "amount": int(amount)}],
+            "photo_url": "https://smart-content-assistant.onrender.com/static/premium_sub.jpg"
+        }
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload)
+            tg_data = response.json()
+            if not tg_data.get("ok"):
+                logger.error(f"Ошибка Telegram API createInvoiceLink: {tg_data}")
+                return {"success": False, "error": tg_data}
+            invoice_link = tg_data["result"]
+        return {"success": True, "invoice_link": invoice_link}
+    except Exception as e:
+        logger.error(f"Ошибка при генерации Stars invoice link: {e}")
+        return {"success": False, "error": str(e)}
+
 # --- Настройка обслуживания статических файлов ---
 import os
 from fastapi.staticfiles import StaticFiles
