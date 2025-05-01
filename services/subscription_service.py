@@ -13,36 +13,22 @@ class SubscriptionService:
         self.db = DBService(pool)
         
     async def get_user_usage(self, user_id: int):
-        """Получает статистику использования бесплатных функций и сбрасывает лимиты, если прошло 14 дней с reset_at"""
+        """Получает статистику использования бесплатных функций"""
         query = """
         SELECT * FROM user_usage_stats WHERE user_id = $1
         """
+        
         stats = await self.db.fetchrow(query, user_id)
-        now = datetime.utcnow()
+        
         if not stats:
             # Если записи нет, создаем новую
             query = """
-            INSERT INTO user_usage_stats (user_id, analysis_count, post_generation_count, reset_at)
-            VALUES ($1, 0, 0, $2)
+            INSERT INTO user_usage_stats (user_id, analysis_count, post_generation_count)
+            VALUES ($1, 0, 0)
             RETURNING *
             """
-            stats = await self.db.fetchrow(query, user_id, now)
-        else:
-            # Проверяем, нужно ли сбросить лимиты
-            reset_at = stats.get('reset_at')
-            if not reset_at:
-                reset_at = now
-            if isinstance(reset_at, str):
-                reset_at = datetime.fromisoformat(reset_at.replace('Z', '+00:00'))
-            if (now - reset_at).days >= 14:
-                # Сбросить лимиты и обновить reset_at
-                query = """
-                UPDATE user_usage_stats
-                SET analysis_count = 0, post_generation_count = 0, reset_at = $2, updated_at = $2
-                WHERE user_id = $1
-                RETURNING *
-                """
-                stats = await self.db.fetchrow(query, user_id, now)
+            stats = await self.db.fetchrow(query, user_id)
+            
         return stats
         
     async def increment_analysis_usage(self, user_id: int):
