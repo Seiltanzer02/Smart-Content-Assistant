@@ -126,10 +126,16 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const handleInvoiceGeneration = async (userId: number) => {
     try {
       setIsSubscribing(true);
-      if (window?.Telegram?.WebApp && typeof window?.Telegram?.WebApp.openInvoice === 'function') {
-        window.Telegram.WebApp.openInvoice(
-          { slug: 'stars', amount: 70 },
-          (status) => {
+      // Получаем invoice_url с backend
+      const response = await fetch('/generate-stars-invoice-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, amount: 70 })
+      });
+      const data = await response.json();
+      if (data.success && data.invoice_link) {
+        if (window?.Telegram?.WebApp && typeof window?.Telegram?.WebApp.openInvoice === 'function') {
+          window.Telegram.WebApp.openInvoice(data.invoice_link, (status) => {
             if (status === 'paid') {
               fetchSubscriptionStatus();
               if (window?.Telegram?.WebApp?.showPopup) {
@@ -150,14 +156,17 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
               setError('Платеж был отменен.');
             }
             setIsSubscribing(false);
-          }
-        );
+          });
+        } else {
+          setError('Оплата через Stars недоступна в этом окружении.');
+          setIsSubscribing(false);
+        }
       } else {
-        setError('Оплата через Stars недоступна в этом окружении.');
+        setError(data.error || 'Ошибка генерации инвойса');
         setIsSubscribing(false);
       }
     } catch (error) {
-      console.error('Ошибка при оплате через Stars:', error);
+      console.error('Ошибка при генерации Stars invoice link:', error);
       setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
       setIsSubscribing(false);
     }
