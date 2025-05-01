@@ -6,7 +6,6 @@ export interface SubscriptionStatus {
   analysis_count: number;
   post_generation_count: number;
   subscription_end_date?: string;
-  next_free_limit_reset?: string;
 }
 
 // API_URL пустая строка для относительных путей
