@@ -23,7 +23,6 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
       if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
         tgUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
         if (/^\d+$/.test(tgUserId)) {
-          localStorage.setItem('tg_user_id', tgUserId);
           setUserId(tgUserId);
           setUserIdReady(true);
           console.log('[SubscriptionWidget] userId из Telegram:', tgUserId);
@@ -39,7 +38,6 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
             const userObj = JSON.parse(userParam);
             if (userObj && userObj.id && /^\d+$/.test(String(userObj.id))) {
               tgUserId = String(userObj.id);
-              localStorage.setItem('tg_user_id', tgUserId);
               setUserId(tgUserId);
               setUserIdReady(true);
               console.log('[SubscriptionWidget] userId из initData:', tgUserId);
@@ -50,30 +48,7 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
           console.error('[SubscriptionWidget] Ошибка декодирования initData:', e);
         }
       }
-      // 3. localStorage
-      const storedId = localStorage.getItem('tg_user_id');
-      if (storedId && /^\d+$/.test(storedId)) {
-        setUserId(storedId);
-        setUserIdReady(true);
-        console.log('[SubscriptionWidget] userId из localStorage:', storedId);
-        return;
-      }
-      // 4. Бэкенд
-      if (window.Telegram?.WebApp?.initData) {
-        try {
-          const resp = await axios.post('/resolve-user-id', { initData: window.Telegram.WebApp.initData });
-          if (resp.data && resp.data.user_id && /^\d+$/.test(String(resp.data.user_id))) {
-            tgUserId = String(resp.data.user_id);
-            localStorage.setItem('tg_user_id', tgUserId);
-            setUserId(tgUserId);
-            setUserIdReady(true);
-            console.log('[SubscriptionWidget] userId с бэкенда:', tgUserId);
-            return;
-          }
-        } catch (e) {
-          console.error('[SubscriptionWidget] Ошибка при запросе userId с бэкенда:', e);
-        }
-      }
+      // 3. НЕ используем localStorage!
       setUserId(null);
       setUserIdReady(true);
       console.error('[SubscriptionWidget] userId не найден!');
@@ -240,7 +215,6 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
         <pre style={{textAlign: 'left', fontSize: '12px', marginTop: '16px', color: '#888', background: '#222', padding: '8px', borderRadius: '6px'}}>
           userId: {userId}
           {'\n'}initData: {window.Telegram?.WebApp?.initData}
-          {'\n'}localStorage.tg_user_id: {localStorage.getItem('tg_user_id')}
         </pre>
       </div>
     );
@@ -258,7 +232,6 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
         <pre style={{textAlign: 'left', fontSize: '12px', marginTop: '16px', color: '#888', background: '#222', padding: '8px', borderRadius: '6px'}}>
           userId: {userId}
           {'\n'}initData: {window.Telegram?.WebApp?.initData}
-          {'\n'}localStorage.tg_user_id: {localStorage.getItem('tg_user_id')}
         </pre>
       </div>
     );
