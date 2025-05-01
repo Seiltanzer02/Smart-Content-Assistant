@@ -3373,27 +3373,34 @@ async def resolve_user_id(request: Request):
 @app.get("/subscription/status")
 async def get_subscription_status(request: Request):
     user_id = request.query_params.get("user_id")
+    logger.info(f'Запрос /subscription/status для user_id: {user_id}') # <-- Добавляем лог
     if not user_id:
         return {"error": "user_id обязателен"}
     try:
         result = supabase.table("user_subscription").select("*").eq("user_id", int(user_id)).maybe_single().execute()
+        logger.info(f'Результат запроса к user_subscription: {result.data}') # <-- Добавляем лог
         if result.data:
             sub = result.data
             now = datetime.utcnow()
             is_active = sub.get("is_active", False) and sub.get("end_date") and datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00")) > now
-            return {
+            response_data = {
                 "has_subscription": is_active,
                 "subscription_end_date": sub.get("end_date"),
                 "is_active": is_active,
                 "analysis_count": sub.get("analysis_count", 0),
                 "post_generation_count": sub.get("post_generation_count", 0)
             }
+            logger.info(f'Возвращаем статус для user_id {user_id}: {response_data}') # <-- Добавляем лог
+            return response_data
         else:
-            return {
+            response_data = {
                 "has_subscription": False,
                 "analysis_count": 0,
                 "post_generation_count": 0
             }
+            logger.info(f'Подписка не найдена для user_id {user_id}, возвращаем: {response_data}') # <-- Добавляем лог
+            return response_data
     except Exception as e:
+        logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True) # <-- Добавляем лог ошибки
         return {"error": str(e)}
 
