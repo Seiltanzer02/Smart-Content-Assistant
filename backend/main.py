@@ -309,6 +309,21 @@ async def generate_stars_invoice_link(request: Request):
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
+    # 1. Обработка pre_checkout_query
+    pre_checkout_query = data.get("pre_checkout_query")
+    if pre_checkout_query:
+        query_id = pre_checkout_query.get("id")
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        if not bot_token:
+            return {"ok": False, "error": "TELEGRAM_BOT_TOKEN не задан"}
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"https://api.telegram.org/bot{bot_token}/answerPreCheckoutQuery",
+                json={"pre_checkout_query_id": query_id, "ok": True}
+            )
+            print("Ответ на pre_checkout_query:", resp.text)
+        return {"ok": True, "pre_checkout_query": True}
+    # 2. Обработка успешной оплаты
     message = data.get("message", {})
     successful_payment = message.get("successful_payment")
     if successful_payment:
@@ -321,16 +336,15 @@ async def telegram_webhook(request: Request):
             # Проверяем, есть ли уже подписка
             existing = supabase.table("user_subscription").select("*").eq("user_id", user_id).execute()
             if existing.data and len(existing.data) > 0:
-                # Обновляем существующую подписку
+                # Обновляем подписку
                 supabase.table("user_subscription").update({
                     "is_active": True,
                     "start_date": start_date.isoformat(),
                     "end_date": end_date.isoformat(),
                     "payment_id": payment_id
                 }).eq("user_id", user_id).execute()
-                logging.info(f"Обновлена подписка для пользователя {user_id}, payment_id: {payment_id}")
             else:
-                # Создаем новую подписку
+                # Создаём новую подписку
                 supabase.table("user_subscription").insert({
                     "user_id": user_id,
                     "is_active": True,
@@ -338,11 +352,9 @@ async def telegram_webhook(request: Request):
                     "end_date": end_date.isoformat(),
                     "payment_id": payment_id
                 }).execute()
-                logging.info(f"Создана новая подписка для пользователя {user_id}, payment_id: {payment_id}")
-            return {"ok": True}
         except Exception as e:
-            logging.error(f"Ошибка при обработке успешного платежа: {e}")
-            return {"ok": False, "error": str(e)}
+            print("Ошибка при активации подписки:", e)
+        return {"ok": True, "successful_payment": True}
     return {"ok": True}
 
 
