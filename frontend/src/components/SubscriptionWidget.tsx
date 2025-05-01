@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/SubscriptionWidget.css';
 import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice } from '../api/subscription';
+import axios from 'axios';
 
 // API_URL для относительных путей
 const API_URL = '';
@@ -15,31 +16,72 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
   const [userId, setUserId] = useState<number | null>(null);
   
   useEffect(() => {
-    console.log('[SubscriptionWidget] Монтирование компонента');
-    console.log('[SubscriptionWidget] window.Telegram:', window.Telegram);
-    console.log('[SubscriptionWidget] window.Telegram?.WebApp:', window.Telegram?.WebApp);
-    console.log('[SubscriptionWidget] window.Telegram?.WebApp?.initDataUnsafe:', window.Telegram?.WebApp?.initDataUnsafe);
-    let tgUserId: string | undefined;
-    if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
-      tgUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
-      if (/^\d+$/.test(tgUserId)) {
-        localStorage.setItem('tg_user_id', tgUserId);
-        console.log('[SubscriptionWidget] userId получен из Telegram:', tgUserId);
-      } else {
-        console.error('[SubscriptionWidget] userId из Telegram невалиден:', tgUserId);
-        tgUserId = undefined;
+    async function resolveUserId() {
+      console.log('[SubscriptionWidget] Монтирование компонента');
+      console.log('[SubscriptionWidget] window.Telegram:', window.Telegram);
+      console.log('[SubscriptionWidget] window.Telegram?.WebApp:', window.Telegram?.WebApp);
+      console.log('[SubscriptionWidget] window.Telegram?.WebApp?.initDataUnsafe:', window.Telegram?.WebApp?.initDataUnsafe);
+      let tgUserId: string | undefined;
+      // 1. Пробуем initDataUnsafe.user.id
+      if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
+        tgUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
+        if (/^\d+$/.test(tgUserId)) {
+          localStorage.setItem('tg_user_id', tgUserId);
+          console.log('[SubscriptionWidget] userId получен из Telegram:', tgUserId);
+          setUserId(Number(tgUserId));
+          return;
+        } else {
+          console.error('[SubscriptionWidget] userId из Telegram невалиден:', tgUserId);
+        }
       }
-    } else {
+      // 2. Пробуем декодировать initData вручную
+      if (window.Telegram?.WebApp?.initData) {
+        try {
+          const params = new URLSearchParams(window.Telegram.WebApp.initData);
+          const userParam = params.get('user');
+          if (userParam) {
+            const userObj = JSON.parse(userParam);
+            if (userObj && userObj.id && /^\d+$/.test(String(userObj.id))) {
+              tgUserId = String(userObj.id);
+              localStorage.setItem('tg_user_id', tgUserId);
+              console.log('[SubscriptionWidget] userId получен из initData:', tgUserId);
+              setUserId(Number(tgUserId));
+              return;
+            }
+          }
+        } catch (e) {
+          console.error('[SubscriptionWidget] Ошибка декодирования initData:', e);
+        }
+      }
+      // 3. Пробуем взять из localStorage
       const storedId = localStorage.getItem('tg_user_id');
       if (storedId && /^\d+$/.test(storedId)) {
         tgUserId = storedId;
         console.log('[SubscriptionWidget] userId получен из localStorage:', tgUserId);
-      } else {
-        console.warn('[SubscriptionWidget] userId не найден или невалиден в localStorage:', storedId);
-        tgUserId = undefined;
+        setUserId(Number(tgUserId));
+        return;
       }
+      // 4. Пробуем запросить userId у бэкенда (если есть initData)
+      if (window.Telegram?.WebApp?.initData) {
+        try {
+          const resp = await axios.post('/resolve-user-id', { initData: window.Telegram.WebApp.initData });
+          if (resp.data && resp.data.user_id && /^\d+$/.test(String(resp.data.user_id))) {
+            tgUserId = String(resp.data.user_id);
+            localStorage.setItem('tg_user_id', tgUserId);
+            console.log('[SubscriptionWidget] userId получен с бэкенда:', tgUserId);
+            setUserId(Number(tgUserId));
+            return;
+          } else {
+            console.error('[SubscriptionWidget] userId не получен с бэкенда:', resp.data);
+          }
+        } catch (e) {
+          console.error('[SubscriptionWidget] Ошибка при запросе userId с бэкенда:', e);
+        }
+      }
+      // Если не удалось — ошибка
+      setUserId(null);
     }
-    setUserId(tgUserId ? Number(tgUserId) : null);
+    resolveUserId();
   }, []);
   
   useEffect(() => {

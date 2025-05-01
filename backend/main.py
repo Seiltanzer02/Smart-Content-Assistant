@@ -41,6 +41,8 @@ import traceback
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
 # from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 import shutil # Добавляем импорт shutil
+import base64
+import urllib.parse
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -3342,4 +3344,29 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     logger.info(f"Запуск сервера на порту {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
+
+@app.post("/resolve-user-id")
+async def resolve_user_id(request: Request):
+    try:
+        data = await request.json()
+        init_data = data.get('initData')
+        logger.info('[resolve-user-id] Получен initData: %s', init_data)
+        if not init_data:
+            return {"error": "initData не передан"}
+        # Парсим строку как query string
+        params = urllib.parse.parse_qs(init_data)
+        user_param = params.get('user')
+        logger.info('[resolve-user-id] user_param: %s', user_param)
+        if user_param:
+            try:
+                user_obj = json.loads(user_param[0])
+                logger.info('[resolve-user-id] user_obj: %s', user_obj)
+                if user_obj and user_obj.get('id') and str(user_obj['id']).isdigit():
+                    return {"user_id": str(user_obj['id'])}
+            except Exception as e:
+                logger.error('[resolve-user-id] Ошибка декодирования user_param: %s', e)
+        return {"error": "user_id не найден"}
+    except Exception as e:
+        logger.error('[resolve-user-id] Ошибка: %s', e)
+        return {"error": str(e)}
 
