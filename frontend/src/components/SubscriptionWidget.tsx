@@ -30,7 +30,7 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
     try {
       const subscriptionData = await getUserSubscriptionStatus(String(currentUserId));
       setStatus(subscriptionData);
-      if (window.Telegram?.WebApp?.MainButton) {
+      if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.MainButton) {
         if (!subscriptionData.has_subscription && !isActive) {
           window.Telegram.WebApp.MainButton.show();
         } else {
@@ -135,11 +135,11 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
   // --- useEffect для настройки кнопок и событий Telegram --- 
   useEffect(() => {
     console.log('Инициализация Telegram WebApp UI...');
-    if (window.Telegram?.WebApp) {
+    if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp) {
       console.log('window.Telegram.WebApp найден, настраиваем UI...');
       window.Telegram.WebApp.ready();
       
-      if (window.Telegram.WebApp.MainButton) {
+      if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.MainButton) {
         window.Telegram.WebApp.MainButton.setText('Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars');
         window.Telegram.WebApp.MainButton.color = '#2481cc';
         window.Telegram.WebApp.MainButton.textColor = '#ffffff';
@@ -159,7 +159,7 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
         fetchSubscriptionStatus(userId); // Используем userId из стейта
       };
 
-      if (typeof window.Telegram.WebApp.onEvent === 'function') {
+      if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp && typeof window.Telegram.WebApp.onEvent === 'function') {
         // Убираем обработчик popup_closed, он может быть излишним
         // window.Telegram.WebApp.onEvent('popup_closed', handleInvoiceClosed); 
         window.Telegram.WebApp.onEvent('invoiceClosed', handleInvoiceClosed); 
@@ -169,10 +169,10 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
 
       // Функция очистки для useEffect
       return () => {
-        if (window.Telegram?.WebApp?.MainButton) {
+        if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.MainButton) {
           window.Telegram.WebApp.MainButton.offClick(handleSubscribeViaMainButton);
         }
-        if (typeof window.Telegram.WebApp.offEvent === 'function') {
+        if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp && typeof window.Telegram.WebApp.offEvent === 'function') {
           // window.Telegram.WebApp.offEvent('popup_closed', handleInvoiceClosed);
           window.Telegram.WebApp.offEvent('invoiceClosed', handleInvoiceClosed);
         }
@@ -269,7 +269,11 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
           <button onClick={() => fetchSubscriptionStatus(userId)}>Повторить запрос статуса</button>
         )}
         {error.startsWith('Не удалось получить') && (
-          <button onClick={() => window.Telegram?.WebApp?.close?.()}>Закрыть</button>
+          <button onClick={() => {
+            if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp && typeof window.Telegram.WebApp.close === 'function') {
+              window.Telegram.WebApp.close();
+            }
+          }}>Закрыть</button>
         )}
         <pre style={{textAlign: 'left', fontSize: '12px', marginTop: '16px', color: '#888', background: '#222', padding: '8px', borderRadius: '6px'}}>
           userId: {userId}
@@ -288,29 +292,32 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
     return <div className="subscription-widget loading">Загрузка статуса подписки...</div>;
   }
   
-  // Отображение статуса подписки (если нет ошибки и не идет загрузка)
+  // --- Новый блок отображения статуса подписки ---
+  // Проверяем лимиты для бесплатного плана
+  const freePostLimit = 2;
+  const freeAnalysisLimit = 2;
+  const postGenUsed = typeof status?.post_generation_count === 'number' ? status.post_generation_count : 0;
+  const analysisUsed = typeof status?.analysis_count === 'number' ? status.analysis_count : 0;
+  const postGenLeft = Math.max(0, freePostLimit - postGenUsed);
+  const analysisLeft = Math.max(0, freeAnalysisLimit - analysisUsed);
+  const freeLimitsExceeded = postGenLeft <= 0 && analysisLeft <= 0;
+
   return (
     <div className="subscription-widget">
       <h3>Статус подписки</h3>
-      
       {status?.has_subscription ? (
         <div className="subscription-active">
-          <div className="status-badge premium">Premium</div>
-          <p>У вас активная подписка{status.subscription_end_date ? ` до ${new Date(status.subscription_end_date).toLocaleDateString()}` : ''}</p>
-          <p>Все функции доступны без ограничений</p>
+          <div className="status-badge premium">Премиум-подписка</div>
+          <p>Ваша подписка активна{status.subscription_end_date ? ` до ${new Date(status.subscription_end_date).toLocaleString('ru-RU')}` : ''}</p>
+          <p>Все функции доступны без ограничений.</p>
         </div>
       ) : (
         <div className="subscription-free">
           <div className="status-badge free">Бесплатный план</div>
-          {/* Отображаем счетчики, если они есть в статусе */} 
-          {status && typeof status.analysis_count === 'number' && (
-            <p>Использовано анализов: {status.analysis_count}/2</p>
-          )}
-          {status && typeof status.post_generation_count === 'number' && (
-             <p>Использовано генераций постов: {status.post_generation_count}/2</p>
-          )}
-          
-          {/* Убираем кнопку "Оплатить" из этого блока, используем MainButton */} 
+          <div style={{marginBottom: 8}}>
+            <b>Осталось генераций постов:</b> {postGenLeft} / {freePostLimit}<br/>
+            <b>Осталось анализов каналов:</b> {analysisLeft} / {freeAnalysisLimit}
+          </div>
           <div className="subscription-offer">
             <h4>Получите безлимитный доступ</h4>
             <ul>
@@ -318,8 +325,28 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
               <li>Неограниченная генерация постов</li>
               <li>Сохранение данных в облаке</li>
             </ul>
-            {/* Кнопка подписки теперь только MainButton */}
-            {isSubscribing && <p>Создание платежа...</p>}
+            {/* Кнопка подписки только здесь, если нет подписки */}
+            {status && !status.has_subscription && !freeLimitsExceeded && (
+              <button
+                className="subscribe-button"
+                onClick={handleSubscribe}
+                disabled={isSubscribing}
+              >
+                {isSubscribing ? 'Создание платежа...' : `Подписаться за ${SUBSCRIPTION_PRICE} Stars`}
+              </button>
+            )}
+            {/* Если лимиты исчерпаны, показываем предупреждение и дату сброса */}
+            {freeLimitsExceeded && (
+              <div style={{color: '#d32f2f', marginTop: 8}}>
+                Бесплатные лимиты исчерпаны.<br/>
+                {status?.next_free_limit_reset && (
+                  <>
+                    <span>Следующее бесплатное использование будет доступно: <b>{new Date(status.next_free_limit_reset).toLocaleString('ru-RU')}</b></span><br/>
+                  </>
+                )}
+                <span>Приходите через две недели или оформите подписку для безлимитного доступа.</span>
+              </div>
+            )}
           </div>
         </div>
       )}
