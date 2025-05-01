@@ -15,11 +15,17 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
   const [userId, setUserId] = useState<number | null>(null);
   
   useEffect(() => {
+    let tgUserId: string | undefined;
     if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
-      setUserId(window.Telegram.WebApp.initDataUnsafe.user.id);
+      tgUserId = window.Telegram.WebApp.initDataUnsafe.user.id.toString();
+      localStorage.setItem('tg_user_id', tgUserId);
     } else {
-      setUserId(null);
+      const storedId = localStorage.getItem('tg_user_id');
+      if (storedId) {
+        tgUserId = storedId;
+      }
     }
+    setUserId(typeof tgUserId === 'string' ? Number(tgUserId) : null);
   }, []);
   
   useEffect(() => {
