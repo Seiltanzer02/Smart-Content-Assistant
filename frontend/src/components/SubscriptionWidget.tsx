@@ -117,6 +117,11 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
     setLoading(true);
     try {
       const subscriptionData = await getUserSubscriptionStatus(String(userId));
+      if (typeof subscriptionData === 'object' && 'error' in subscriptionData && subscriptionData.error) {
+        setError('Ошибка при получении статуса подписки: ' + subscriptionData.error);
+        setStatus(null);
+        return false;
+      }
       setStatus(subscriptionData);
       if (window.Telegram?.WebApp?.MainButton) {
         if (!subscriptionData.has_subscription && !isActive) {
@@ -129,6 +134,7 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
       return subscriptionData.has_subscription;
     } catch (e: any) {
       setError('Ошибка при получении статуса подписки: ' + (e?.message || e));
+      setStatus(null);
       console.error('[SubscriptionWidget] Ошибка при получении статуса подписки:', e);
       return false;
     } finally {

@@ -3312,7 +3312,11 @@ if SHOULD_MOUNT_STATIC:
             if rest_of_path.startswith("api/") or \
                rest_of_path.startswith("docs") or \
                rest_of_path.startswith("openapi.json") or \
-               rest_of_path.startswith("uploads/"):
+               rest_of_path.startswith("uploads/") or \
+               rest_of_path.startswith("resolve-user-id") or \
+               rest_of_path.startswith("subscription/") or \
+               rest_of_path.startswith("generate-stars-invoice-link") or \
+               rest_of_path.startswith("telegram/"):
                  # Этот код не должен выполняться, т.к. роуты API/docs/uploads определены выше, но для надежности
                  # Логируем попытку доступа к API через SPA catch-all
                  logger.debug(f"Запрос к '{rest_of_path}' перехвачен SPA catch-all, но проигнорирован (API/Docs/Uploads).")
@@ -3375,7 +3379,7 @@ async def get_subscription_status(request: Request):
     user_id = request.query_params.get("user_id")
     logger.info(f'Запрос /subscription/status для user_id: {user_id}') # <-- Добавляем лог
     if not user_id:
-        return {"error": "user_id обязателен", "user_id": user_id}
+        return {"error": "user_id обязателен"}
     try:
         result = supabase.table("user_subscription").select("*").eq("user_id", int(user_id)).maybe_single().execute()
         logger.info(f'Результат запроса к user_subscription: {result.data}') # <-- Добавляем лог
@@ -3384,7 +3388,6 @@ async def get_subscription_status(request: Request):
             now = datetime.utcnow()
             is_active = sub.get("is_active", False) and sub.get("end_date") and datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00")) > now
             response_data = {
-                "user_id": user_id,  # <--- ДОБАВЛЕНО
                 "has_subscription": is_active,
                 "subscription_end_date": sub.get("end_date"),
                 "is_active": is_active,
@@ -3395,7 +3398,6 @@ async def get_subscription_status(request: Request):
             return response_data
         else:
             response_data = {
-                "user_id": user_id,  # <--- ДОБАВЛЕНО
                 "has_subscription": False,
                 "analysis_count": 0,
                 "post_generation_count": 0
@@ -3404,5 +3406,5 @@ async def get_subscription_status(request: Request):
             return response_data
     except Exception as e:
         logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True) # <-- Добавляем лог ошибки
-        return {"error": str(e), "user_id": user_id}  # <--- ДОБАВЛЕНО
+        return {"error": str(e)}
 
