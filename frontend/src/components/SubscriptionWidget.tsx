@@ -126,36 +126,48 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const handleInvoiceGeneration = async (userId: number) => {
     try {
       setIsSubscribing(true);
-      // Отправляем запрос на backend для отправки Stars-инвойса
-      const response = await fetch('/send-stars-invoice', {
+      // Получаем invoice_link с backend
+      const response = await fetch('/generate-stars-invoice-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, amount: 70 })
       });
       const data = await response.json();
-      if (data.success) {
-        if (window.Telegram?.WebApp?.showPopup) {
-          window.Telegram.WebApp.showPopup({
-            title: 'Оплата',
-            message: 'Инвойс отправлен в чат с ботом. Проверьте Telegram и оплатите счёт. После оплаты вернитесь в приложение и обновите статус подписки.',
-            buttons: [{ type: 'ok' }]
+      if (data.success && data.invoice_link) {
+        if (window?.Telegram?.WebApp && typeof window?.Telegram?.WebApp.openInvoice === 'function') {
+          window.Telegram.WebApp.openInvoice(data.invoice_link, (status) => {
+            if (status === 'paid') {
+              fetchSubscriptionStatus();
+              if (window?.Telegram?.WebApp?.showPopup) {
+                window.Telegram.WebApp.showPopup({
+                  title: 'Успешная оплата',
+                  message: 'Ваша подписка Premium активирована!',
+                  buttons: [{ type: 'ok' }]
+                });
+              }
+              setTimeout(() => {
+                if (window?.Telegram?.WebApp?.close) {
+                  window.Telegram.WebApp.close();
+                }
+              }, 300);
+            } else if (status === 'failed') {
+              setError('Оплата не удалась. Пожалуйста, попробуйте позже.');
+            } else if (status === 'cancelled') {
+              setError('Платеж был отменен.');
+            }
+            setIsSubscribing(false);
           });
         } else {
-          alert('Инвойс отправлен в чат с ботом. Проверьте Telegram и оплатите счёт.');
+          setError('Оплата через Stars недоступна в этом окружении.');
+          setIsSubscribing(false);
         }
-        // Свернуть WebApp после popup
-        setTimeout(() => {
-          if (window.Telegram?.WebApp?.close) {
-            window.Telegram.WebApp.close();
-          }
-        }, 300); // небольшая задержка чтобы popup успел показаться
       } else {
-        setError(data.message || 'Ошибка при отправке инвойса');
+        setError(data.error || 'Ошибка генерации инвойса');
+        setIsSubscribing(false);
       }
     } catch (error) {
-      console.error('Ошибка при отправке Stars-инвойса:', error);
+      console.error('Ошибка при генерации Stars invoice link:', error);
       setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
-    } finally {
       setIsSubscribing(false);
     }
   };

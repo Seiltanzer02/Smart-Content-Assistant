@@ -35,7 +35,7 @@ import telethon
 import aiohttp
 from telegram_utils import get_telegram_posts, get_mock_telegram_posts
 import move_temp_files
-from datetime import datetime
+from datetime import datetime, timedelta
 import traceback
 # Убираем неиспользуемые импорты psycopg2
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
@@ -271,6 +271,40 @@ async def send_stars_invoice(request: Request):
     except Exception as e:
         logger.error(f"Ошибка при отправке Stars-инвойса: {e}")
         return {"success": False, "message": f"Ошибка: {str(e)}"}
+
+@app.post("/generate-stars-invoice-link", response_model=Dict[str, Any])
+async def generate_stars_invoice_link(request: Request):
+    """Генерирует invoice_link для оплаты Stars через Telegram Bot API createInvoiceLink (provider_token='', currency='XTR')."""
+    try:
+        data = await request.json()
+        user_id = data.get("user_id")
+        amount = data.get("amount")
+        if not user_id or not amount:
+            raise HTTPException(status_code=400, detail="user_id и amount обязательны")
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        if not bot_token:
+            raise HTTPException(status_code=500, detail="TELEGRAM_BOT_TOKEN не задан в окружении")
+        url = f"https://api.telegram.org/bot{bot_token}/createInvoiceLink"
+        payload = {
+            "title": "Подписка Premium",
+            "description": "Подписка Premium на 1 месяц",
+            "payload": f"stars_invoice_{user_id}_{int(time.time())}",
+            "provider_token": "",
+            "currency": "XTR",
+            "prices": [{"label": "XTR", "amount": int(amount)}],
+            "photo_url": "https://smart-content-assistant.onrender.com/static/premium_sub.jpg"
+        }
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload)
+            tg_data = response.json()
+            if not tg_data.get("ok"):
+                logger.error(f"Ошибка Telegram API createInvoiceLink: {tg_data}")
+                return {"success": False, "error": tg_data}
+            invoice_link = tg_data["result"]
+        return {"success": True, "invoice_link": invoice_link}
+    except Exception as e:
+        logger.error(f"Ошибка при генерации Stars invoice link: {e}")
+        return {"success": False, "error": str(e)}
 
 # --- Настройка обслуживания статических файлов ---
 import os
@@ -3241,4 +3275,44 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     logger.info(f"Запуск сервера на порту {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
+
+@app.post("/telegram/webhook")
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    message = data.get("message", {})
+    successful_payment = message.get("successful_payment")
+    if successful_payment:
+        user_id = message.get("from", {}).get("id")
+        payment_id = successful_payment.get("telegram_payment_charge_id")
+        now = datetime.utcnow()
+        start_date = now
+        end_date = now + timedelta(days=30)
+        try:
+            # Проверяем, есть ли уже подписка
+            existing = supabase.table("user_subscription").select("id").eq("user_id", user_id).maybe_single().execute()
+            if existing.data:
+                # Обновляем
+                supabase.table("user_subscription").update({
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "payment_id": payment_id,
+                    "is_active": True,
+                    "updated_at": now.isoformat()
+                }).eq("user_id", user_id).execute()
+            else:
+                # Создаём новую
+                supabase.table("user_subscription").insert({
+                    "user_id": user_id,
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "payment_id": payment_id,
+                    "is_active": True,
+                    "created_at": now.isoformat(),
+                    "updated_at": now.isoformat()
+                }).execute()
+            logger.info(f'Подписка активирована для user_id={user_id}')
+        except Exception as e:
+            logger.error(f'Ошибка при активации подписки: {e}')
+        return {"ok": True}
+    return {"ok": True}
 
