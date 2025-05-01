@@ -3289,30 +3289,29 @@ async def telegram_webhook(request: Request):
         end_date = now + timedelta(days=30)
         try:
             # Проверяем, есть ли уже подписка
-            existing = supabase.table("user_subscription").select("id").eq("user_id", user_id).maybe_single().execute()
-            if existing.data:
-                # Обновляем
+            existing = supabase.table("user_subscription").select("*").eq("user_id", user_id).execute()
+            if existing.data and len(existing.data) > 0:
+                # Обновляем существующую подписку
                 supabase.table("user_subscription").update({
+                    "is_active": True,
                     "start_date": start_date.isoformat(),
                     "end_date": end_date.isoformat(),
-                    "payment_id": payment_id,
-                    "is_active": True,
-                    "updated_at": now.isoformat()
+                    "payment_id": payment_id
                 }).eq("user_id", user_id).execute()
+                logging.info(f"Обновлена подписка для пользователя {user_id}, payment_id: {payment_id}")
             else:
-                # Создаём новую
+                # Создаем новую подписку
                 supabase.table("user_subscription").insert({
                     "user_id": user_id,
+                    "is_active": True,
                     "start_date": start_date.isoformat(),
                     "end_date": end_date.isoformat(),
-                    "payment_id": payment_id,
-                    "is_active": True,
-                    "created_at": now.isoformat(),
-                    "updated_at": now.isoformat()
+                    "payment_id": payment_id
                 }).execute()
-            logger.info(f'Подписка активирована для user_id={user_id}')
+                logging.info(f"Создана новая подписка для пользователя {user_id}, payment_id: {payment_id}")
+            return {"ok": True}
         except Exception as e:
-            logger.error(f'Ошибка при активации подписки: {e}')
-        return {"ok": True}
+            logging.error(f"Ошибка при обработке успешного платежа: {e}")
+            return {"ok": False, "error": str(e)}
     return {"ok": True}
 
