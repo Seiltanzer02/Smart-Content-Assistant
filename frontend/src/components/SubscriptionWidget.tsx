@@ -13,28 +13,24 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 1; // временно 1 Star для теста
   const [isSubscribing, setIsSubscribing] = useState(false);
-  const [userId, setUserId] = useState<number | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [userIdReady, setUserIdReady] = useState(false);
   
   useEffect(() => {
     async function resolveUserId() {
-      console.log('[SubscriptionWidget] Монтирование компонента');
-      console.log('[SubscriptionWidget] window.Telegram:', window.Telegram);
-      console.log('[SubscriptionWidget] window.Telegram?.WebApp:', window.Telegram?.WebApp);
-      console.log('[SubscriptionWidget] window.Telegram?.WebApp?.initDataUnsafe:', window.Telegram?.WebApp?.initDataUnsafe);
       let tgUserId: string | undefined;
-      // 1. Пробуем initDataUnsafe.user.id
+      // 1. initDataUnsafe.user.id
       if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
         tgUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
         if (/^\d+$/.test(tgUserId)) {
           localStorage.setItem('tg_user_id', tgUserId);
-          console.log('[SubscriptionWidget] userId получен из Telegram:', tgUserId);
-          setUserId(Number(tgUserId));
+          setUserId(tgUserId);
+          setUserIdReady(true);
+          console.log('[SubscriptionWidget] userId из Telegram:', tgUserId);
           return;
-        } else {
-          console.error('[SubscriptionWidget] userId из Telegram невалиден:', tgUserId);
         }
       }
-      // 2. Пробуем декодировать initData вручную
+      // 2. initData
       if (window.Telegram?.WebApp?.initData) {
         try {
           const params = new URLSearchParams(window.Telegram.WebApp.initData);
@@ -44,8 +40,9 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
             if (userObj && userObj.id && /^\d+$/.test(String(userObj.id))) {
               tgUserId = String(userObj.id);
               localStorage.setItem('tg_user_id', tgUserId);
-              console.log('[SubscriptionWidget] userId получен из initData:', tgUserId);
-              setUserId(Number(tgUserId));
+              setUserId(tgUserId);
+              setUserIdReady(true);
+              console.log('[SubscriptionWidget] userId из initData:', tgUserId);
               return;
             }
           }
@@ -53,33 +50,33 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
           console.error('[SubscriptionWidget] Ошибка декодирования initData:', e);
         }
       }
-      // 3. Пробуем взять из localStorage
+      // 3. localStorage
       const storedId = localStorage.getItem('tg_user_id');
       if (storedId && /^\d+$/.test(storedId)) {
-        tgUserId = storedId;
-        console.log('[SubscriptionWidget] userId получен из localStorage:', tgUserId);
-        setUserId(Number(tgUserId));
+        setUserId(storedId);
+        setUserIdReady(true);
+        console.log('[SubscriptionWidget] userId из localStorage:', storedId);
         return;
       }
-      // 4. Пробуем запросить userId у бэкенда (если есть initData)
+      // 4. Бэкенд
       if (window.Telegram?.WebApp?.initData) {
         try {
           const resp = await axios.post('/resolve-user-id', { initData: window.Telegram.WebApp.initData });
           if (resp.data && resp.data.user_id && /^\d+$/.test(String(resp.data.user_id))) {
             tgUserId = String(resp.data.user_id);
             localStorage.setItem('tg_user_id', tgUserId);
-            console.log('[SubscriptionWidget] userId получен с бэкенда:', tgUserId);
-            setUserId(Number(tgUserId));
+            setUserId(tgUserId);
+            setUserIdReady(true);
+            console.log('[SubscriptionWidget] userId с бэкенда:', tgUserId);
             return;
-          } else {
-            console.error('[SubscriptionWidget] userId не получен с бэкенда:', resp.data);
           }
         } catch (e) {
           console.error('[SubscriptionWidget] Ошибка при запросе userId с бэкенда:', e);
         }
       }
-      // Если не удалось — ошибка
       setUserId(null);
+      setUserIdReady(true);
+      console.error('[SubscriptionWidget] userId не найден!');
     }
     resolveUserId();
   }, []);
@@ -127,33 +124,25 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
   }, [isActive]);
   
   useEffect(() => {
-    if (userId && !isNaN(userId)) {
-      console.log('[SubscriptionWidget] useEffect: userId найден:', userId, typeof userId);
-      fetchSubscriptionStatus();
-    } else {
-      console.warn('[SubscriptionWidget] useEffect: userId отсутствует или невалиден!', userId);
+    if (userIdReady) {
+      if (userId) {
+        fetchSubscriptionStatus();
+      } else {
+        setError('Не удалось получить корректный ID пользователя');
+      }
     }
-    console.log('SubscriptionWidget загружен, проверка Telegram.WebApp:');
-    console.log('window.Telegram существует:', !!window.Telegram);
-    console.log('window.Telegram?.WebApp существует:', !!window.Telegram?.WebApp);
-    if (window.Telegram?.WebApp) {
-      console.log('window.Telegram.WebApp методы:', Object.keys(window.Telegram.WebApp));
-    }
-  }, [userId]);
+  }, [userIdReady, userId]);
   
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
-    if (!userId || isNaN(userId)) {
+    if (!userId) {
       setError('Не удалось получить корректный ID пользователя');
       setLoading(false);
-      console.error('[SubscriptionWidget] fetchSubscriptionStatus: userId отсутствует или невалиден!', userId);
       return false;
     }
     setLoading(true);
     try {
-      console.log('[SubscriptionWidget] fetchSubscriptionStatus: userId =', userId, typeof userId);
-      const subscriptionData = await getUserSubscriptionStatus(String(userId));
+      const subscriptionData = await getUserSubscriptionStatus(userId);
       setStatus(subscriptionData);
-      
       if (window.Telegram?.WebApp?.MainButton) {
         if (!subscriptionData.has_subscription && !isActive) {
           window.Telegram.WebApp.MainButton.show();
@@ -161,10 +150,8 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
           window.Telegram.WebApp.MainButton.hide();
         }
       }
-      
       return subscriptionData.has_subscription;
     } catch (err: any) {
-      console.error('Ошибка при получении статуса подписки:', err);
       setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке статуса подписки');
       return false;
     } finally {
@@ -189,26 +176,18 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
     }
   };
   
-  const handleInvoiceGeneration = async (userId: number) => {
+  const handleInvoiceGeneration = async (userId: string) => {
     try {
       setIsSubscribing(true);
-      if (!userId || isNaN(userId)) {
-        setError('Некорректный userId для оплаты');
-        setIsSubscribing(false);
-        console.error('[SubscriptionWidget] handleInvoiceGeneration: userId невалиден!', userId);
-        return;
-      }
-      console.log('[SubscriptionWidget] handleInvoiceGeneration: userId =', userId, typeof userId);
       const response = await fetch('/generate-stars-invoice-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: String(userId), amount: 1 }) // временно 1 Star
+        body: JSON.stringify({ user_id: userId, amount: 1 })
       });
       const data = await response.json();
       if (data.success && data.invoice_link) {
         if (window?.Telegram?.WebApp && typeof window?.Telegram?.WebApp.openInvoice === 'function') {
           window.Telegram.WebApp.openInvoice(data.invoice_link, (status) => {
-            console.log('[SubscriptionWidget] openInvoice callback status:', status);
             if (status === 'paid') {
               fetchSubscriptionStatus();
               if (window?.Telegram?.WebApp?.showPopup) {
@@ -234,24 +213,17 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
         setIsSubscribing(false);
       }
     } catch (error) {
-      console.error('Ошибка при генерации Stars invoice link:', error);
       setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
       setIsSubscribing(false);
     }
   };
   
   const handleSubscribe = async () => {
-    try {
-      if (!userId || isNaN(userId)) {
-        setError('Не удалось получить корректный ID пользователя');
-        console.error('[SubscriptionWidget] handleSubscribe: userId невалиден!', userId);
-        return;
-      }
-      await handleInvoiceGeneration(userId);
-    } catch (error) {
-      console.error('Ошибка при подписке:', error);
-      setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
+    if (!userId) {
+      setError('Не удалось получить корректный ID пользователя');
+      return;
     }
+    await handleInvoiceGeneration(userId);
   };
   
   if (loading) {
@@ -263,17 +235,27 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
       <div className="subscription-widget error">
         <p>Ошибка: {error}</p>
         <button onClick={fetchSubscriptionStatus}>Повторить</button>
+        <pre style={{textAlign: 'left', fontSize: '12px', marginTop: '16px', color: '#888', background: '#222', padding: '8px', borderRadius: '6px'}}>
+          userId: {userId}
+          {'\n'}initData: {window.Telegram?.WebApp?.initData}
+          {'\n'}localStorage.tg_user_id: {localStorage.getItem('tg_user_id')}
+        </pre>
       </div>
     );
   }
   
-  if (!userId || isNaN(userId)) {
+  if (!userIdReady) {
+    return <div className="subscription-widget loading">Определение пользователя Telegram...</div>;
+  }
+  
+  if (!userId) {
     return (
       <div className="subscription-widget error">
         <p>Ошибка: Не удалось получить корректный ID пользователя из Telegram.<br/>Пожалуйста, перезапустите мини-приложение из Telegram.<br/>Если ошибка повторяется — попробуйте очистить кэш Telegram или обновить приложение.</p>
         <button onClick={() => window.Telegram?.WebApp?.close?.()}>Закрыть мини-приложение</button>
         <pre style={{textAlign: 'left', fontSize: '12px', marginTop: '16px', color: '#888', background: '#222', padding: '8px', borderRadius: '6px'}}>
-          window.Telegram: {JSON.stringify(window.Telegram, null, 2)}
+          userId: {userId}
+          {'\n'}initData: {window.Telegram?.WebApp?.initData}
           {'\n'}localStorage.tg_user_id: {localStorage.getItem('tg_user_id')}
         </pre>
       </div>
