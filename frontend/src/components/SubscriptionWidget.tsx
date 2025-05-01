@@ -29,6 +29,7 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
     setError(null); // Сбрасываем предыдущие ошибки перед запросом
     try {
       const subscriptionData = await getUserSubscriptionStatus(String(currentUserId));
+      console.log('[SubscriptionWidget] fetchSubscriptionStatus: Получен ответ от API:', subscriptionData);
       setStatus(subscriptionData);
       if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.MainButton) {
         if (!subscriptionData.has_subscription && !isActive) {
@@ -37,7 +38,7 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
           window.Telegram.WebApp.MainButton.hide();
         }
       }
-      console.log('[SubscriptionWidget] Получен статус подписки:', subscriptionData);
+      console.log('[SubscriptionWidget] fetchSubscriptionStatus: Статус в state обновлен.');
       return subscriptionData.has_subscription;
     } catch (e: any) {
       setError('Ошибка API при получении статуса подписки: ' + (e?.message || e));
@@ -134,67 +135,43 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
   
   // --- useEffect для настройки кнопок и событий Telegram --- 
   useEffect(() => {
-    console.log('Инициализация Telegram WebApp UI...');
+    console.log('[SubscriptionWidget] useEffect [status]: Запуск настройки UI/MainButton, текущий статус:', status);
     if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp) {
-      console.log('window.Telegram.WebApp найден, настраиваем UI...');
+      console.log('[SubscriptionWidget] useEffect [status]: window.Telegram.WebApp найден');
       window.Telegram.WebApp.ready();
       
       if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.MainButton) {
-        window.Telegram.WebApp.MainButton.setText('Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars');
-        window.Telegram.WebApp.MainButton.color = '#2481cc';
-        window.Telegram.WebApp.MainButton.textColor = '#ffffff';
-        // Показываем/скрываем кнопку в зависимости от статуса (полученного ранее)
-        if (status?.has_subscription) {
-           window.Telegram.WebApp.MainButton.hide();
-        } else {
-           window.Telegram.WebApp.MainButton.show();
-        }
-        window.Telegram.WebApp.MainButton.onClick(handleSubscribeViaMainButton);
+        console.log('[SubscriptionWidget] useEffect [status]: Скрываем MainButton Telegram.');
+        window.Telegram.WebApp.MainButton.hide();
       } else {
-        console.warn('MainButton недоступен в Telegram WebApp');
+        console.warn('[SubscriptionWidget] useEffect [status]: MainButton недоступен');
       }
       
-      const handleInvoiceClosed = () => {
-        console.log('Событие invoiceClosed, обновляем статус подписки');
-        fetchSubscriptionStatus(userId); // Используем userId из стейта
+      const handleInvoiceClosed = async () => {
+        console.log('[SubscriptionWidget] Event: invoiceClosed. Запускаем fetchSubscriptionStatus...');
+        await fetchSubscriptionStatus(userId);
+        console.log('[SubscriptionWidget] Event: invoiceClosed. fetchSubscriptionStatus завершен.');
       };
 
       if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp && typeof window.Telegram.WebApp.onEvent === 'function') {
-        // Убираем обработчик popup_closed, он может быть излишним
-        // window.Telegram.WebApp.onEvent('popup_closed', handleInvoiceClosed); 
+        console.log('[SubscriptionWidget] useEffect [status]: Привязываем обработчик invoiceClosed');
         window.Telegram.WebApp.onEvent('invoiceClosed', handleInvoiceClosed); 
       } else {
-        console.warn('onEvent недоступен в Telegram WebApp');
+        console.warn('[SubscriptionWidget] useEffect [status]: onEvent недоступен');
       }
 
       // Функция очистки для useEffect
       return () => {
-        if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.MainButton) {
-          window.Telegram.WebApp.MainButton.offClick(handleSubscribeViaMainButton);
-        }
+        console.log('[SubscriptionWidget] useEffect [status]: Очистка...');
         if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp && typeof window.Telegram.WebApp.offEvent === 'function') {
-          // window.Telegram.WebApp.offEvent('popup_closed', handleInvoiceClosed);
-          window.Telegram.WebApp.offEvent('invoiceClosed', handleInvoiceClosed);
+           console.log('[SubscriptionWidget] useEffect [status]: Отвязываем обработчик invoiceClosed');
+           window.Telegram.WebApp.offEvent('invoiceClosed', handleInvoiceClosed);
         }
       };
-    }
-  }, [status]); // Перезапускаем настройку UI при изменении статуса подписки
-  
-  const handleSubscribeViaMainButton = () => {
-    console.log('Нажата главная кнопка в Telegram WebApp');
-    if (window.Telegram?.WebApp?.showConfirm) {
-      window.Telegram.WebApp.showConfirm(
-        'Вы хотите оформить подписку за ' + SUBSCRIPTION_PRICE + ' Stars?',
-        (confirmed) => {
-          if (confirmed) {
-            handleSubscribe();
-          }
-        }
-      );
     } else {
-      handleSubscribe();
+       console.log('[SubscriptionWidget] useEffect [status]: window.Telegram.WebApp НЕ найден.');
     }
-  };
+  }, [status, userId]); // Перезапускаем настройку UI при изменении статуса или userId
   
   const handleInvoiceGeneration = async (userId: string) => {
     try {
@@ -293,6 +270,9 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
   }
   
   // --- Новый блок отображения статуса подписки ---
+  // Логируем статус перед рендером
+  console.log('[SubscriptionWidget] Render: Текущий статус для отображения:', status);
+  
   // Проверяем лимиты для бесплатного плана
   const freePostLimit = 2;
   const freeAnalysisLimit = 2;
