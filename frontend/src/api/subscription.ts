@@ -22,10 +22,7 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
   }
 
   try {
-    const response = await axios.get(`${API_URL}/subscription/status`, {
-      headers: { 'x-telegram-user-id': userId }
-    });
-    
+    const response = await axios.get(`/subscription/status?user_id=${userId}`);
     return response.data;
   } catch (error) {
     console.error('Ошибка при получении статуса подписки:', error);

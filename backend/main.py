@@ -3370,3 +3370,24 @@ async def resolve_user_id(request: Request):
         logger.error('[resolve-user-id] Ошибка: %s', e)
         return {"error": str(e)}
 
+@app.get("/subscription/status")
+async def get_subscription_status(request: Request):
+    user_id = request.query_params.get("user_id")
+    if not user_id:
+        return {"error": "user_id обязателен"}
+    try:
+        result = supabase.table("user_subscription").select("*").eq("user_id", int(user_id)).maybe_single().execute()
+        if result.data:
+            sub = result.data
+            now = datetime.utcnow()
+            is_active = sub.get("is_active", False) and sub.get("end_date") and datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00")) > now
+            return {
+                "has_subscription": is_active,
+                "subscription_end_date": sub.get("end_date"),
+                "is_active": is_active
+            }
+        else:
+            return {"has_subscription": False}
+    except Exception as e:
+        return {"error": str(e)}
+
