@@ -3384,10 +3384,16 @@ async def get_subscription_status(request: Request):
             return {
                 "has_subscription": is_active,
                 "subscription_end_date": sub.get("end_date"),
-                "is_active": is_active
+                "is_active": is_active,
+                "analysis_count": sub.get("analysis_count", 0),
+                "post_generation_count": sub.get("post_generation_count", 0)
             }
         else:
-            return {"has_subscription": False}
+            return {
+                "has_subscription": False,
+                "analysis_count": 0,
+                "post_generation_count": 0
+            }
     except Exception as e:
         return {"error": str(e)}
 
