@@ -50,6 +50,11 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
           console.log('Popup закрыт, обновляем статус подписки');
           fetchSubscriptionStatus();
         });
+        // === ДОБАВЛЕНО: обработка invoiceClosed ===
+        window.Telegram.WebApp.onEvent('invoiceClosed', () => {
+          console.log('Событие invoiceClosed, обновляем статус подписки');
+          fetchSubscriptionStatus();
+        });
       }
     } else {
       console.warn('window.Telegram.WebApp не найден!');
@@ -145,11 +150,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
                   buttons: [{ type: 'ok' }]
                 });
               }
-              setTimeout(() => {
-                if (window?.Telegram?.WebApp?.close) {
-                  window.Telegram.WebApp.close();
-                }
-              }, 300);
             } else if (status === 'failed') {
               setError('Оплата не удалась. Пожалуйста, попробуйте позже.');
             } else if (status === 'cancelled') {
