@@ -2,34 +2,34 @@ import React, { useState, useEffect } from 'react';
 import '../styles/SubscriptionWidget.css';
 import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice } from '../api/subscription';
 
-interface SubscriptionWidgetProps {
-  userId: string | null;
-  isActive?: boolean;
-}
-
 // API_URL для относительных путей
 const API_URL = '';
 
-const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActive }) => {
+const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 1; // временно 1 Star для теста
   const [isSubscribing, setIsSubscribing] = useState(false);
+  const [userId, setUserId] = useState<number | null>(null);
   
-  // Инициализация и настройка Telegram WebApp
+  useEffect(() => {
+    if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
+      setUserId(window.Telegram.WebApp.initDataUnsafe.user.id);
+    } else {
+      setUserId(null);
+    }
+  }, []);
+  
   useEffect(() => {
     console.log('Инициализация Telegram WebApp...');
     
-    // Проверяем наличие Telegram WebApp
     if (window.Telegram?.WebApp) {
       console.log('window.Telegram.WebApp найден, настраиваем...');
       
-      // Инициализируем Telegram WebApp
       window.Telegram.WebApp.ready();
       
-      // Настраиваем главную кнопку
       if (window.Telegram.WebApp.MainButton) {
         window.Telegram.WebApp.MainButton.setText('Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars');
         window.Telegram.WebApp.MainButton.color = '#2481cc';
@@ -38,19 +38,16 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
           window.Telegram.WebApp.MainButton.hide();
         }
         
-        // Добавляем обработчик нажатия на главную кнопку
         window.Telegram.WebApp.MainButton.onClick(handleSubscribeViaMainButton);
       } else {
         console.warn('MainButton недоступен в Telegram WebApp');
       }
       
-      // Добавляем обработчик onEvent для события 'popup_closed'
       if (typeof window.Telegram.WebApp.onEvent === 'function') {
         window.Telegram.WebApp.onEvent('popup_closed', () => {
           console.log('Popup закрыт, обновляем статус подписки');
           fetchSubscriptionStatus();
         });
-        // === ДОБАВЛЕНО: обработка invoiceClosed ===
         window.Telegram.WebApp.onEvent('invoiceClosed', () => {
           console.log('Событие invoiceClosed, обновляем статус подписки');
           fetchSubscriptionStatus();
@@ -60,7 +57,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       console.warn('window.Telegram.WebApp не найден!');
     }
     
-    // Функция очистки при размонтировании компонента
     return () => {
       if (window.Telegram?.WebApp?.MainButton) {
         window.Telegram.WebApp.MainButton.offClick(handleSubscribeViaMainButton);
@@ -72,8 +68,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     if (userId) {
       fetchSubscriptionStatus();
     }
-    
-    // Добавляем логирование статуса Telegram WebApp при загрузке компонента
     console.log('SubscriptionWidget загружен, проверка Telegram.WebApp:');
     console.log('window.Telegram существует:', !!window.Telegram);
     console.log('window.Telegram?.WebApp существует:', !!window.Telegram?.WebApp);
@@ -83,13 +77,16 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   }, [userId]);
   
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
+    if (!userId) {
+      setError('Не удалось получить ID пользователя');
+      setLoading(false);
+      return false;
+    }
     setLoading(true);
     try {
-      // Используем функцию из API вместо прямого запроса
-      const subscriptionData = await getUserSubscriptionStatus(userId);
+      const subscriptionData = await getUserSubscriptionStatus(userId.toString());
       setStatus(subscriptionData);
       
-      // Показываем/скрываем главную кнопку в зависимости от статуса подписки
       if (window.Telegram?.WebApp?.MainButton) {
         if (!subscriptionData.has_subscription && !isActive) {
           window.Telegram.WebApp.MainButton.show();
@@ -108,11 +105,9 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     }
   };
   
-  // Функция для запуска платежа через MainButton
   const handleSubscribeViaMainButton = () => {
     console.log('Нажата главная кнопка в Telegram WebApp');
     
-    // Показываем подтверждение через Telegram WebApp
     if (window.Telegram?.WebApp?.showConfirm) {
       window.Telegram.WebApp.showConfirm(
         'Вы хотите оформить подписку за ' + SUBSCRIPTION_PRICE + ' Stars?',
@@ -123,7 +118,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
         }
       );
     } else {
-      // Если метод showConfirm недоступен, просто продолжаем
       handleSubscribe();
     }
   };
@@ -131,7 +125,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const handleInvoiceGeneration = async (userId: number) => {
     try {
       setIsSubscribing(true);
-      // Получаем invoice_url с backend
       const response = await fetch('/generate-stars-invoice-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -174,15 +167,10 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   
   const handleSubscribe = async () => {
     try {
-      // Получаем ID пользователя из Telegram WebApp
-      const userId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
-      
       if (!userId) {
         setError('Не удалось получить ID пользователя');
         return;
       }
-      
-      // Генерируем инвойс для оплаты
       await handleInvoiceGeneration(userId);
     } catch (error) {
       console.error('Ошибка при подписке:', error);
