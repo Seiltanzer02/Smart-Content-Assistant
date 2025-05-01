@@ -3377,6 +3377,16 @@ async def get_subscription_status(request: Request):
         return {"error": "user_id обязателен"}
     try:
         result = supabase.table("user_subscription").select("*").eq("user_id", int(user_id)).maybe_single().execute()
+        usage_result = supabase.table("user_usage_stats").select("*").eq("user_id", int(user_id)).maybe_single().execute()
+        usage = usage_result.data if usage_result and usage_result.data else None
+        reset_at = None
+        next_free_limit_reset = None
+        if usage and usage.get('reset_at'):
+            import datetime
+            reset_at = usage['reset_at']
+            if isinstance(reset_at, str):
+                reset_at = datetime.datetime.fromisoformat(reset_at.replace('Z', '+00:00'))
+            next_free_limit_reset = (reset_at + datetime.timedelta(days=14)).isoformat()
         if result.data:
             sub = result.data
             now = datetime.utcnow()
@@ -3385,14 +3395,16 @@ async def get_subscription_status(request: Request):
                 "has_subscription": is_active,
                 "subscription_end_date": sub.get("end_date"),
                 "is_active": is_active,
-                "analysis_count": sub.get("analysis_count", 0),
-                "post_generation_count": sub.get("post_generation_count", 0)
+                "analysis_count": usage["analysis_count"] if usage else 0,
+                "post_generation_count": usage["post_generation_count"] if usage else 0,
+                "next_free_limit_reset": next_free_limit_reset
             }
         else:
             return {
                 "has_subscription": False,
-                "analysis_count": 0,
-                "post_generation_count": 0
+                "analysis_count": usage["analysis_count"] if usage else 0,
+                "post_generation_count": usage["post_generation_count"] if usage else 0,
+                "next_free_limit_reset": next_free_limit_reset
             }
     except Exception as e:
         return {"error": str(e)}
