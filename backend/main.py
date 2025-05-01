@@ -331,7 +331,7 @@ async def telegram_webhook(request: Request):
         payment_id = successful_payment.get("telegram_payment_charge_id")
         now = datetime.utcnow()
         start_date = now
-        end_date = now + timedelta(days=30)
+        end_date = now + timedelta(hours=1)
         try:
             # Проверяем, есть ли уже подписка
             existing = supabase.table("user_subscription").select("*").eq("user_id", user_id).execute()
