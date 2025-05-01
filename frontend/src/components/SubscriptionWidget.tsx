@@ -15,17 +15,31 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
   const [userId, setUserId] = useState<number | null>(null);
   
   useEffect(() => {
+    console.log('[SubscriptionWidget] Монтирование компонента');
+    console.log('[SubscriptionWidget] window.Telegram:', window.Telegram);
+    console.log('[SubscriptionWidget] window.Telegram?.WebApp:', window.Telegram?.WebApp);
+    console.log('[SubscriptionWidget] window.Telegram?.WebApp?.initDataUnsafe:', window.Telegram?.WebApp?.initDataUnsafe);
     let tgUserId: string | undefined;
     if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
-      tgUserId = window.Telegram.WebApp.initDataUnsafe.user.id.toString();
-      localStorage.setItem('tg_user_id', tgUserId);
+      tgUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
+      if (/^\d+$/.test(tgUserId)) {
+        localStorage.setItem('tg_user_id', tgUserId);
+        console.log('[SubscriptionWidget] userId получен из Telegram:', tgUserId);
+      } else {
+        console.error('[SubscriptionWidget] userId из Telegram невалиден:', tgUserId);
+        tgUserId = undefined;
+      }
     } else {
       const storedId = localStorage.getItem('tg_user_id');
-      if (storedId) {
+      if (storedId && /^\d+$/.test(storedId)) {
         tgUserId = storedId;
+        console.log('[SubscriptionWidget] userId получен из localStorage:', tgUserId);
+      } else {
+        console.warn('[SubscriptionWidget] userId не найден или невалиден в localStorage:', storedId);
+        tgUserId = undefined;
       }
     }
-    setUserId(typeof tgUserId === 'string' ? Number(tgUserId) : null);
+    setUserId(tgUserId ? Number(tgUserId) : null);
   }, []);
   
   useEffect(() => {
@@ -71,8 +85,11 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
   }, [isActive]);
   
   useEffect(() => {
-    if (userId) {
+    if (userId && !isNaN(userId)) {
+      console.log('[SubscriptionWidget] useEffect: userId найден:', userId, typeof userId);
       fetchSubscriptionStatus();
+    } else {
+      console.warn('[SubscriptionWidget] useEffect: userId отсутствует или невалиден!', userId);
     }
     console.log('SubscriptionWidget загружен, проверка Telegram.WebApp:');
     console.log('window.Telegram существует:', !!window.Telegram);
@@ -83,14 +100,16 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
   }, [userId]);
   
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
-    if (!userId) {
-      setError('Не удалось получить ID пользователя');
+    if (!userId || isNaN(userId)) {
+      setError('Не удалось получить корректный ID пользователя');
       setLoading(false);
+      console.error('[SubscriptionWidget] fetchSubscriptionStatus: userId отсутствует или невалиден!', userId);
       return false;
     }
     setLoading(true);
     try {
-      const subscriptionData = await getUserSubscriptionStatus(userId.toString());
+      console.log('[SubscriptionWidget] fetchSubscriptionStatus: userId =', userId, typeof userId);
+      const subscriptionData = await getUserSubscriptionStatus(String(userId));
       setStatus(subscriptionData);
       
       if (window.Telegram?.WebApp?.MainButton) {
@@ -131,15 +150,23 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
   const handleInvoiceGeneration = async (userId: number) => {
     try {
       setIsSubscribing(true);
+      if (!userId || isNaN(userId)) {
+        setError('Некорректный userId для оплаты');
+        setIsSubscribing(false);
+        console.error('[SubscriptionWidget] handleInvoiceGeneration: userId невалиден!', userId);
+        return;
+      }
+      console.log('[SubscriptionWidget] handleInvoiceGeneration: userId =', userId, typeof userId);
       const response = await fetch('/generate-stars-invoice-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, amount: 1 }) // временно 1 Star
+        body: JSON.stringify({ user_id: String(userId), amount: 1 }) // временно 1 Star
       });
       const data = await response.json();
       if (data.success && data.invoice_link) {
         if (window?.Telegram?.WebApp && typeof window?.Telegram?.WebApp.openInvoice === 'function') {
           window.Telegram.WebApp.openInvoice(data.invoice_link, (status) => {
+            console.log('[SubscriptionWidget] openInvoice callback status:', status);
             if (status === 'paid') {
               fetchSubscriptionStatus();
               if (window?.Telegram?.WebApp?.showPopup) {
@@ -173,8 +200,9 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
   
   const handleSubscribe = async () => {
     try {
-      if (!userId) {
-        setError('Не удалось получить ID пользователя');
+      if (!userId || isNaN(userId)) {
+        setError('Не удалось получить корректный ID пользователя');
+        console.error('[SubscriptionWidget] handleSubscribe: userId невалиден!', userId);
         return;
       }
       await handleInvoiceGeneration(userId);
@@ -193,6 +221,19 @@ const SubscriptionWidget: React.FC<{ isActive?: boolean }> = ({ isActive }) => {
       <div className="subscription-widget error">
         <p>Ошибка: {error}</p>
         <button onClick={fetchSubscriptionStatus}>Повторить</button>
+      </div>
+    );
+  }
+  
+  if (!userId || isNaN(userId)) {
+    return (
+      <div className="subscription-widget error">
+        <p>Ошибка: Не удалось получить корректный ID пользователя из Telegram.<br/>Пожалуйста, перезапустите мини-приложение из Telegram.<br/>Если ошибка повторяется — попробуйте очистить кэш Telegram или обновить приложение.</p>
+        <button onClick={() => window.Telegram?.WebApp?.close?.()}>Закрыть мини-приложение</button>
+        <pre style={{textAlign: 'left', fontSize: '12px', marginTop: '16px', color: '#888', background: '#222', padding: '8px', borderRadius: '6px'}}>
+          window.Telegram: {JSON.stringify(window.Telegram, null, 2)}
+          {'\n'}localStorage.tg_user_id: {localStorage.getItem('tg_user_id')}
+        </pre>
       </div>
     );
   }

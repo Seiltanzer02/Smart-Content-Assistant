@@ -309,34 +309,46 @@ async def generate_stars_invoice_link(request: Request):
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
+    logger.info('[telegram_webhook] Получены данные: %s', json.dumps(data, ensure_ascii=False))
     # 1. Обработка pre_checkout_query
     pre_checkout_query = data.get("pre_checkout_query")
     if pre_checkout_query:
         query_id = pre_checkout_query.get("id")
         bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        logger.info('[telegram_webhook] pre_checkout_query: query_id=%s', query_id)
         if not bot_token:
+            logger.error('[telegram_webhook] Нет TELEGRAM_BOT_TOKEN')
             return {"ok": False, "error": "TELEGRAM_BOT_TOKEN не задан"}
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"https://api.telegram.org/bot{bot_token}/answerPreCheckoutQuery",
                 json={"pre_checkout_query_id": query_id, "ok": True}
             )
-            print("Ответ на pre_checkout_query:", resp.text)
+            logger.info("[telegram_webhook] Ответ на pre_checkout_query: %s", resp.text)
         return {"ok": True, "pre_checkout_query": True}
     # 2. Обработка успешной оплаты
     message = data.get("message", {})
     successful_payment = message.get("successful_payment")
     if successful_payment:
-        user_id = message.get("from", {}).get("id")
+        user_id_raw = message.get("from", {}).get("id")
+        try:
+            user_id = int(user_id_raw)
+            logger.info('[telegram_webhook] user_id приведён к int: %s (%s)', user_id, type(user_id))
+        except Exception as e:
+            logger.error('[telegram_webhook] Не удалось привести user_id к int: %s, ошибка: %s', user_id_raw, e)
+            return {"ok": False, "error": "Некорректный user_id"}
         payment_id = successful_payment.get("telegram_payment_charge_id")
         now = datetime.utcnow()
         start_date = now
         end_date = now + timedelta(hours=1)
+        logger.info('[telegram_webhook] Успешная оплата: user_id=%s (%s), payment_id=%s, start_date=%s, end_date=%s', user_id, type(user_id), payment_id, start_date, end_date)
         try:
             # Проверяем, есть ли уже подписка
             existing = supabase.table("user_subscription").select("*").eq("user_id", user_id).execute()
+            logger.info('[telegram_webhook] Результат поиска подписки: %s', existing.data)
             if existing.data and len(existing.data) > 0:
                 # Обновляем подписку
+                logger.info('[telegram_webhook] Обновляем подписку для user_id=%s', user_id)
                 supabase.table("user_subscription").update({
                     "is_active": True,
                     "start_date": start_date.isoformat(),
@@ -345,6 +357,7 @@ async def telegram_webhook(request: Request):
                 }).eq("user_id", user_id).execute()
             else:
                 # Создаём новую подписку
+                logger.info('[telegram_webhook] Создаём новую подписку для user_id=%s', user_id)
                 supabase.table("user_subscription").insert({
                     "user_id": user_id,
                     "is_active": True,
@@ -352,9 +365,11 @@ async def telegram_webhook(request: Request):
                     "end_date": end_date.isoformat(),
                     "payment_id": payment_id
                 }).execute()
+            logger.info('[telegram_webhook] Подписка успешно активирована для user_id=%s', user_id)
         except Exception as e:
-            print("Ошибка при активации подписки:", e)
+            logger.error('[telegram_webhook] Ошибка при активации подписки: %s', e, exc_info=True)
         return {"ok": True, "successful_payment": True}
+    logger.info('[telegram_webhook] Нет события оплаты, возврат ok')
     return {"ok": True}
 
 
