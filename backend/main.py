@@ -940,12 +940,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         message=error_message
     )
                 
-    except Exception as e:
-        logger.error(f"Ошибка при генерации плана: {e}\\n{traceback.format_exc()}") # Добавляем traceback
-        return PlanGenerationResponse(
-            message=f"Ошибка при генерации плана: {str(e)}",
-            plan=[]
-        )
+ 
 
 # --- Настройка обработки корневого маршрута для обслуживания статических файлов ---
 @app.get("/")
