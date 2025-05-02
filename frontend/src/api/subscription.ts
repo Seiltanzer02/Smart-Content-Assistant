@@ -4,9 +4,7 @@ import axios from 'axios';
 export interface SubscriptionStatus {
   has_subscription: boolean;
   is_active: boolean;
-  subscription_end_date: string | null;
-  debug?: any; // Отладочная информация, может содержать любые поля
-  error?: string; // Возможная ошибка
+  subscription_end_date?: string | null;
 }
 
 // API_URL пустая строка для относительных путей
@@ -15,75 +13,28 @@ const API_URL = '';
 /**
  * Получает статус подписки пользователя
  * @param userId ID пользователя Telegram
- * @param forceRefresh Принудительное обновление данных из БД
- * @returns Promise с информацией о подписке
+ * @returns Promise с данными о статусе подписки
  */
-export const getUserSubscriptionStatus = async (
-  userId: string | number,
-  forceRefresh: boolean = true
-): Promise<SubscriptionStatus> => {
+export const getUserSubscriptionStatus = async (userId: string | null): Promise<SubscriptionStatus> => {
+  if (!userId) {
+    console.error('[getUserSubscriptionStatus] Не передан userId!');
+    throw new Error('ID пользователя не предоставлен');
+  }
+  console.log(`[getUserSubscriptionStatus] Запрос статуса подписки для userId: ${userId}`);
   try {
-    // Добавляем параметры для обхода кэширования
-    const timestamp = Date.now();
-    const nocache = Math.random().toString(36).substring(2, 15);
-    
-    // Добавляем агрессивный подход к обходу кэширования
-    const params = {
-      user_id: userId,
-      t: timestamp,
-      nocache,
-      force: forceRefresh,
-      "_": timestamp,
-      absolute_nocache: `nocache_${nocache}_${timestamp}`,
-      force_nocache: `nocache_${nocache}_${timestamp}`
-    };
-    
-    console.log(`[API] Запрос статуса подписки для userId=${userId}, timestamp=${timestamp}, nocache=${nocache}`);
-    
-    // Выполняем запрос с таймаутом
-    const response = await axios.get('/subscription/status', {
-      params,
-      headers: {
-        'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0, s-max-age=0',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-        'x-telegram-user-id': String(userId),
-      },
-      // Добавляем таймаут, чтобы не ждать ответа вечно
-      timeout: 10000
-    });
-    
-    // Проверяем, что пришел корректный ответ
-    if (response.data) {
-      // Валидируем и нормализуем данные
-      const subscriptionData: SubscriptionStatus = {
-        has_subscription: Boolean(response.data.has_subscription),
-        is_active: Boolean(response.data.is_active),
-        subscription_end_date: response.data.subscription_end_date || null
-      };
-      
-      console.log(`[API] Получен статус подписки:`, subscriptionData);
-      console.log(`[API] Отладочная информация:`, response.data.debug || 'Нет отладочной информации');
-      
-      return subscriptionData;
-    } else {
-      console.error('[API] Ошибка: Ответ не содержит данных');
-      // Возвращаем базовый статус (неактивный)
-      return {
-        has_subscription: false,
-        is_active: false,
-        subscription_end_date: null
-      };
+    const url = `/subscription/status?user_id=${userId}&t=${Date.now()}`;
+    console.log(`[getUserSubscriptionStatus] GET ${url}`);
+    const response = await axios.get(url);
+    console.log('[getUserSubscriptionStatus] Ответ от сервера:', response.data);
+    if (response.data.debug) {
+      console.log('[getUserSubscriptionStatus][DEBUG]:', response.data.debug);
     }
+    const { has_subscription, is_active, subscription_end_date } = response.data;
+    console.log('[getUserSubscriptionStatus] Возвращаемые поля:', { has_subscription, is_active, subscription_end_date });
+    return { has_subscription, is_active, subscription_end_date };
   } catch (error) {
-    console.error('[API] Ошибка при получении статуса подписки:', error);
-    
-    // В случае ошибки возвращаем базовый статус (неактивный)
-    return {
-      has_subscription: false,
-      is_active: false,
-      subscription_end_date: null
-    };
+    console.error('[getUserSubscriptionStatus] Ошибка при получении статуса подписки:', error);
+    throw error;
   }
 };
 

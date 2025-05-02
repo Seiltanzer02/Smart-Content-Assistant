@@ -8,25 +8,10 @@ import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
 import { getUserSubscriptionStatus, SubscriptionStatus } from './api/subscription';
 
-// Добавляем CSS для контейнера подписки
-const subscriptionContainerStyle = {
-  marginBottom: '20px',
-  padding: '10px',
-  borderRadius: '8px'
-};
-
 // Определяем базовый URL API
 // Так как фронтенд и API на одном домене, используем пустую строку
 // чтобы axios использовал относительные пути (например, /generate-plan)
 const API_BASE_URL = '';
-// const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000'; // Убираем использование process.env
-
-// --- УДАЛЕНО: Вспомогательная функция для ключей localStorage ---
-// const getUserSpecificKey = (baseKey: string, userId: string | null): string | null => {
-//   if (!userId) return null; // Не работаем с localStorage без ID пользователя
-//   return `${userId}_${baseKey}`;
-// };
-// --- КОНЕЦ УДАЛЕНИЯ ---
 
 // Компоненты для отображения загрузки и сообщений
 const Loading = ({ message }: { message: string }) => (
@@ -394,168 +379,74 @@ const CalendarDay = ({
   );
 };
 
-// ErrorBoundary уже есть (SimpleErrorBoundary), оборачиваю весь App
-
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus | null>(null);
-  const [debugInfo, setDebugInfo] = useState<any>(null); // Оставляем debug
-  const [lastRefreshTime, setLastRefreshTime] = useState<string>(new Date().toISOString());
-  const previousStatusRef = useRef<SubscriptionStatus | null>(null);
-  const [error, setError] = useState<string | null>(null); // Убедимся что это состояние существует
-
-  // --- УДАЛЕНЫ: Константы для localStorage ---
-  // const PREMIUM_TIMESTAMP_KEY = 'lastPremiumConfirmedAt';
-  // const PREMIUM_TIMESTAMP_LIFETIME_MS = 60 * 60 * 1000;
-
-  // --- ИЗМЕНЕНО: Упрощенная функция refetchSubscriptionStatus ---
-  const refetchSubscriptionStatus = useCallback(async () => {
-    if (!userId) return;
-    console.log('[refetchSubscriptionStatus] Запрос статуса с API...');
-    try {
-      // Добавляем флаг форсированного обновления для борьбы с кэшированием
-      const fetchedStatus = await getUserSubscriptionStatus(userId, true);
-      console.log('[refetchSubscriptionStatus] Получен статус:', fetchedStatus);
-      
-      // Проверяем валидность полученных данных
-      if (fetchedStatus && typeof fetchedStatus === 'object') {
-        // Проверяем на наличие всех полей
-        if ('has_subscription' in fetchedStatus && 
-            'is_active' in fetchedStatus && 
-            'subscription_end_date' in fetchedStatus) {
-          
-          // Логируем сравнение с предыдущим статусом
-          if (previousStatusRef.current) {
-            console.log('[refetchSubscriptionStatus] Сравнение с предыдущим статусом:');
-            console.log(`Предыдущий: has_subscription=${previousStatusRef.current.has_subscription}, is_active=${previousStatusRef.current.is_active}`);
-            console.log(`Новый: has_subscription=${fetchedStatus.has_subscription}, is_active=${fetchedStatus.is_active}`);
-            
-            if (previousStatusRef.current.has_subscription !== fetchedStatus.has_subscription ||
-                previousStatusRef.current.is_active !== fetchedStatus.is_active) {
-              console.log('[refetchSubscriptionStatus] ВНИМАНИЕ! Статус изменился!');
-              
-              // Если новый статус показывает активную подписку, запускаем серию дополнительных проверок
-              if (fetchedStatus.has_subscription && fetchedStatus.is_active) {
-                console.log('[refetchSubscriptionStatus] Обнаружена активная подписка! Запускаем дополнительные проверки...');
-                
-                // Запускаем серию повторных запросов с разными интервалами для гарантии
-                const verificationIntervals = [1000, 2000, 3000, 5000];
-                
-                for (const interval of verificationIntervals) {
-                  setTimeout(async () => {
-                    console.log(`[refetchSubscriptionStatus] Дополнительная проверка через ${interval}ms...`);
-                    try {
-                      const verificationStatus = await getUserSubscriptionStatus(userId, true);
-                      console.log(`[refetchSubscriptionStatus] Результат дополнительной проверки:`, verificationStatus);
-                      
-                      // Обновляем состояние только если подписка все еще активна
-                      if (verificationStatus.has_subscription && verificationStatus.is_active) {
-                        setSubscriptionStatus(verificationStatus);
-                        previousStatusRef.current = verificationStatus;
-                        console.log('[refetchSubscriptionStatus] Подтверждено: подписка активна!');
-                      }
-                    } catch (e) {
-                      console.error(`[refetchSubscriptionStatus] Ошибка при дополнительной проверке:`, e);
-                    }
-                  }, interval);
-                }
-              }
-            }
-          }
-          
-          // Обновляем ссылку на предыдущий статус
-          previousStatusRef.current = fetchedStatus;
-          
-          // Обновляем время последнего обновления
-          setLastRefreshTime(new Date().toISOString());
-          
-          // Обновляем debug info, если доступно
-          if (fetchedStatus.debug) {
-            setDebugInfo(fetchedStatus.debug);
-            console.log('[refetchSubscriptionStatus][DEBUG]:', fetchedStatus.debug);
-          } else {
-            setDebugInfo(null);
-          }
-          
-          // Обновляем статус на основе ответа API
-          setSubscriptionStatus({
-            has_subscription: fetchedStatus.has_subscription,
-            is_active: fetchedStatus.is_active,
-            subscription_end_date: fetchedStatus.subscription_end_date
-          });
-          
-          // Сбрасываем ошибку подписки, если она была
-          setSubscriptionError(null);
-          
-          // Возвращаем полученный статус для использования в Promise chain
-          return fetchedStatus;
-        } else {
-          console.error('[refetchSubscriptionStatus] Получен неполный ответ от API:', fetchedStatus);
-          setSubscriptionError('Получен неполный ответ от сервера');
-          return null;
-        }
-      } else {
-        console.error('[refetchSubscriptionStatus] Некорректный формат ответа API:', fetchedStatus);
-        setSubscriptionError('Некорректный формат ответа от сервера');
-        return null;
-      }
-    } catch (err) {
-      console.error('[refetchSubscriptionStatus] Ошибка запроса статуса:', err);
-      setSubscriptionError('Не удалось получить статус подписки');
-      return null;
-    }
-  }, [userId]);
-  // --- КОНЕЦ ИЗМЕНЕНИЯ ---
-
-  // --- КАРДИНАЛЬНО ИЗМЕНЕНО: useEffect для ПЕРВОНАЧАЛЬНОЙ загрузки ---
-  useEffect(() => {
-    console.log(`[Initial Load Effect] Запуск. Текущий userId: ${userId}`);
-    if (userId) {
-      console.log(`[Initial Load Effect] userId установлен: ${userId}. Вызов refetchSubscriptionStatus...`);
-      // Просто вызываем загрузку статуса ОДИН раз при наличии userId
-      refetchSubscriptionStatus().catch(err => {
-        console.error("[Initial Load Effect] Ошибка при загрузке статуса:", err);
-        // Устанавливаем дефолтный статус, чтобы не повредить работу приложения
-        setSubscriptionStatus({
-          has_subscription: false,
-          is_active: false,
-          subscription_end_date: null
-        });
-      });
-    } else {
-      console.log('[Initial Load Effect] userId пока null, статус не запрашиваем.');
-    }
-    // Этот эффект должен зависеть ТОЛЬКО от userId
-  }, [userId, refetchSubscriptionStatus]); // Добавляем refetchSubscriptionStatus в зависимости, так как он используется внутри
-  // --- КОНЕЦ КАРДИНАЛЬНОГО ИЗМЕНЕНИЯ ---
   
-  // --- ДОБАВЛЕНО: Периодический опрос статуса подписки ---
+  // В стейте добавляю debugInfo
+  const [debugInfo, setDebugInfo] = useState<any>(null);
+
+  // --- ИЗМЕНЕНО: Упрощенный refetchSubscriptionStatus --- 
+  const refetchSubscriptionStatus = useCallback(async () => {
+    if (!userId) {
+      console.log('[refetchSubscriptionStatus] userId is null, skipping fetch.');
+      return; // Выходим, если нет userId
+    }
+    console.log(`[refetchSubscriptionStatus] Fetching status for userId: ${userId}...`);
+    try {
+      const fetchedStatus = await getUserSubscriptionStatus(userId);
+      console.log('[refetchSubscriptionStatus] Fetched status from API:', fetchedStatus);
+      if ((fetchedStatus as any).debug) {
+        setDebugInfo((fetchedStatus as any).debug);
+        console.log('[refetchSubscriptionStatus][DEBUG]:', (fetchedStatus as any).debug);
+      } else {
+        // Если debug не пришел, устанавливаем сам ответ или null
+        setDebugInfo(fetchedStatus || { message: 'Debug field missing in response' });
+      }
+      // Устанавливаем статус и логируем то, что реально установили
+      setSubscriptionStatus(currentState => {
+        console.log('[refetchSubscriptionStatus] Updating state with:', fetchedStatus);
+        return fetchedStatus;
+      });
+    } catch (error: any) {
+      console.error('[refetchSubscriptionStatus] Error fetching status:', error);
+      // Устанавливаем debugInfo при ошибке
+      setDebugInfo({ 
+        error: `Error fetching status: ${error?.message || String(error)}`, 
+        response: error?.response?.data 
+      });
+      // Сбрасываем статус при ошибке
+      setSubscriptionStatus(currentState => {
+        console.log('[refetchSubscriptionStatus] Setting state to null due to error.');
+        return null;
+      });
+    }
+  }, [userId]); // Зависимость только от userId
+  // --- КОНЕЦ ИЗМЕНЕНИЯ --- 
+
+  // --- ИЗМЕНЕНО: Упрощенный useEffect для ПЕРВОНАЧАЛЬНОЙ загрузки --- 
   useEffect(() => {
-    if (!userId) return;
-    
-    console.log('[SubscriptionPoller] Запуск периодического опроса статуса подписки');
-    
-    // Запускаем опрос каждые 10 секунд
-    const intervalId = setInterval(() => {
-      console.log('[SubscriptionPoller] Выполняем периодический запрос статуса...');
+    console.log(`[Initial Load Effect] Running. userId: ${userId}`);
+    if (userId) {
+      console.log(`[Initial Load Effect] userId is set (${userId}). Calling refetchSubscriptionStatus.`);
       refetchSubscriptionStatus();
-    }, 10000); // 10 секунд
-    
-    // Очистка при размонтировании
-    return () => {
-      console.log('[SubscriptionPoller] Остановка периодического опроса');
-      clearInterval(intervalId);
-    };
-  }, [userId, refetchSubscriptionStatus]);
-  // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+    } else {
+      console.log('[Initial Load Effect] userId is null or undefined. Clearing status and debug info.');
+      // Если userId нет, сбрасываем статус и debug
+      setSubscriptionStatus(null);
+      setDebugInfo(null);
+    }
+    // Перезапускаем эффект ТОЛЬКО при изменении userId
+  }, [userId, refetchSubscriptionStatus]); // Добавляем refetchSubscriptionStatus в зависимости
+  // --- КОНЕЦ ИЗМЕНЕНИЯ --- 
 
   // useEffect для обновления при изменении видимости (остается без изменений)
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
-        console.log('[VisibilityChange] Документ стал видимым, обновляем статус...');
+        console.log('[Visibility Effect] App became visible. Refetching status...');
         refetchSubscriptionStatus();
       }
     };
@@ -576,6 +467,7 @@ function App() {
   const [selectedIdea, setSelectedIdea] = useState<SuggestedIdea | null>(null);
   const [isGeneratingPostDetails, setIsGeneratingPostDetails] = useState<boolean>(false);
   const [suggestedImages, setSuggestedImages] = useState<PostImage[]>([]);
+  const [error, setError] = useState<string | null>(null); 
   const [success, setSuccess] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<PostImage | null>(null);
 
@@ -597,61 +489,64 @@ function App() {
 
   // Добавляем состояние для подписки
   const [showSubscription, setShowSubscription] = useState<boolean>(false);
-  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
 
   // --- ВОССТАНОВЛЕНО: Состояние для текущего месяца календаря --- 
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
 
-  // --- ИЗМЕНЕНО: Удалена логика сохранения/восстановления из localStorage ---
+  // --- ИЗМЕНЕНИЕ: Удаляем логику localStorage из useEffect для загрузки состояния --- 
   useEffect(() => {
     if (isAuthenticated && userId) {
-      // Загружаем только НЕ связанные со статусом подписки данные
-      // (канал, выбранные каналы и т.д.)
-       const channelKey = `${userId}_channelName`; // Простой ключ
-       const storedChannel = localStorage.getItem(channelKey);
-       if (storedChannel) setChannelName(storedChannel);
-
-       const selectedChannelsKey = `${userId}_selectedChannels`;
-       const storedSelectedChannels = localStorage.getItem(selectedChannelsKey);
-       if (storedSelectedChannels) {
-         try { setSelectedChannels(JSON.parse(storedSelectedChannels)); } catch (e) {}
-       }
-
-       const allChannelsKey = `${userId}_allChannels`;
-       const storedChannels = localStorage.getItem(allChannelsKey);
-       if (storedChannels) {
-         try { setAllChannels(JSON.parse(storedChannels)); } catch (e) {}
-       } else {
-         // Логика обновления каналов из постов остается
-       }
+      console.log(`[Auth Effect] User authenticated (${userId}). Loading initial data.`);
+      // Восстанавливаем состояние из localStorage, используя user-specific ключи
+      const channelKey = `${userId}_channelName`; // Простой ключ без функции
+      const storedChannel = localStorage.getItem(channelKey);
+      if (storedChannel) {
+        setChannelName(storedChannel);
+      }
       
-      // Загружаем сохраненные посты и анализ (это остается)
+      const selectedChannelsKey = `${userId}_selectedChannels`;
+      const storedSelectedChannels = localStorage.getItem(selectedChannelsKey);
+      if (storedSelectedChannels) {
+        try {
+          setSelectedChannels(JSON.parse(storedSelectedChannels));
+        } catch (e) {
+          console.error('Ошибка при восстановлении выбранных каналов:', e);
+        }
+      }
+
+      const allChannelsKey = `${userId}_allChannels`;
+      const storedChannels = localStorage.getItem(allChannelsKey);
+      if (storedChannels) {
+        try {
+          setAllChannels(JSON.parse(storedChannels));
+        } catch (e) {
+          console.error('Ошибка при восстановлении списка каналов:', e);
+        }
+      } 
+      
+      // Загружаем сохраненные посты
       fetchSavedPosts();
-      if (channelName) {
+
+      // Загрузка сохраненного анализа для ТЕКУЩЕГО выбранного канала
+      if (channelName) { 
         fetchSavedAnalysis(channelName);
       }
     }
-     setTimeout(() => setLoading(false), 500);
-  }, [isAuthenticated, userId]); // Зависимости не меняются
 
-  // --- ИЗМЕНЕНО: Сохранение в localStorage без user-specific ключей (если нужно) ---
-   useEffect(() => {
-     if (userId && channelName) { // Проверяем userId
-       localStorage.setItem(`${userId}_channelName`, channelName);
-     }
-   }, [channelName, userId]); // Зависимость от userId
-  
-   useEffect(() => {
-     if (userId) { // Проверяем userId
-       localStorage.setItem(`${userId}_selectedChannels`, JSON.stringify(selectedChannels));
-     }
-   }, [selectedChannels, userId]); // Зависимость от userId
-  
-   useEffect(() => {
-     if (userId) { // Проверяем userId
-       localStorage.setItem(`${userId}_allChannels`, JSON.stringify(allChannels));
-     }
-   }, [allChannels, userId]); // Зависимость от userId
+    // Устанавливаем флаг загрузки после попытки аутентификации/загрузки
+    // (Перенесено из старого useEffect)
+    setTimeout(() => {
+      setLoading(false);
+    }, 500);
+  }, [isAuthenticated, userId]); // Зависимость от isAuthenticated и userId
+
+  // --- ИЗМЕНЕНИЕ: Упрощаем сохранение канала в localStorage --- 
+  useEffect(() => {
+    if (userId && channelName) {
+      const key = `${userId}_channelName`;
+      localStorage.setItem(key, channelName);
+    }
+  }, [channelName, userId]); // Запускаем при изменении канала ИЛИ userId
 
   // --- ВОССТАНОВЛЕНО: useEffect для генерации дней календаря --- 
   useEffect(() => {
@@ -1423,17 +1318,12 @@ function App() {
   // Основной интерфейс
   return (
     <SimpleErrorBoundary>
-      <div style={{ background: '#ffe', color: '#333', padding: 8, marginBottom: 8, fontSize: 12 }}>
+      <div style={{ background: '#ffe', color: '#333', padding: 8, marginBottom: 8, fontSize: 12, border: '1px solid #ccc', borderRadius: '4px' }}>
         <b>userId:</b> {String(userId)}<br/>
-        <b>Статус подписки:</b> {JSON.stringify(subscriptionStatus)}<br/>
-        <b>Последнее обновление:</b> {new Date(lastRefreshTime).toLocaleTimeString()}<br/>
-        <button 
-          onClick={() => refetchSubscriptionStatus()} 
-          style={{ padding: '2px 5px', marginTop: '4px', cursor: 'pointer' }}
-        >
-          Обновить статус
-        </button>
-        <b>DEBUG:</b> <pre style={{whiteSpace:'pre-wrap'}}>{JSON.stringify(debugInfo, null, 2)}</pre>
+        <b>Статус подписки (raw):</b> {JSON.stringify(subscriptionStatus)}<br/>
+        {/* Добавим рендер статуса для наглядности */}
+        <b>Статус (интерпретация):</b> {subscriptionStatus === null ? 'Загрузка/Ошибка' : (subscriptionStatus.is_active && subscriptionStatus.has_subscription ? 'Premium' : 'Free')}<br/>
+        <b>DEBUG Info:</b> <pre style={{whiteSpace:'pre-wrap', maxHeight: '100px', overflowY: 'auto', background:'#f8f8f8', border: '1px dashed #aaa', padding: '4px', margin: '4px 0'}}>{JSON.stringify(debugInfo, null, 2)}</pre>
       </div>
       <div className="app-container">
         <header className="app-header">
@@ -1442,12 +1332,7 @@ function App() {
             {/* Кнопка для управления подпиской */}
             <button
               className="icon-button"
-              onClick={() => {
-                setShowSubscription(!showSubscription);
-                setSubscriptionError(null); // Сбрасываем ошибку при переключении
-                // Скрываем другие виды
-                setCurrentView('analyze');
-              }}
+              onClick={() => setShowSubscription(!showSubscription)}
               title="Управление подпиской"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1486,34 +1371,13 @@ function App() {
         
         {/* Блок подписки */}
         {showSubscription && (
-          <div className="subscription-container" style={subscriptionContainerStyle}>
-            <SimpleErrorBoundary>
-              {subscriptionError ? (
-                <div className="error-message">
-                  <p>{subscriptionError}</p>
-                  <button 
-                    className="action-button small" 
-                    onClick={() => {
-                      setSubscriptionError(null);
-                      refetchSubscriptionStatus();
-                    }}
-                  >
-                    Попробовать снова
-                  </button>
-                </div>
-              ) : (
-                <SubscriptionWidget 
-                  userId={userId}
-                  subscriptionStatus={subscriptionStatus}
-                  onSubscriptionUpdate={refetchSubscriptionStatus}
-                  isActive={subscriptionStatus ? 
-                    (!!subscriptionStatus.is_active || 
-                    !!(subscriptionStatus.subscription_end_date && new Date(subscriptionStatus.subscription_end_date) > new Date())) : 
-                    false}
-                />
-              )}
-            </SimpleErrorBoundary>
-          </div>
+          <SubscriptionWidget
+            userId={userId}
+            subscriptionStatus={subscriptionStatus}
+            onSubscriptionUpdate={refetchSubscriptionStatus} // Старое имя -> новое
+            setSubscriptionStatus={setSubscriptionStatus} // Передаем сеттер
+            isActive={showSubscription} // Используем showSubscription для определения активности
+          />
         )}
 
         <main className="app-main">
@@ -2096,21 +1960,6 @@ function App() {
         <footer className="app-footer">
           <p>© 2024 Smart Content Assistant</p>
         </footer>
-      </div>
-      <div className="debug-info">
-        <p>userId: {userId || 'null'}</p>
-        <p>Статус подписки: {subscriptionStatus ? JSON.stringify(subscriptionStatus) : 'null'}</p>
-        <p>DEBUG: </p>
-        <pre>{
-          (() => {
-            try {
-              return debugInfo ? JSON.stringify(debugInfo, null, 2) : 'null';
-            } catch (e) {
-              console.error("Ошибка при сериализации debugInfo:", e);
-              return "Ошибка сериализации debugInfo";
-            }
-          })()
-        }</pre>
       </div>
     </SimpleErrorBoundary>
   );
