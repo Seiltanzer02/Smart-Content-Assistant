@@ -405,7 +405,9 @@ function App() {
     try {
       const fetchedStatus = await getUserSubscriptionStatus(userId);
       console.log('[refetchSubscriptionStatus] Fetched status:', fetchedStatus);
-      
+      if ((fetchedStatus as any).debug) {
+        console.log('[refetchSubscriptionStatus][DEBUG]:', (fetchedStatus as any).debug);
+      }
       setSubscriptionStatus(currentStatus => {
         // 1. Проверяем localStorage, если сервер вернул Free
         if (!fetchedStatus.has_subscription && userTimestampKey) {
@@ -418,9 +420,8 @@ function App() {
                     // Возвращаем искусственный Premium статус на основе метки
                     return {
                         has_subscription: true,
-                        analysis_count: currentStatus?.analysis_count ?? 999, // Сохраняем счетчики, если они были
-                        post_generation_count: currentStatus?.post_generation_count ?? 999,
-                        subscription_end_date: currentStatus?.subscription_end_date // Сохраняем дату, если была
+                        is_active: true,
+                        subscription_end_date: currentStatus?.subscription_end_date
                     };
                 }
             }

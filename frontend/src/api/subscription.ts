@@ -26,6 +26,9 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
     console.log(`[getUserSubscriptionStatus] GET ${url}`);
     const response = await axios.get(url);
     console.log('[getUserSubscriptionStatus] Ответ от сервера:', response.data);
+    if (response.data.debug) {
+      console.log('[getUserSubscriptionStatus][DEBUG]:', response.data.debug);
+    }
     const { has_subscription, is_active, subscription_end_date } = response.data;
     console.log('[getUserSubscriptionStatus] Возвращаемые поля:', { has_subscription, is_active, subscription_end_date });
     return { has_subscription, is_active, subscription_end_date };

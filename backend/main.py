@@ -3388,39 +3388,55 @@ async def get_subscription_status(request: Request):
         "Pragma": "no-cache",
         "Expires": "0",
     }
+    debug = {}
     if not user_id:
         return FastAPIResponse(
-            content=json.dumps({"error": "user_id обязателен"}),
+            content=json.dumps({"error": "user_id обязателен", "debug": debug}),
             media_type="application/json",
             headers=cache_headers
         )
     now = datetime.now(timezone.utc)
-    result = supabase.table("user_subscription")\
-        .select("*")\
-        .eq("user_id", int(user_id))\
-        .order("end_date", desc=True)\
-        .limit(1)\
-        .execute()
-    sub = result.data[0] if result.data else None
-    is_active = False
-    has_subscription = False
-    subscription_end_date = None
-    if sub and sub.get("is_active") and sub.get("end_date"):
-        try:
-            end_date = datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00"))
-            if end_date > now:
-                is_active = True
-                has_subscription = True
-                subscription_end_date = sub["end_date"]
-        except Exception as e:
-            pass
-    return FastAPIResponse(
-        content=json.dumps({
+    try:
+        # Получаем все записи по user_id
+        result = supabase.table("user_subscription")\
+            .select("*")\
+            .eq("user_id", int(user_id))\
+            .order("end_date", desc=True)\
+            .execute()
+        debug["requested_user_id"] = user_id
+        debug["db_rows"] = result.data
+        sub = result.data[0] if result.data else None
+        debug["used_row"] = sub
+        is_active = False
+        has_subscription = False
+        subscription_end_date = None
+        if sub and sub.get("is_active") and sub.get("end_date"):
+            try:
+                end_date = datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00"))
+                debug["parsed_end_date"] = str(end_date)
+                debug["now"] = str(now)
+                if end_date > now:
+                    is_active = True
+                    has_subscription = True
+                    subscription_end_date = sub["end_date"]
+            except Exception as e:
+                debug["end_date_parse_error"] = str(e)
+        response = {
             "has_subscription": has_subscription,
             "subscription_end_date": subscription_end_date,
-            "is_active": is_active
-        }),
-        media_type="application/json",
-        headers=cache_headers
-    )
+            "is_active": is_active,
+            "debug": debug
+        }
+        return FastAPIResponse(
+            content=json.dumps(response),
+            media_type="application/json",
+            headers=cache_headers
+        )
+    except Exception as e:
+        debug["exception"] = str(e)
+        return FastAPIResponse(
+            content=json.dumps({"error": str(e), "debug": debug}),
+            media_type="application/json",
+            headers=cache_headers
+        )
 
