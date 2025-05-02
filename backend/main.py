@@ -3373,36 +3373,48 @@ async def resolve_user_id(request: Request):
 @app.get("/subscription/status")
 async def get_subscription_status(request: Request):
     user_id = request.query_params.get("user_id")
-    logger.info(f'Запрос /subscription/status для user_id: {user_id}') # <-- Добавляем лог
+    logger.info(f'Запрос /subscription/status для user_id: {user_id}')
     if not user_id:
         return {"error": "user_id обязателен", "user_id": user_id}
     try:
-        result = supabase.table("user_subscription").select("*").eq("user_id", int(user_id)).maybe_single().execute()
-        logger.info(f'Результат запроса к user_subscription: {result.data}') # <-- Добавляем лог
-        if result.data:
-            sub = result.data
-            now = datetime.utcnow()
-            is_active = sub.get("is_active", False) and sub.get("end_date") and datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00")) > now
+        # Получаем все подписки пользователя, сортируем по end_date DESC
+        result = supabase.table("user_subscription").select("*").eq("user_id", int(user_id)).order("end_date", desc=True).execute()
+        logger.info(f'Результат запроса к user_subscription: {result.data}')
+        now = datetime.utcnow()
+        active_sub = None
+        for sub in result.data or []:
+            # Если подписка активна и не истекла
+            if sub.get("is_active", False) and sub.get("end_date") and datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00")) > now:
+                active_sub = sub
+                break
+            # Если подписка неактивна, но не истекла — активируем её (фикс для Telegram Stars)
+            if not sub.get("is_active", False) and sub.get("end_date") and datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00")) > now:
+                logger.info(f'Обнаружена неактивная, но не истекшая подписка. Активируем для user_id={user_id}')
+                supabase.table("user_subscription").update({"is_active": True}).eq("id", sub["id"]).execute()
+                sub["is_active"] = True
+                active_sub = sub
+                break
+        if active_sub:
             response_data = {
-                "user_id": user_id,  # <--- ДОБАВЛЕНО
-                "has_subscription": is_active,
-                "subscription_end_date": sub.get("end_date"),
-                "is_active": is_active,
-                "analysis_count": sub.get("analysis_count", 0),
-                "post_generation_count": sub.get("post_generation_count", 0)
+                "user_id": user_id,
+                "has_subscription": True,
+                "subscription_end_date": active_sub.get("end_date"),
+                "is_active": True,
+                "analysis_count": active_sub.get("analysis_count", 0),
+                "post_generation_count": active_sub.get("post_generation_count", 0)
             }
-            logger.info(f'Возвращаем статус для user_id {user_id}: {response_data}') # <-- Добавляем лог
+            logger.info(f'Возвращаем статус для user_id {user_id}: {response_data}')
             return response_data
         else:
             response_data = {
-                "user_id": user_id,  # <--- ДОБАВЛЕНО
+                "user_id": user_id,
                 "has_subscription": False,
                 "analysis_count": 0,
                 "post_generation_count": 0
             }
-            logger.info(f'Подписка не найдена для user_id {user_id}, возвращаем: {response_data}') # <-- Добавляем лог
+            logger.info(f'Подписка не найдена для user_id {user_id}, возвращаем: {response_data}')
             return response_data
     except Exception as e:
-        logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True) # <-- Добавляем лог ошибки
-        return {"error": str(e), "user_id": user_id}  # <--- ДОБАВЛЕНО
+        logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True)
+        return {"error": str(e), "user_id": user_id}
 
