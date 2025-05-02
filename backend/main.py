@@ -342,12 +342,12 @@ async def telegram_webhook(request: Request):
             logger.error('[telegram_webhook] Не удалось привести user_id к int: %s, ошибка: %s', user_id_raw, e)
             return {"ok": False, "error": "Некорректный user_id"}
         payment_id = successful_payment.get("telegram_payment_charge_id")
-        now = datetime.now(timezone.utc) # <-- Используем timezone.utc
+        now = datetime.now(timezone.utc)
 
-        # --- ТЕСТИРОВАНИЕ: Устанавливаем end_date на 1 час вперед --- 
-        test_end_date = now + timedelta(hours=1)
-        logger.info('[telegram_webhook] ТЕСТОВАЯ длительность подписки: 1 час. Новая дата окончания: %s', test_end_date.isoformat())
-        # --- КОНЕЦ ТЕСТИРОВАНИЯ ---
+        # --- НОВЫЙ ТЕСТ: Устанавливаем ОЧЕНЬ далекую дату окончания --- 
+        far_future_end_date = datetime(2099, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+        logger.info(f'[telegram_webhook] ТЕСТОВАЯ дата окончания: {far_future_end_date.isoformat()}')
+        # --- КОНЕЦ НОВОГО ТЕСТА ---
         
         try:
             # Ищем ПОСЛЕДНЮЮ запись о подписке (активную или неактивную)
@@ -361,25 +361,23 @@ async def telegram_webhook(request: Request):
                 # existing_end_date_str = existing_sub.get("end_date")
                 # ... (код продления закомментирован или удален для теста)
             
-            # Используем тестовую дату окончания
+            # Используем тестовую ДАЛЕКУЮ дату окончания
             update_data = {
                 "is_active": True,
-                "end_date": test_end_date.isoformat(), 
+                "end_date": far_future_end_date.isoformat(), # <-- Используем далекую дату
                 "payment_id": payment_id
             }
             
             if sub_id_to_update:
-                # Обновляем последнюю подписку с тестовой датой
-                logger.info(f'[telegram_webhook] Обновляем подписку ID={sub_id_to_update} для user_id={user_id} (ТЕСТ +1 час): {update_data}')
+                logger.info(f'[telegram_webhook] Обновляем подписку ID={sub_id_to_update} для user_id={user_id} (ТЕСТ до 2099): {update_data}')
                 supabase.table("user_subscription").update(update_data).eq("id", sub_id_to_update).execute()
             else:
-                # Создаём новую подписку с тестовой датой
                 insert_data = update_data.copy()
                 insert_data["user_id"] = user_id
                 insert_data["start_date"] = now.isoformat()
-                logger.info(f'[telegram_webhook] Создаём новую подписку для user_id={user_id} (ТЕСТ +1 час): {insert_data}')
+                logger.info(f'[telegram_webhook] Создаём новую подписку для user_id={user_id} (ТЕСТ до 2099): {insert_data}')
                 supabase.table("user_subscription").insert(insert_data).execute()
-            logger.info('[telegram_webhook] Подписка успешно активирована/продлена для user_id=%s (ТЕСТ +1 час)', user_id)
+            logger.info('[telegram_webhook] Подписка успешно активирована/продлена для user_id=%s (ТЕСТ до 2099)', user_id)
         except Exception as e:
             logger.error('[telegram_webhook] Ошибка при активации подписки: %s', e, exc_info=True)
         return {"ok": True, "successful_payment": True}
@@ -3404,38 +3402,35 @@ async def get_subscription_status(request: Request):
         )
         
     try:
-        # Получаем все подписки пользователя, сортируем по end_date DESC
+        logger.debug(f'[Subscription Status] Проверка для user_id={user_id}. Текущее время UTC: {datetime.now(timezone.utc).isoformat()}')
         result = supabase.table("user_subscription").select("*").eq("user_id", int(user_id)).order("end_date", desc=True).execute()
-        logger.info(f'Результат запроса к user_subscription: {result.data}')
-        now = datetime.now(timezone.utc) # <-- Используем timezone.utc и здесь для согласованности
+        logger.debug(f'[Subscription Status] Ответ от Supabase: {result.data}')
+        now = datetime.now(timezone.utc)
         active_sub = None
         for sub in result.data or []:
+            sub_id = sub.get("id")
+            is_active_db = sub.get("is_active", False)
             end_date_str = sub.get("end_date")
+            # Исправляем строку логгера
+            logger.debug(f'[Subscription Status] Проверяем запись ID={sub_id}: is_active={is_active_db}, end_date="{end_date_str}"')
             if end_date_str:
                  try:
                      end_date = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
-                     # Теперь сравнение корректно
-                     if sub.get("is_active", False) and end_date > now:
+                     logger.debug(f'[Subscription Status] Запись ID={sub_id}: end_date распарсена: {end_date.isoformat()}, now: {now.isoformat()}, end_date > now: {end_date > now}')
+                     if is_active_db and end_date > now:
+                         logger.info(f'[Subscription Status] Найдена АКТИВНАЯ подписка ID={sub_id} для user_id={user_id}.')
+                         active_sub = sub
+                         break 
+                     if not is_active_db and end_date > now:
+                         logger.warning(f'[Subscription Status] Найдена НЕАКТИВНАЯ, но ДЕЙСТВУЮЩАЯ подписка ID={sub_id}. Активируем...')
+                         # ... (код активации) ...
                          active_sub = sub
                          break
-                     # Если подписка неактивна, но не истекла — активируем её
-                     if not sub.get("is_active", False) and end_date > now:
-                         logger.info(f'Обнаружена неактивная, но не истекшая подписка. Активируем для user_id={user_id}')
-                         supabase.table("user_subscription").update({"is_active": True}).eq("id", sub["id"]).execute()
-                         sub["is_active"] = True
-                         active_sub = sub
-                         break
-                 except ValueError:
-                     logger.warning(f'Некорректный формат end_date в подписке ID {sub.get("id")}: {end_date_str}')
-                 # Добавлен except Exception для общей обработки ошибок внутри цикла
-                 except Exception as inner_e:
-                    logger.error(f'Ошибка при обработке подписки ID {sub.get("id")} внутри цикла: {inner_e}', exc_info=True)
-                    # Можно решить, продолжать ли цикл или нет. Пока продолжаем.
-                    continue 
-            # Проверка, найдена ли активная подписка в цикле
-            if active_sub: 
-                break # Выходим из основного цикла, если нашли активную
-
+                 except Exception as e_inner:
+                     logger.error(f'[Subscription Status] Ошибка обработки записи ID={sub_id}: {e_inner}', exc_info=True)
+                     continue
+            if active_sub: break
+        
         # Возвращаем результат после цикла
         if active_sub:
             response_data = {

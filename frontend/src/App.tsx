@@ -392,58 +392,111 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus | null>(null);
-  // Переименовываем для ясности
+  
+  // --- ДОБАВЛЕНО: Константа для ключа localStorage и времени жизни метки --- 
+  const PREMIUM_TIMESTAMP_KEY = 'lastPremiumConfirmedAt';
+  const PREMIUM_TIMESTAMP_LIFETIME_MS = 60 * 60 * 1000; // 1 час (для теста, как в бэкенде)
+  // --- КОНЕЦ ДОБАВЛЕНИЯ --- 
+
+  // --- ИЗМЕНЕНО: refetchSubscriptionStatus теперь возвращает результат и проверяет localStorage --- 
   const refetchSubscriptionStatus = useCallback(async (): Promise<SubscriptionStatus | null> => {
     if (!userId) return null;
     console.log('[refetchSubscriptionStatus] Fetching status from API...');
+    const userTimestampKey = getUserSpecificKey(PREMIUM_TIMESTAMP_KEY, userId);
+    
     try {
       const fetchedStatus = await getUserSubscriptionStatus(userId);
       console.log('[refetchSubscriptionStatus] Fetched status:', fetchedStatus);
-      // Логика обновления состояния с защитой от отката
+      
       setSubscriptionStatus(currentStatus => {
+        // 1. Проверяем localStorage, если сервер вернул Free
+        if (!fetchedStatus.has_subscription && userTimestampKey) {
+            const storedTimestampStr = localStorage.getItem(userTimestampKey);
+            if (storedTimestampStr) {
+                const storedTimestamp = parseInt(storedTimestampStr, 10);
+                const now = Date.now();
+                if (!isNaN(storedTimestamp) && (now - storedTimestamp < PREMIUM_TIMESTAMP_LIFETIME_MS)) {
+                    console.warn(`[refetchSubscriptionStatus] Backend returned Free, but recent timestamp (${new Date(storedTimestamp).toISOString()}) found in localStorage. Forcing Premium.`);
+                    // Возвращаем искусственный Premium статус на основе метки
+                    return {
+                        has_subscription: true,
+                        analysis_count: currentStatus?.analysis_count ?? 999, // Сохраняем счетчики, если они были
+                        post_generation_count: currentStatus?.post_generation_count ?? 999,
+                        subscription_end_date: currentStatus?.subscription_end_date // Сохраняем дату, если была
+                    };
+                }
+            }
+        }
+        
+        // 2. Старая логика защиты от отката (если currentStatus был Premium)
         if (currentStatus?.has_subscription && !fetchedStatus.has_subscription) {
-          console.warn('[refetchSubscriptionStatus] Ignoring fetched free status because current status is premium.');
+          console.warn('[refetchSubscriptionStatus] Ignoring fetched free status because current status is premium (fallback check).');
           return currentStatus;
         }
+        
+        // 3. Если все проверки пройдены, обновляем статус из API
         console.log('[refetchSubscriptionStatus] Updating state with fetched status.');
+        // --- ДОБАВЛЕНО: Обновляем метку в localStorage при получении Premium --- 
+        if (fetchedStatus.has_subscription && userTimestampKey) {
+            localStorage.setItem(userTimestampKey, Date.now().toString());
+            console.log(`[refetchSubscriptionStatus] Updated premium timestamp in localStorage: ${userTimestampKey}`);
+        }
+        // --- КОНЕЦ ДОБАВЛЕНИЯ --- 
         return fetchedStatus;
       });
-      return fetchedStatus; // Возвращаем полученный статус
+      return fetchedStatus; 
     } catch (e) {
       console.error('[refetchSubscriptionStatus] Error fetching status:', e);
-      setSubscriptionStatus(null); // Сбрасываем при ошибке
-      return null; // Возвращаем null при ошибке
+      setSubscriptionStatus(null); 
+      return null; 
     }
   }, [userId]);
 
-  // --- ИЗМЕНЕНО: useEffect для ПЕРВОНАЧАЛЬНОЙ загрузки статуса с повторной попыткой --- 
+  // --- ИЗМЕНЕНО: useEffect для ПЕРВОНАЧАЛЬНОЙ загрузки проверяет localStorage --- 
   useEffect(() => {
-    // Добавляем проверку !userId в начало useEffect
     if (!userId) return;
 
-    let isMounted = true; // Флаг для предотвращения обновления состояния после размонтирования
-    const initialFetchTimeout = 2000; // Задержка перед повторной попыткой
+    let isMounted = true; 
+    const initialFetchTimeout = 2000; 
+    const userTimestampKey = getUserSpecificKey(PREMIUM_TIMESTAMP_KEY, userId);
 
     const performInitialFetch = async () => {
-      console.log('[Initial Fetch] Attempting first fetch...');
-      // Используем refetchSubscriptionStatus, который уже объявлен ВНЕ этого useEffect
-      const firstStatus = await refetchSubscriptionStatus();
+      // --- ДОБАВЛЕНО: Проверка localStorage ПЕРЕД первым запросом --- 
+      let initialStatusIsPremium = false;
+      if (userTimestampKey) {
+          const storedTimestampStr = localStorage.getItem(userTimestampKey);
+          if (storedTimestampStr) {
+              const storedTimestamp = parseInt(storedTimestampStr, 10);
+              const now = Date.now();
+              if (!isNaN(storedTimestamp) && (now - storedTimestamp < PREMIUM_TIMESTAMP_LIFETIME_MS)) {
+                  console.log(`[Initial Fetch] Found recent timestamp in localStorage. Assuming Premium initially.`);
+                  setSubscriptionStatus({
+                      has_subscription: true,
+                      analysis_count: 999, // Предполагаемые значения
+                      post_generation_count: 999,
+                      subscription_end_date: undefined // Дату не знаем точно
+                  });
+                  initialStatusIsPremium = true;
+              }
+          }
+      }
+      // --- КОНЕЦ ДОБАВЛЕНИЯ --- 
+      
+      console.log('[Initial Fetch] Attempting first API fetch...');
+      const firstStatus = await refetchSubscriptionStatus(); // Он сам обновит состояние и проверит localStorage
 
-      // Если компонент размонтирован или первый статус уже Premium, выходим
-      if (!isMounted || firstStatus?.has_subscription) {
-         console.log('[Initial Fetch] Exiting: component unmounted or first fetch returned premium.');
+      // Если первый статус из API НЕ Premium И localStorage НЕ показал Premium, пробуем еще раз
+      if (!isMounted || (firstStatus?.has_subscription ?? initialStatusIsPremium)) {
+         console.log('[Initial Fetch] Exiting: component unmounted or first fetch confirmed premium.');
          return;
       }
 
-      // Если первый статус НЕ Premium (или null), ждем и пробуем еще раз
-      console.log(`[Initial Fetch] First fetch was not premium. Waiting ${initialFetchTimeout}ms for retry...`);
+      console.log(`[Initial Fetch] First fetch result was not premium. Waiting ${initialFetchTimeout}ms for retry...`);
       await new Promise(resolve => setTimeout(resolve, initialFetchTimeout));
 
-      // Если компонент все еще смонтирован, делаем вторую попытку
       if (isMounted) {
-        console.log('[Initial Fetch] Attempting second fetch...');
-        // Используем refetchSubscriptionStatus снова
-        await refetchSubscriptionStatus(); // Вызываем еще раз, он сам обновит состояние
+        console.log('[Initial Fetch] Attempting second API fetch...');
+        await refetchSubscriptionStatus(); 
         console.log('[Initial Fetch] Second fetch complete.');
       } else {
         console.log('[Initial Fetch] Exiting retry: component unmounted during wait.');
@@ -452,13 +505,25 @@ function App() {
 
     performInitialFetch();
 
-    // Функция очистки для useEffect
     return () => {
-      isMounted = false; // Помечаем компонент как размонтированный
+      isMounted = false; 
       console.log('[Initial Fetch] Cleanup: component unmounted.');
     };
-  }, [userId, refetchSubscriptionStatus]); // Зависимости: userId и сама функция refetch
-  // --- КОНЕЦ ИЗМЕНЕНИЯ ---\n\n  // useEffect для обновления при изменении видимости (остается без изменений)\n  useEffect(() => {\n    const onVisibility = () => {\n      if (document.visibilityState === 'visible') {\n        refetchSubscriptionStatus(); // Используем новое имя\n      }\n    };\n    document.addEventListener('visibilitychange', onVisibility);\n    return () => document.removeEventListener('visibilitychange', onVisibility);\n  }, [refetchSubscriptionStatus]); // Обновляем зависимость
+  }, [userId, refetchSubscriptionStatus]);
+
+  // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
+  // useEffect для обновления при изменении видимости (остается без изменений)
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refetchSubscriptionStatus();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [refetchSubscriptionStatus]);
+
   const [currentView, setCurrentView] = useState<ViewType>('analyze');
   const [channelName, setChannelName] = useState<string>('');
   

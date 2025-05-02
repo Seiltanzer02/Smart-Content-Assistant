@@ -64,6 +64,13 @@ const SubscriptionWidget: React.FC<{
             setIsSubscribing(false);
             if (status === 'paid') {
               console.log('Payment status: paid. Optimistically updating UI...');
+              
+              if (userId) {
+                  const timestampKey = `premiumConfirmed_${userId}`;
+                  localStorage.setItem(timestampKey, Date.now().toString());
+                  console.log(`Saved premium confirmation timestamp to localStorage: ${timestampKey}`);
+              }
+
               if (window?.Telegram?.WebApp?.showPopup) {
                 window.Telegram.WebApp.showPopup({
                   title: 'Успешная оплата',
