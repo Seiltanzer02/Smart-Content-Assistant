@@ -22,7 +22,7 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
   }
 
   try {
-    const response = await axios.get(`/subscription/status?user_id=${userId}`);
+    const response = await axios.get(`/subscription/status?user_id=${userId}&t=${Date.now()}`);
     return response.data;
   } catch (error) {
     console.error('Ошибка при получении статуса подписки:', error);
