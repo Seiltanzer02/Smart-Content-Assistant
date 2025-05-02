@@ -392,7 +392,8 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus | null>(null);
-  const updateSubscriptionStatus = useCallback(async () => {
+  // Переименовываем для ясности
+  const refetchSubscriptionStatus = useCallback(async () => {
     if (!userId) return;
     try {
       const status = await getUserSubscriptionStatus(userId);
@@ -402,17 +403,17 @@ function App() {
     }
   }, [userId]);
   useEffect(() => {
-    updateSubscriptionStatus();
-  }, [userId, updateSubscriptionStatus]);
+    refetchSubscriptionStatus(); // Используем новое имя
+  }, [userId, refetchSubscriptionStatus]); // Обновляем зависимость
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
-        updateSubscriptionStatus();
+        refetchSubscriptionStatus(); // Используем новое имя
       }
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, [updateSubscriptionStatus]);
+  }, [refetchSubscriptionStatus]); // Обновляем зависимость
   const [currentView, setCurrentView] = useState<ViewType>('analyze');
   const [channelName, setChannelName] = useState<string>('');
   
@@ -1344,8 +1345,9 @@ function App() {
         <SubscriptionWidget
           userId={userId}
           subscriptionStatus={subscriptionStatus}
-          onSubscriptionUpdate={updateSubscriptionStatus}
-          isActive={!!subscriptionStatus?.has_subscription}
+          onSubscriptionUpdate={refetchSubscriptionStatus} // Старое имя -> новое
+          setSubscriptionStatus={setSubscriptionStatus} // Передаем сеттер
+          isActive={currentView === 'subscription'}
         />
       )}
 
