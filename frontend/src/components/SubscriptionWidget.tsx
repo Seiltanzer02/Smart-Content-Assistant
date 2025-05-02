@@ -21,6 +21,9 @@ const SubscriptionWidget: React.FC<{
   const pollIntervalRef = useRef<number | null>(null);
   const pollTimeoutRef = useRef<number | null>(null);
 
+  // Получаем актуальный статус подписки из props
+  const hasActiveSubscription = subscriptionStatus?.is_active === true;
+
   // Возвращаем функцию stopPolling
   const stopPolling = () => {
     if (pollIntervalRef.current) {
@@ -159,16 +162,25 @@ const SubscriptionWidget: React.FC<{
   };
 
   useEffect(() => {
-    console.log('[SubscriptionWidget] useEffect инициализации Telegram WebApp. isActive:', isActive);
+    console.log('[SubscriptionWidget] useEffect инициализации Telegram WebApp. hasActiveSubscription:', hasActiveSubscription);
     if (window.Telegram?.WebApp) {
       window.Telegram.WebApp.ready();
       if (window.Telegram.WebApp.MainButton) {
         window.Telegram.WebApp.MainButton.setText('Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars');
         window.Telegram.WebApp.MainButton.color = '#2481cc';
         window.Telegram.WebApp.MainButton.textColor = '#ffffff';
-        if (isActive) {
+        
+        // Используем hasActiveSubscription вместо isActive для управления кнопкой
+        if (hasActiveSubscription) {
+          // Если подписка активна, скрываем кнопку подписки
           window.Telegram.WebApp.MainButton.hide();
+          console.log('[SubscriptionWidget] Подписка активна, MainButton скрыт');
+        } else {
+          // Если подписка не активна, показываем кнопку
+          window.Telegram.WebApp.MainButton.show();
+          console.log('[SubscriptionWidget] Подписка не активна, MainButton показан');
         }
+        
         window.Telegram.WebApp.MainButton.onClick(handleSubscribeViaMainButton);
         console.log('[SubscriptionWidget] MainButton настроен');
       }
@@ -183,13 +195,14 @@ const SubscriptionWidget: React.FC<{
         });
       }
     }
-  }, [isActive, onSubscriptionUpdate]);
+  }, [hasActiveSubscription, onSubscriptionUpdate]); // Заменяем isActive на hasActiveSubscription
 
   // Добавляем useEffect для остановки polling при подтверждении Premium статуса
   useEffect(() => {
     console.log('[SubscriptionWidget] useEffect: изменение subscriptionStatus:', subscriptionStatus);
-    if (subscriptionStatus?.has_subscription) {
-      console.log('[SubscriptionWidget] Premium status confirmed. Stopping polling.');
+    // Проверяем именно is_active вместо has_subscription
+    if (subscriptionStatus?.is_active) {
+      console.log('[SubscriptionWidget] Premium status confirmed (is_active=true). Stopping polling.');
       stopPolling();
     }
   }, [subscriptionStatus]); // Зависимость от статуса подписки
@@ -203,7 +216,7 @@ const SubscriptionWidget: React.FC<{
       }
       stopPolling(); // Очищаем таймеры при размонтировании
     };
-  }, [isActive, onSubscriptionUpdate]);
+  }, [hasActiveSubscription, onSubscriptionUpdate]);
 
   if (!userId) {
     console.error('[SubscriptionWidget] Нет userId!');
