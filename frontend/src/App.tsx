@@ -1364,12 +1364,11 @@ function App() {
         
         {/* Блок подписки */}
         {showSubscription && (
-          <SubscriptionWidget
+          <SubscriptionWidget 
             userId={userId}
             subscriptionStatus={subscriptionStatus}
-            onSubscriptionUpdate={refetchSubscriptionStatus} // Старое имя -> новое
-            setSubscriptionStatus={setSubscriptionStatus} // Передаем сеттер
-            isActive={showSubscription} // Используем showSubscription для определения активности
+            onSubscriptionUpdate={refetchSubscriptionStatus}
+            isActive={!!(subscriptionStatus?.is_active && subscriptionStatus?.has_subscription)}
           />
         )}
 
@@ -1953,6 +1952,21 @@ function App() {
         <footer className="app-footer">
           <p>© 2024 Smart Content Assistant</p>
         </footer>
+      </div>
+      <div className="debug-info">
+        <p>userId: {userId || 'null'}</p>
+        <p>Статус подписки: {subscriptionStatus ? JSON.stringify(subscriptionStatus) : 'null'}</p>
+        <p>DEBUG: </p>
+        <pre>{
+          (() => {
+            try {
+              return debugInfo ? JSON.stringify(debugInfo, null, 2) : 'null';
+            } catch (e) {
+              console.error("Ошибка при сериализации debugInfo:", e);
+              return "Ошибка сериализации debugInfo";
+            }
+          })()
+        }</pre>
       </div>
     </SimpleErrorBoundary>
   );

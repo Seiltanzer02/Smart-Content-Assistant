@@ -10,9 +10,8 @@ const SubscriptionWidget: React.FC<{
   userId: string | null,
   subscriptionStatus: SubscriptionStatus | null,
   onSubscriptionUpdate: () => void,
-  setSubscriptionStatus: Dispatch<SetStateAction<SubscriptionStatus | null>>;
   isActive?: boolean
-}> = ({ userId, subscriptionStatus, onSubscriptionUpdate, setSubscriptionStatus, isActive }) => {
+}> = ({ userId, subscriptionStatus, onSubscriptionUpdate, isActive }) => {
   console.log('[SubscriptionWidget] Монтирование компонента. userId:', userId, 'subscriptionStatus:', subscriptionStatus, 'isActive:', isActive);
   const [error, setError] = useState<string | null>(null);
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
@@ -55,6 +54,13 @@ const SubscriptionWidget: React.FC<{
 
   const handleInvoiceGeneration = async (userId: string) => {
     console.log('[SubscriptionWidget] handleInvoiceGeneration вызван для userId:', userId);
+    if (!window.Telegram?.WebApp) {
+      console.error('[SubscriptionWidget] Telegram WebApp не инициализирован!');
+      setError('Не удалось инициализировать Telegram WebApp для оплаты.');
+      setIsSubscribing(false);
+      return;
+    }
+
     try {
       setIsSubscribing(true);
       const response = await fetch('/generate-stars-invoice-link', {
@@ -65,13 +71,13 @@ const SubscriptionWidget: React.FC<{
       const data = await response.json();
       console.log('[SubscriptionWidget] Ответ от /generate-stars-invoice-link:', data);
       if (data.success && data.invoice_link) {
-        if (window?.Telegram?.WebApp && typeof window?.Telegram?.WebApp.openInvoice === 'function') {
+        if (typeof window.Telegram.WebApp?.openInvoice === 'function') {
           window.Telegram.WebApp.openInvoice(data.invoice_link, async (status) => {
             setIsSubscribing(false);
             console.log('[SubscriptionWidget] openInvoice callback статус:', status);
             if (status === 'paid') {
               console.log('[SubscriptionWidget] Payment status: paid. Updating status from server...');
-              if (window?.Telegram?.WebApp?.showPopup) {
+              if (window.Telegram.WebApp?.showPopup) {
                 window.Telegram.WebApp.showPopup({
                   title: 'Успешная оплата',
                   message: 'Подписка активирована! Обновляем статус...',
@@ -155,7 +161,7 @@ const SubscriptionWidget: React.FC<{
   useEffect(() => {
     return () => {
       console.log('[SubscriptionWidget] Размонтирование компонента. Очищаю MainButton и polling');
-      if (window.Telegram?.WebApp?.MainButton) {
+      if (window.Telegram?.WebApp?.MainButton && typeof window.Telegram.WebApp.MainButton.offClick === 'function') {
         window.Telegram.WebApp.MainButton.offClick(handleSubscribeViaMainButton);
       }
       stopPolling(); // Очищаем таймеры при размонтировании
@@ -219,12 +225,6 @@ const SubscriptionWidget: React.FC<{
     } catch (e) {
       console.error('[SubscriptionWidget][onSubscriptionUpdate] Ошибка:', e);
     }
-  };
-
-  // ======= ОБЕРТКА ДЛЯ setSubscriptionStatus С ЛОГАМИ =======
-  const setSubscriptionStatusWithLog = (status: SubscriptionStatus) => {
-    console.log('[SubscriptionWidget][setSubscriptionStatus] Устанавливаю статус:', status);
-    setSubscriptionStatus(status);
   };
 
   // ======= ЛОГИРУЕМ useEffect'ы =======
