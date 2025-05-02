@@ -1347,7 +1347,7 @@ function App() {
           subscriptionStatus={subscriptionStatus}
           onSubscriptionUpdate={refetchSubscriptionStatus} // Старое имя -> новое
           setSubscriptionStatus={setSubscriptionStatus} // Передаем сеттер
-          isActive={currentView === 'subscription'}
+          isActive={showSubscription} // Используем showSubscription для определения активности
         />
       )}
 
