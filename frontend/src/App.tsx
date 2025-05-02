@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Toaster, toast } from 'react-hot-toast';
 import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
-import { getUserSubscriptionStatus } from './api/subscription';
+import { getUserSubscriptionStatus, SubscriptionStatus } from './api/subscription';
 
 // Определяем базовый URL API
 // Так как фронтенд и API на одном домене, используем пустую строку
@@ -391,6 +391,28 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus | null>(null);
+  const updateSubscriptionStatus = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const status = await getUserSubscriptionStatus(userId);
+      setSubscriptionStatus(status);
+    } catch (e) {
+      setSubscriptionStatus(null);
+    }
+  }, [userId]);
+  useEffect(() => {
+    updateSubscriptionStatus();
+  }, [userId, updateSubscriptionStatus]);
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        updateSubscriptionStatus();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [updateSubscriptionStatus]);
   const [currentView, setCurrentView] = useState<ViewType>('analyze');
   const [channelName, setChannelName] = useState<string>('');
   
@@ -1319,7 +1341,12 @@ function App() {
       
       {/* Блок подписки */}
       {showSubscription && (
-        <SubscriptionWidget userId={userId} isActive={true} />
+        <SubscriptionWidget
+          userId={userId}
+          subscriptionStatus={subscriptionStatus}
+          onSubscriptionUpdate={updateSubscriptionStatus}
+          isActive={!!subscriptionStatus?.has_subscription}
+        />
       )}
 
       <main className="app-main">
