@@ -35,7 +35,7 @@ import telethon
 import aiohttp
 from telegram_utils import get_telegram_posts, get_mock_telegram_posts
 import move_temp_files
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone # <-- Добавляем timezone
 import traceback
 # Убираем неиспользуемые импорты psycopg2
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
@@ -342,7 +342,7 @@ async def telegram_webhook(request: Request):
             logger.error('[telegram_webhook] Не удалось привести user_id к int: %s, ошибка: %s', user_id_raw, e)
             return {"ok": False, "error": "Некорректный user_id"}
         payment_id = successful_payment.get("telegram_payment_charge_id")
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc) # <-- Используем timezone.utc
         # Вычисляем правильную дату окончания
         new_end_date = now + relativedelta(months=SUBSCRIPTION_DURATION_MONTHS)
         logger.info('[telegram_webhook] Успешная оплата: user_id=%s, payment_id=%s, новая дата окончания: %s', user_id, payment_id, new_end_date.isoformat())
@@ -359,6 +359,7 @@ async def telegram_webhook(request: Request):
                 if existing_end_date_str:
                      try:
                          existing_end_date = datetime.fromisoformat(existing_end_date_str.replace("Z", "+00:00"))
+                         # Теперь сравнение корректно, т.к. обе даты offset-aware
                          if existing_end_date > now:
                              new_end_date = existing_end_date + relativedelta(months=SUBSCRIPTION_DURATION_MONTHS)
                              logger.info(f'[telegram_webhook] Продлеваем активную подписку до: {new_end_date.isoformat()}')
@@ -3393,20 +3394,36 @@ async def get_subscription_status(request: Request):
         # Получаем все подписки пользователя, сортируем по end_date DESC
         result = supabase.table("user_subscription").select("*").eq("user_id", int(user_id)).order("end_date", desc=True).execute()
         logger.info(f'Результат запроса к user_subscription: {result.data}')
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc) # <-- Используем timezone.utc и здесь для согласованности
         active_sub = None
         for sub in result.data or []:
-            # Если подписка активна и не истекла
-            if sub.get("is_active", False) and sub.get("end_date") and datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00")) > now:
-                active_sub = sub
-                break
-            # Если подписка неактивна, но не истекла — активируем её (фикс для Telegram Stars)
-            if not sub.get("is_active", False) and sub.get("end_date") and datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00")) > now:
-                logger.info(f'Обнаружена неактивная, но не истекшая подписка. Активируем для user_id={user_id}')
-                supabase.table("user_subscription").update({"is_active": True}).eq("id", sub["id"]).execute()
-                sub["is_active"] = True
-                active_sub = sub
-                break
+            end_date_str = sub.get("end_date")
+            if end_date_str:
+                 try:
+                     end_date = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                     # Теперь сравнение корректно
+                     if sub.get("is_active", False) and end_date > now:
+                         active_sub = sub
+                         break
+                     # Если подписка неактивна, но не истекла — активируем её
+                     if not sub.get("is_active", False) and end_date > now:
+                         logger.info(f'Обнаружена неактивная, но не истекшая подписка. Активируем для user_id={user_id}')
+                         supabase.table("user_subscription").update({"is_active": True}).eq("id", sub["id"]).execute()
+                         sub["is_active"] = True
+                         active_sub = sub
+                         break
+                 except ValueError:
+                     logger.warning(f'Некорректный формат end_date в подписке ID {sub.get("id")}: {end_date_str}')
+                 # Добавлен except Exception для общей обработки ошибок внутри цикла
+                 except Exception as inner_e:
+                    logger.error(f'Ошибка при обработке подписки ID {sub.get("id")} внутри цикла: {inner_e}', exc_info=True)
+                    # Можно решить, продолжать ли цикл или нет. Пока продолжаем.
+                    continue 
+            # Проверка, найдена ли активная подписка в цикле
+            if active_sub: 
+                break # Выходим из основного цикла, если нашли активную
+
+        # Возвращаем результат после цикла
         if active_sub:
             response_data = {
                 "user_id": user_id,
@@ -3419,14 +3436,16 @@ async def get_subscription_status(request: Request):
             logger.info(f'Возвращаем статус для user_id {user_id}: {response_data}')
             return response_data
         else:
+            # Если цикл завершился и активная подписка не найдена
             response_data = {
                 "user_id": user_id,
                 "has_subscription": False,
                 "analysis_count": 0,
                 "post_generation_count": 0
             }
-            logger.info(f'Подписка не найдена для user_id {user_id}, возвращаем: {response_data}')
+            logger.info(f'Подписка не найдена или истекла для user_id {user_id}, возвращаем: {response_data}')
             return response_data
+    # Основной except для ошибок запроса к БД или других внешних ошибок
     except Exception as e:
         logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True)
         return {"error": str(e), "user_id": user_id}
