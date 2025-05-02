@@ -43,6 +43,7 @@ import traceback
 import shutil # Добавляем импорт shutil
 import base64
 import urllib.parse
+from dateutil.relativedelta import relativedelta
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -74,6 +75,7 @@ SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 SESSION_NAME = "telegram_session" # <-- Определяем имя файла сессии
 IMAGE_SEARCH_COUNT = 15 # Сколько изображений запрашивать у Unsplash
 IMAGE_RESULTS_COUNT = 5 # Сколько изображений показывать пользователю
+SUBSCRIPTION_DURATION_MONTHS = 1 # Добавляем константу
 
 # --- Валидация переменных окружения без аварийного завершения --- 
 missing_keys = []
@@ -341,33 +343,44 @@ async def telegram_webhook(request: Request):
             return {"ok": False, "error": "Некорректный user_id"}
         payment_id = successful_payment.get("telegram_payment_charge_id")
         now = datetime.utcnow()
-        start_date = now
-        end_date = now + timedelta(hours=1)
-        logger.info('[telegram_webhook] Успешная оплата: user_id=%s (%s), payment_id=%s, start_date=%s, end_date=%s', user_id, type(user_id), payment_id, start_date, end_date)
+        # Вычисляем правильную дату окончания
+        new_end_date = now + relativedelta(months=SUBSCRIPTION_DURATION_MONTHS)
+        logger.info('[telegram_webhook] Успешная оплата: user_id=%s, payment_id=%s, новая дата окончания: %s', user_id, payment_id, new_end_date.isoformat())
         try:
-            # Проверяем, есть ли уже подписка
-            existing = supabase.table("user_subscription").select("*").eq("user_id", user_id).execute()
-            logger.info('[telegram_webhook] Результат поиска подписки: %s', existing.data)
-            if existing.data and len(existing.data) > 0:
-                # Обновляем подписку
-                logger.info('[telegram_webhook] Обновляем подписку для user_id=%s', user_id)
-                supabase.table("user_subscription").update({
-                    "is_active": True,
-                    "start_date": start_date.isoformat(),
-                    "end_date": end_date.isoformat(),
-                    "payment_id": payment_id
-                }).eq("user_id", user_id).execute()
+            # Ищем ПОСЛЕДНЮЮ запись о подписке (активную или неактивную)
+            existing_sub_res = supabase.table("user_subscription").select("*, id").eq("user_id", user_id).order("end_date", desc=True).limit(1).execute()
+            logger.info(f'[telegram_webhook] Поиск последней подписки для user_id={user_id}: {existing_sub_res.data}')
+            existing_sub = existing_sub_res.data[0] if existing_sub_res.data else None
+            sub_id_to_update = None
+            if existing_sub:
+                sub_id_to_update = existing_sub['id']
+                # Если последняя подписка все еще активна, продлеваем ее
+                existing_end_date_str = existing_sub.get("end_date")
+                if existing_end_date_str:
+                     try:
+                         existing_end_date = datetime.fromisoformat(existing_end_date_str.replace("Z", "+00:00"))
+                         if existing_end_date > now:
+                             new_end_date = existing_end_date + relativedelta(months=SUBSCRIPTION_DURATION_MONTHS)
+                             logger.info(f'[telegram_webhook] Продлеваем активную подписку до: {new_end_date.isoformat()}')
+                     except ValueError:
+                         logger.warning(f'[telegram_webhook] Некорректный формат end_date в существующей подписке: {existing_end_date_str}')
+            update_data = {
+                "is_active": True,
+                "end_date": new_end_date.isoformat(),
+                "payment_id": payment_id # Сохраняем ID платежа
+            }
+            if sub_id_to_update:
+                # Обновляем последнюю подписку
+                logger.info(f'[telegram_webhook] Обновляем подписку ID={sub_id_to_update} для user_id={user_id}: {update_data}')
+                supabase.table("user_subscription").update(update_data).eq("id", sub_id_to_update).execute()
             else:
-                # Создаём новую подписку
-                logger.info('[telegram_webhook] Создаём новую подписку для user_id=%s', user_id)
-                supabase.table("user_subscription").insert({
-                    "user_id": user_id,
-                    "is_active": True,
-                    "start_date": start_date.isoformat(),
-                    "end_date": end_date.isoformat(),
-                    "payment_id": payment_id
-                }).execute()
-            logger.info('[telegram_webhook] Подписка успешно активирована для user_id=%s', user_id)
+                # Создаём новую подписку, если существующей нет
+                insert_data = update_data.copy()
+                insert_data["user_id"] = user_id
+                insert_data["start_date"] = now.isoformat() # Добавляем дату начала
+                logger.info(f'[telegram_webhook] Создаём новую подписку для user_id={user_id}: {insert_data}')
+                supabase.table("user_subscription").insert(insert_data).execute()
+            logger.info('[telegram_webhook] Подписка успешно активирована/продлена для user_id=%s', user_id)
         except Exception as e:
             logger.error('[telegram_webhook] Ошибка при активации подписки: %s', e, exc_info=True)
         return {"ok": True, "successful_payment": True}
