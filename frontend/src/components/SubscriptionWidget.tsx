@@ -13,6 +13,7 @@ const SubscriptionWidget: React.FC<{
   setSubscriptionStatus: Dispatch<SetStateAction<SubscriptionStatus | null>>;
   isActive?: boolean
 }> = ({ userId, subscriptionStatus, onSubscriptionUpdate, setSubscriptionStatus, isActive }) => {
+  console.log('[SubscriptionWidget] Монтирование компонента. userId:', userId, 'subscriptionStatus:', subscriptionStatus, 'isActive:', isActive);
   const [error, setError] = useState<string | null>(null);
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 1; // временно 1 Star для теста
@@ -26,19 +27,22 @@ const SubscriptionWidget: React.FC<{
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
-      console.log('Polling stopped by stopPolling function');
+      console.log('[SubscriptionWidget] Polling stopped by stopPolling function');
     }
     if (pollTimeoutRef.current) {
       clearTimeout(pollTimeoutRef.current);
       pollTimeoutRef.current = null;
+      console.log('[SubscriptionWidget] Polling timeout cleared');
     }
   };
 
   const handleSubscribeViaMainButton = () => {
+    console.log('[SubscriptionWidget] Нажатие на MainButton для подписки');
     if (window.Telegram?.WebApp?.showConfirm) {
       window.Telegram.WebApp.showConfirm(
         'Вы хотите оформить подписку за ' + SUBSCRIPTION_PRICE + ' Stars?',
         (confirmed) => {
+          console.log('[SubscriptionWidget] showConfirm ответ:', confirmed);
           if (confirmed) {
             handleSubscribe();
           }
@@ -50,6 +54,7 @@ const SubscriptionWidget: React.FC<{
   };
 
   const handleInvoiceGeneration = async (userId: string) => {
+    console.log('[SubscriptionWidget] handleInvoiceGeneration вызван для userId:', userId);
     try {
       setIsSubscribing(true);
       const response = await fetch('/generate-stars-invoice-link', {
@@ -58,19 +63,19 @@ const SubscriptionWidget: React.FC<{
         body: JSON.stringify({ user_id: userId, amount: 1 })
       });
       const data = await response.json();
+      console.log('[SubscriptionWidget] Ответ от /generate-stars-invoice-link:', data);
       if (data.success && data.invoice_link) {
         if (window?.Telegram?.WebApp && typeof window?.Telegram?.WebApp.openInvoice === 'function') {
           window.Telegram.WebApp.openInvoice(data.invoice_link, async (status) => {
             setIsSubscribing(false);
+            console.log('[SubscriptionWidget] openInvoice callback статус:', status);
             if (status === 'paid') {
-              console.log('Payment status: paid. Optimistically updating UI...');
-              
+              console.log('[SubscriptionWidget] Payment status: paid. Optimistically updating UI...');
               if (userId) {
                   const timestampKey = `premiumConfirmed_${userId}`;
                   localStorage.setItem(timestampKey, Date.now().toString());
-                  console.log(`Saved premium confirmation timestamp to localStorage: ${timestampKey}`);
+                  console.log(`[SubscriptionWidget] Saved premium confirmation timestamp to localStorage: ${timestampKey}`);
               }
-
               if (window?.Telegram?.WebApp?.showPopup) {
                 window.Telegram.WebApp.showPopup({
                   title: 'Успешная оплата',
@@ -80,56 +85,56 @@ const SubscriptionWidget: React.FC<{
               }
               const optimisticStatus: SubscriptionStatus = {
                 has_subscription: true,
-                analysis_count: 999,
-                post_generation_count: 999,
+                is_active: true,
                 subscription_end_date: undefined
               };
               setSubscriptionStatus(optimisticStatus);
-
-              // 3. Запускаем агрессивный polling ВМЕСТО одного запроса с задержкой
-              stopPolling(); // Останавливаем предыдущие таймеры на всякий случай
-              console.log('Starting aggressive polling for status confirmation...');
-
+              stopPolling();
+              console.log('[SubscriptionWidget] Starting aggressive polling for status confirmation...');
               pollIntervalRef.current = window.setInterval(() => {
-                console.log('Polling for subscription status...');
-                onSubscriptionUpdate(); // Вызываем refetch
-              }, 2000); // каждые 2 секунды
-
+                console.log('[SubscriptionWidget] Polling for subscription status...');
+                onSubscriptionUpdate();
+              }, 2000);
               pollTimeoutRef.current = window.setTimeout(() => {
-                console.warn('Polling timeout reached. Stopping polling. Status might not be up-to-date.');
+                console.warn('[SubscriptionWidget] Polling timeout reached. Stopping polling. Status might not be up-to-date.');
                 stopPolling();
-              }, 15000); // Таймаут 15 секунд
-
+              }, 15000);
             } else if (status === 'failed') {
-              console.log('Payment status: failed');
+              console.log('[SubscriptionWidget] Payment status: failed');
               setError('Оплата не удалась. Пожалуйста, попробуйте позже.');
             } else if (status === 'cancelled') {
-              console.log('Payment status: cancelled');
+              console.log('[SubscriptionWidget] Payment status: cancelled');
             }
           });
         } else {
           setError('Оплата через Stars недоступна в этом окружении.');
           setIsSubscribing(false);
+          console.error('[SubscriptionWidget] openInvoice не поддерживается');
         }
       } else {
         setError(data.error || 'Ошибка генерации инвойса');
         setIsSubscribing(false);
+        console.error('[SubscriptionWidget] Ошибка генерации инвойса:', data.error);
       }
     } catch (error) {
       setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
       setIsSubscribing(false);
+      console.error('[SubscriptionWidget] Ошибка в handleInvoiceGeneration:', error);
     }
   };
 
   const handleSubscribe = async () => {
+    console.log('[SubscriptionWidget] handleSubscribe вызван. userId:', userId);
     if (!userId) {
       setError('Не удалось получить корректный ID пользователя');
+      console.error('[SubscriptionWidget] Нет userId при попытке подписки');
       return;
     }
     await handleInvoiceGeneration(userId);
   };
 
   useEffect(() => {
+    console.log('[SubscriptionWidget] useEffect инициализации Telegram WebApp. isActive:', isActive);
     if (window.Telegram?.WebApp) {
       window.Telegram.WebApp.ready();
       if (window.Telegram.WebApp.MainButton) {
@@ -140,12 +145,15 @@ const SubscriptionWidget: React.FC<{
           window.Telegram.WebApp.MainButton.hide();
         }
         window.Telegram.WebApp.MainButton.onClick(handleSubscribeViaMainButton);
+        console.log('[SubscriptionWidget] MainButton настроен');
       }
       if (typeof window.Telegram.WebApp.onEvent === 'function') {
         window.Telegram.WebApp.onEvent('popup_closed', () => {
+          console.log('[SubscriptionWidget] popup_closed event');
           onSubscriptionUpdate();
         });
         window.Telegram.WebApp.onEvent('invoiceClosed', () => {
+          console.log('[SubscriptionWidget] invoiceClosed event');
           onSubscriptionUpdate();
         });
       }
@@ -154,9 +162,9 @@ const SubscriptionWidget: React.FC<{
 
   // Добавляем useEffect для остановки polling при подтверждении Premium статуса
   useEffect(() => {
-    // Если статус стал Premium (неважно, оптимистично или через refetch)
+    console.log('[SubscriptionWidget] useEffect: изменение subscriptionStatus:', subscriptionStatus);
     if (subscriptionStatus?.has_subscription) {
-      console.log('Premium status confirmed. Stopping polling.');
+      console.log('[SubscriptionWidget] Premium status confirmed. Stopping polling.');
       stopPolling();
     }
   }, [subscriptionStatus]); // Зависимость от статуса подписки
@@ -164,6 +172,7 @@ const SubscriptionWidget: React.FC<{
   // Возвращаем очистку таймеров при размонтировании
   useEffect(() => {
     return () => {
+      console.log('[SubscriptionWidget] Размонтирование компонента. Очищаю MainButton и polling');
       if (window.Telegram?.WebApp?.MainButton) {
         window.Telegram.WebApp.MainButton.offClick(handleSubscribeViaMainButton);
       }
@@ -172,6 +181,7 @@ const SubscriptionWidget: React.FC<{
   }, [isActive, onSubscriptionUpdate]);
 
   if (!userId) {
+    console.error('[SubscriptionWidget] Нет userId!');
     return (
       <div className="subscription-widget error">
         <p>Ошибка: Не удалось получить корректный ID пользователя из Telegram.<br/>Пожалуйста, перезапустите мини-приложение из Telegram.<br/>Если ошибка повторяется — попробуйте очистить кэш Telegram или обновить приложение.</p>
@@ -184,6 +194,7 @@ const SubscriptionWidget: React.FC<{
   }
 
   if (error) {
+    console.error('[SubscriptionWidget] Ошибка:', error);
     return (
       <div className="subscription-widget error">
         <p>Ошибка: {error}</p>
@@ -196,13 +207,65 @@ const SubscriptionWidget: React.FC<{
   }
 
   if (!subscriptionStatus) {
+    console.log('[SubscriptionWidget] subscriptionStatus отсутствует, показываю лоадер');
     return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
   }
+
+  // Новый простой рендеринг
+  const isPremium = subscriptionStatus.is_active && subscriptionStatus.has_subscription;
+  console.log('[SubscriptionWidget] Рендеринг. isPremium:', isPremium, 'subscriptionStatus:', subscriptionStatus);
+
+  // ======= ПОДРОБНОЕ ЛОГИРОВАНИЕ В РЕНДЕРЕ =======
+  console.log('[SubscriptionWidget][RENDER] userId:', userId);
+  console.log('[SubscriptionWidget][RENDER] subscriptionStatus:', subscriptionStatus);
+  console.log('[SubscriptionWidget][RENDER] isPremium:', subscriptionStatus?.is_active && subscriptionStatus?.has_subscription);
+  console.log('[SubscriptionWidget][RENDER] error:', error);
+  console.log('[SubscriptionWidget][RENDER] isSubscribing:', isSubscribing);
+  console.log('[SubscriptionWidget][RENDER] showPaymentInfo:', showPaymentInfo);
+  console.log('[SubscriptionWidget][RENDER] pollIntervalRef:', pollIntervalRef.current);
+  console.log('[SubscriptionWidget][RENDER] pollTimeoutRef:', pollTimeoutRef.current);
+
+  // ======= ЛОГИРУЕМ ВСЕ ПРОПСЫ И СОСТОЯНИЯ =======
+  console.log('[SubscriptionWidget][RENDER] props:', { userId, subscriptionStatus, isActive });
+  console.log('[SubscriptionWidget][RENDER] state:', { error, showPaymentInfo, isSubscribing });
+
+  // ======= ОБЕРТКА ДЛЯ onSubscriptionUpdate С ЛОГАМИ =======
+  const onSubscriptionUpdateWithLog = () => {
+    try {
+      console.log('[SubscriptionWidget][onSubscriptionUpdate] Вызван onSubscriptionUpdate');
+      onSubscriptionUpdate();
+    } catch (e) {
+      console.error('[SubscriptionWidget][onSubscriptionUpdate] Ошибка:', e);
+    }
+  };
+
+  // ======= ОБЕРТКА ДЛЯ setSubscriptionStatus С ЛОГАМИ =======
+  const setSubscriptionStatusWithLog = (status: SubscriptionStatus) => {
+    console.log('[SubscriptionWidget][setSubscriptionStatus] Устанавливаю статус:', status);
+    setSubscriptionStatus(status);
+  };
+
+  // ======= ЛОГИРУЕМ useEffect'ы =======
+  useEffect(() => {
+    console.log('[SubscriptionWidget][useEffect] Монтирование/обновление компонента. userId:', userId, 'subscriptionStatus:', subscriptionStatus, 'isActive:', isActive);
+  }, [userId, subscriptionStatus, isActive]);
+
+  useEffect(() => {
+    console.log('[SubscriptionWidget][useEffect] error изменился:', error);
+  }, [error]);
+
+  useEffect(() => {
+    console.log('[SubscriptionWidget][useEffect] isSubscribing изменился:', isSubscribing);
+  }, [isSubscribing]);
+
+  useEffect(() => {
+    console.log('[SubscriptionWidget][useEffect] showPaymentInfo изменился:', showPaymentInfo);
+  }, [showPaymentInfo]);
 
   return (
     <div className="subscription-widget">
       <h3>Статус подписки</h3>
-      {subscriptionStatus.has_subscription ? (
+      {isPremium ? (
         <div className="subscription-active">
           <div className="status-badge premium">Premium</div>
           <p>У вас активная подписка{subscriptionStatus.subscription_end_date ? ` до ${new Date(subscriptionStatus.subscription_end_date).toLocaleDateString()}` : ''}</p>
@@ -211,8 +274,7 @@ const SubscriptionWidget: React.FC<{
       ) : (
         <div className="subscription-free">
           <div className="status-badge free">Бесплатный план</div>
-          <p>Использовано анализов: {subscriptionStatus.analysis_count || 0}/2</p>
-          <p>Использовано генераций постов: {subscriptionStatus.post_generation_count || 0}/2</p>
+          <p>Доступ ограничен. Для безлимитного доступа оформите подписку.</p>
           {showPaymentInfo ? (
             <div className="payment-info">
               <h4>Процесс оплаты</h4>
@@ -227,7 +289,10 @@ const SubscriptionWidget: React.FC<{
               <p>После успешной оплаты ваша подписка активируется автоматически!</p>
               <button 
                 className="cancel-button"
-                onClick={() => setShowPaymentInfo(false)}
+                onClick={() => {
+                  setShowPaymentInfo(false);
+                  console.log('[SubscriptionWidget] Пользователь отменил просмотр paymentInfo');
+                }}
               >
                 Отменить
               </button>
@@ -242,7 +307,10 @@ const SubscriptionWidget: React.FC<{
               </ul>
               <button 
                 className="subscribe-button"
-                onClick={handleSubscribe}
+                onClick={() => {
+                  console.log('[SubscriptionWidget] Клик по кнопке подписки');
+                  handleSubscribe();
+                }}
                 disabled={isSubscribing}
               >
                 {isSubscribing ? 'Создание платежа...' : 'Подписаться за 70 Stars'}
