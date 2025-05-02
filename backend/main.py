@@ -3383,8 +3383,6 @@ async def resolve_user_id(request: Request):
 @app.get("/subscription/status")
 async def get_subscription_status(request: Request):
     user_id = request.query_params.get("user_id")
-    logger.info(f'Запрос /subscription/status для user_id: {user_id}')
-    
     cache_headers = {
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Pragma": "no-cache",
@@ -3392,41 +3390,37 @@ async def get_subscription_status(request: Request):
     }
     if not user_id:
         return FastAPIResponse(
-            content=json.dumps({"error": "user_id обязателен", "user_id": user_id}),
+            content=json.dumps({"error": "user_id обязателен"}),
             media_type="application/json",
             headers=cache_headers
         )
-    try:
-        now = datetime.now(timezone.utc)
-        # 1. Выбираем только те подписки, у которых is_active=TRUE и end_date > now()
-        result = supabase.table("user_subscription")\
-            .select("*")\
-            .eq("user_id", int(user_id))\
-            .eq("is_active", True)\
-            .gt("end_date", now.isoformat())\
-            .order("end_date", desc=True)\
-            .execute()
-        logger.info(f'[Subscription Status] Найдено подписок: {len(result.data)} для user_id={user_id}')
-        # 2. Берём самую свежую
-        active_sub = result.data[0] if result.data else None
-        # 3. Возвращаем debug-ответ
-        response = {
-            "user_id": user_id,
-            "now": now.isoformat(),
-            "has_subscription": bool(active_sub is not None),
-            "active_subscription": active_sub,
-            "all_found": result.data
-        }
-        return FastAPIResponse(
-            content=json.dumps(response, default=str),
-            media_type="application/json",
-            headers=cache_headers
-        )
-    except Exception as e:
-        logger.error(f'[Subscription Status] Ошибка: {e}', exc_info=True)
-        return FastAPIResponse(
-            content=json.dumps({"error": str(e), "user_id": user_id}),
-            media_type="application/json",
-            headers=cache_headers
-        )
+    now = datetime.now(timezone.utc)
+    result = supabase.table("user_subscription")\
+        .select("*")\
+        .eq("user_id", int(user_id))\
+        .order("end_date", desc=True)\
+        .limit(1)\
+        .execute()
+    sub = result.data[0] if result.data else None
+    is_active = False
+    has_subscription = False
+    subscription_end_date = None
+    if sub and sub.get("is_active") and sub.get("end_date"):
+        try:
+            end_date = datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00"))
+            if end_date > now:
+                is_active = True
+                has_subscription = True
+                subscription_end_date = sub["end_date"]
+        except Exception as e:
+            pass
+    return FastAPIResponse(
+        content=json.dumps({
+            "has_subscription": has_subscription,
+            "subscription_end_date": subscription_end_date,
+            "is_active": is_active
+        }),
+        media_type="application/json",
+        headers=cache_headers
+    )
 
