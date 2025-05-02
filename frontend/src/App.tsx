@@ -388,7 +388,7 @@ const CalendarDay = ({
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null); // <-- userId уже есть в состоянии
+  const [userId, setUserId] = useState<string | null>(null); 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [channelName, setChannelName] = useState('');
@@ -400,7 +400,7 @@ function App() {
   const [detailedPost, setDetailedPost] = useState<DetailedPost | null>(null);
   const [selectedIdea, setSelectedIdea] = useState<SuggestedIdea | null>(null);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
-  const [plan, setPlan] = useState<PlanItem[]>([]);
+  // const [plan, setPlan] = useState<PlanItem[]>([]); // plan state seems unused
   const [savedPosts, setSavedPosts] = useState<SavedPost[]>([]);
   const [isSavingPost, setIsSavingPost] = useState(false);
   const [selectedImage, setSelectedImage] = useState<PostImage | null>(null);
@@ -410,28 +410,67 @@ function App() {
   const [currentPostTopic, setCurrentPostTopic] = useState('');
   const [currentPostFormat, setCurrentPostFormat] = useState('');
   const [currentPostText, setCurrentPostText] = useState('');
-
-  // Добавляем состояние для подписки
   const [showSubscription, setShowSubscription] = useState<boolean>(false);
-
-  // --- ВОССТАНОВЛЕНО: Состояние для текущего месяца календаря --- 
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
+
+  // Re-add missing states based on linter errors
+  const [loadingAnalysis, setLoadingAnalysis] = useState(false); 
+  const [analysisLoadedFromDB, setAnalysisLoadedFromDB] = useState(false);
+  const [loadingSavedPosts, setLoadingSavedPosts] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null); // Re-add success state for now, will replace with toast later if needed
+  const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
+  const [suggestedImages, setSuggestedImages] = useState<PostImage[]>([]); // Add suggestedImages state
+  const [isGeneratingPostDetails, setIsGeneratingPostDetails] = useState<boolean>(false); // Add isGeneratingPostDetails state
+  const [allChannels, setAllChannels] = useState<string[]>([]); // Re-add allChannels for analyzeChannel logic
 
   // --- ИЗМЕНЕНИЕ: Загрузка состояния ИЗ localStorage ПОСЛЕ аутентификации ---
   useEffect(() => {
     if (isAuthenticated && userId) {
       const savedChannelKey = getUserSpecificKey('channelName', userId); 
-      const savedChannel = savedChannelKey ? localStorage.getItem(savedChannelKey) : null;
+      // Declare savedChannel outside the condition
+      let savedChannel: string | null = null; 
+      if (savedChannelKey) { 
+        savedChannel = localStorage.getItem(savedChannelKey);
+      }
       if (savedChannel) setChannelName(savedChannel);
 
       const savedViewKey = getUserSpecificKey('currentView', userId);
       const savedView = savedViewKey ? localStorage.getItem(savedViewKey) as ViewType : null;
       if (savedView) setCurrentView(savedView);
+      
+      // Re-add loading allChannels from localStorage
+      const allChannelsKey = getUserSpecificKey('allChannels', userId);
+      if (allChannelsKey) {
+        const storedChannels = localStorage.getItem(allChannelsKey);
+        if (storedChannels) {
+          try {
+            setAllChannels(JSON.parse(storedChannels));
+          } catch (e) {
+            console.error('Ошибка при восстановлении списка каналов:', e);
+          }
+        }
+      }
+      
+      // Re-add loading selectedChannels from localStorage
+      const selectedChannelsKey = getUserSpecificKey('selectedChannels', userId);
+      if (selectedChannelsKey) {
+        const storedSelectedChannels = localStorage.getItem(selectedChannelsKey);
+        if (storedSelectedChannels) {
+          try {
+            setSelectedChannels(JSON.parse(storedSelectedChannels));
+          } catch (e) {
+            console.error('Ошибка при восстановлении выбранных каналов:', e);
+          }
+        }
+      }
 
       if (savedChannel) {
           fetchSavedAnalysis(savedChannel);
-          fetchSavedIdeas(savedChannel);
+          fetchSavedIdeas(); // Corrected: fetchSavedIdeas doesn't take channel name
           fetchSavedPosts(savedChannel);
+      } else {
+          // If no channel saved, fetch all posts for the user
+          fetchSavedPosts();
       }
     }
   }, [isAuthenticated, userId]);
@@ -511,7 +550,7 @@ function App() {
       // Загрузка сохраненных идей для выбранного канала
       fetchSavedIdeas();
       // Загрузка сохраненных постов для выбранного канала
-      fetchSavedPosts(); 
+      fetchSavedPosts(savedChannel); 
     } else if (isAuthenticated) {
       // Если канал не выбран, очищаем специфичные для канала данные
       setAnalysisResult(null);
@@ -526,19 +565,92 @@ function App() {
   }, [isAuthenticated, channelName]); // Зависимости остаются прежними
   // --- КОНЕЦ ИЗМЕНЕНИЯ --- 
   
-  // Функция для загрузки сохраненных постов
+  // --- Re-add useEffect for calendar --- 
+  useEffect(() => {
+    if (currentMonth && currentView === 'calendar') { 
+      generateCalendarDays();
+    }
+  }, [currentMonth, savedPosts, currentView]);
+  
+  // --- Re-add calendar functions --- 
+  const generateCalendarDays = () => {
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+    
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    let firstDayOfWeek = firstDay.getDay();
+    firstDayOfWeek = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
+    
+    const days: CalendarDay[] = [];
+    const prevMonthLastDay = new Date(year, month, 0).getDate();
+    for (let i = firstDayOfWeek - 1; i >= 0; i--) {
+      const date = new Date(year, month - 1, prevMonthLastDay - i);
+      days.push({
+        date,
+        posts: savedPosts.filter(post => new Date(post.target_date).toDateString() === date.toDateString()),
+        isCurrentMonth: false,
+        isToday: date.toDateString() === new Date().toDateString()
+      });
+    }
+    
+    for (let i = 1; i <= lastDay.getDate(); i++) {
+      const date = new Date(year, month, i);
+      days.push({
+        date,
+        posts: savedPosts.filter(post => new Date(post.target_date).toDateString() === date.toDateString()),
+        isCurrentMonth: true,
+        isToday: date.toDateString() === new Date().toDateString()
+      });
+    }
+    
+    const daysToAdd = 42 - days.length; // 6 строк * 7 дней
+    for (let i = 1; i <= daysToAdd; i++) {
+      const date = new Date(year, month + 1, i);
+      days.push({
+        date,
+        posts: savedPosts.filter(post => new Date(post.target_date).toDateString() === date.toDateString()),
+        isCurrentMonth: false,
+        isToday: date.toDateString() === new Date().toDateString()
+      });
+    }
+    
+    setCalendarDays(days);
+  };
+
+  const goToPrevMonth = () => {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
+  };
+  
+  const goToNextMonth = () => {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
+  };
+  // --- End re-added calendar functions --- 
+
+  // --- Function to fetch saved posts (add loading state) --- 
   const fetchSavedPosts = async (channel?: string) => {
     if (!userId) return; 
+    setLoadingSavedPosts(true); // Use the re-added state
     setError(null);
     try {
       const params = channel ? { channel_name: channel } : {};
+      // Use selectedChannels if available and no specific channel is passed
+      if (!channel && selectedChannels.length > 0) {
+         // Fetch posts for multiple selected channels - requires backend support or multiple requests
+         // For now, let's just fetch all user posts if multiple channels selected
+         console.log("Fetching posts for selected channels: ", selectedChannels);
+         // Fetching all user posts for now if multiple selected
+         delete params.channel_name; 
+      } 
       const response = await axios.get(`${API_BASE_URL}/posts`, { params });
       const posts: SavedPost[] = response.data || [];
       setSavedPosts(posts);
-      updateChannelsFromPosts(posts);
+      updateChannelsFromPosts(posts); // Keep updating active channels
     } catch (err) {
       console.error("Ошибка при загрузке сохраненных постов:", err);
       setError("Не удалось загрузить сохраненные посты.");
+    } finally {
+       setLoadingSavedPosts(false); // Use the re-added state
     }
   };
   
@@ -1130,12 +1242,14 @@ function App() {
       
       {/* Блок подписки */}
       {showSubscription && (
-        <SubscriptionWidget userId={userId} isActive={true} />
+        // Remove isActive prop from the call
+        <SubscriptionWidget userId={userId} /> 
       )}
 
       <main className="app-main">
-        {/* Сообщения об ошибках и успешном выполнении */}
+        {/* Сообщения об ошибках и успешном выполнении */} 
         {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
+        {/* Use success state for now */} 
         {success && <SuccessMessage message={success} onClose={() => setSuccess(null)} />}
 
         {/* Навигация */}
