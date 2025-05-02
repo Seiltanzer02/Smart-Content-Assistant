@@ -3570,7 +3570,6 @@ async def get_subscription_status(request: Request):
     debug = {
         "user_id_from_query": user_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "request_headers": dict(request.headers),
         "method": "direct_sql_query" # Указываем метод запроса
     }
     
@@ -3597,182 +3596,127 @@ async def get_subscription_status(request: Request):
         ORDER BY end_date DESC
         LIMIT 1;
         """
-        debug["direct_sql"] = direct_sql
         
         # Выполняем прямой SQL-запрос
+        direct_result = await _execute_sql_direct(direct_sql)
+        
+        # Получаем данные из прямого запроса
+        is_active = False
+        has_subscription = False
+        subscription_end_date = None
+        subscription_id = None
+        
+        if direct_result and direct_result.get("data") and len(direct_result["data"]) > 0:
+            direct_subscription = direct_result["data"][0]
+            logger.info(f"[subscription/status] Прямой SQL запрос вернул: {direct_subscription}")
+            print(f"[subscription/status] 🔎 Прямой SQL запрос вернул: {direct_subscription}")
+            
+            # Получаем значения полей
+            direct_is_active = direct_subscription.get("is_active")
+            direct_end_date = direct_subscription.get("end_date")
+            subscription_id = direct_subscription.get("id")
+            
+            # Проверяем end_date
+            has_valid_end_date = False
+            if direct_end_date:
+                try:
+                    # Обеспечиваем правильный парсинг даты
+                    if isinstance(direct_end_date, str):
+                        if "T" in direct_end_date:
+                            end_date = datetime.fromisoformat(direct_end_date.replace("Z", "+00:00"))
+                        else:
+                            end_date = datetime.fromisoformat(f"{direct_end_date}T00:00:00+00:00")
+                    else:
+                        # Если это уже datetime объект
+                        end_date = direct_end_date
+                    
+                    # Проверяем, что end_date в будущем
+                    if end_date > now:
+                        has_valid_end_date = True
+                        logger.info(f"[subscription/status] ✅ Валидная end_date: {end_date} > {now}")
+                    else:
+                        logger.info(f"[subscription/status] ⚠️ Невалидная end_date: {end_date} <= {now}")
+                except Exception as parse_err:
+                    logger.error(f"[subscription/status] ❌ Ошибка парсинга даты: {parse_err}")
+            
+            # КЛЮЧЕВАЯ ЛОГИКА: Если end_date валидна (в будущем), считаем подписку активной
+            # независимо от значения is_active в базе
+            is_active = direct_is_active if not has_valid_end_date else True
+            has_subscription = has_valid_end_date or direct_is_active
+            subscription_end_date = direct_end_date if has_valid_end_date else None
+            
+            # Если end_date в будущем, но is_active=FALSE - исправляем в базе
+            if has_valid_end_date and not direct_is_active and subscription_id:
+                try:
+                    # Используем прямой SQL для обновления
+                    update_sql = f"""
+                    UPDATE user_subscription 
+                    SET is_active = TRUE,
+                        has_subscription = TRUE 
+                    WHERE id = {subscription_id};
+                    """
+                    
+                    # Выполняем обновление
+                    update_result = await _execute_sql_direct(update_sql)
+                    if update_result and update_result.get("status_code") == 200:
+                        logger.info(f"[subscription/status] ✅ Исправлено is_active=FALSE на TRUE (ID={subscription_id})")
+                        print(f"[subscription/status] ✅ Исправлено is_active=FALSE на TRUE (ID={subscription_id})")
+                        
+                        # Обновляем флаги после исправления
+                        is_active = True
+                        has_subscription = True
+                    else:
+                        logger.error(f"[subscription/status] ❌ Не удалось исправить is_active (ID={subscription_id}): {update_result}")
+                except Exception as update_err:
+                    logger.error(f"[subscription/status] ❌ Ошибка при обновлении: {update_err}")
+        else:
+            # Записи не найдено
+            logger.info(f"[subscription/status] ⚠️ Запись не найдена для user_id={user_id}")
+            print(f"[subscription/status] ⚠️ Запись не найдена для user_id={user_id}")
+    except Exception as sql_err:
+        logger.error(f"[subscription/status] ❌ Ошибка при выполнении прямого SQL: {sql_err}")
+        print(f"[subscription/status] ❌ Ошибка при выполнении прямого SQL: {sql_err}")
+        
+        # Резервный запрос через Supabase API
         try:
-            # Если доступна функция для выполнения SQL через RPC
-            direct_result = await _execute_sql_direct(direct_sql)
-            debug["direct_result"] = direct_result
-            
-            # Получаем данные из прямого запроса
-            if direct_result and direct_result.get("data") and len(direct_result["data"]) > 0:
-                direct_subscription = direct_result["data"][0]
-                debug["direct_subscription"] = direct_subscription
-                logger.info(f"[subscription/status] Прямой SQL запрос вернул: {direct_subscription}")
-                print(f"[subscription/status] 🔎 Прямой SQL запрос вернул: {direct_subscription}")
-                
-                # Получаем значения полей
-                direct_is_active = direct_subscription.get("is_active")
-                direct_end_date = direct_subscription.get("end_date")
-                direct_subscription_id = direct_subscription.get("id")
-                
-                debug["direct_is_active"] = direct_is_active
-                debug["direct_end_date"] = direct_end_date
-                debug["direct_subscription_id"] = direct_subscription_id
-                
-                # Проверяем end_date
-                has_valid_end_date = False
-                if direct_end_date:
-                    try:
-                        # Обеспечиваем правильный парсинг даты
-                        if isinstance(direct_end_date, str):
-                            if "T" in direct_end_date:
-                                end_date = datetime.fromisoformat(direct_end_date.replace("Z", "+00:00"))
-                            else:
-                                end_date = datetime.fromisoformat(f"{direct_end_date}T00:00:00+00:00")
-                        else:
-                            # Если это уже datetime объект
-                            end_date = direct_end_date
-                            
-                        debug["parsed_end_date"] = str(end_date)
-                        
-                        # Проверяем, что end_date в будущем
-                        if end_date > now:
-                            has_valid_end_date = True
-                            debug["end_date_valid"] = True
-                            debug["date_comparison"] = f"end_date ({end_date}) > now ({now})"
-                        else:
-                            debug["end_date_valid"] = False
-                            debug["date_comparison"] = f"end_date ({end_date}) <= now ({now})"
-                    except Exception as parse_err:
-                        debug["end_date_parse_error"] = str(parse_err)
-                
-                # СУПЕР РАДИКАЛЬНОЕ РЕШЕНИЕ: Если end_date в будущем, то подписка активна
-                # независимо от значения is_active в базе
-                is_active = has_valid_end_date
-                has_subscription = has_valid_end_date
-                subscription_end_date = direct_end_date if has_valid_end_date else None
-                
-                # Если is_active == False в базе, но end_date в будущем - исправляем в базе
-                if has_valid_end_date and direct_is_active is False and direct_subscription_id:
-                    try:
-                        # Используем прямой SQL для обновления
-                        update_sql = f"""
-                        UPDATE user_subscription 
-                        SET is_active = TRUE 
-                        WHERE id = {direct_subscription_id};
-                        """
-                        debug["update_sql"] = update_sql
-                        
-                        # Выполняем обновление
-                        update_result = await _execute_sql_direct(update_sql)
-                        debug["update_result"] = update_result
-                        logger.info(f"[subscription/status] ✅ Исправлено is_active=FALSE на TRUE (ID={direct_subscription_id})")
-                        print(f"[subscription/status] ✅ Исправлено is_active=FALSE на TRUE (ID={direct_subscription_id})")
-                    except Exception as update_err:
-                        debug["update_error"] = str(update_err)
-                
-                # Записываем финальный результат
-                debug["final_is_active"] = is_active
-                debug["final_has_subscription"] = has_subscription
-            else:
-                # Записи не найдено
-                is_active = False
-                has_subscription = False
-                subscription_end_date = None
-                logger.info(f"[subscription/status] ⚠️ Запись не найдена для user_id={user_id}")
-                print(f"[subscription/status] ⚠️ Запись не найдена для user_id={user_id}")
-        except Exception as sql_err:
-            debug["direct_sql_error"] = str(sql_err)
-            logger.error(f"[subscription/status] Ошибка при выполнении прямого SQL: {sql_err}")
-            print(f"[subscription/status] ❌ Ошибка при выполнении прямого SQL: {sql_err}")
-            
-            # Резервный запрос через Supabase API (на случай, если SQL RPC недоступен)
             result = supabase.table("user_subscription") \
                 .select("*") \
                 .eq("user_id", int(user_id)) \
                 .order("end_date", desc=True) \
+                .limit(1) \
                 .execute()
                 
-            debug["backup_api_result"] = str(result)
-            debug["backup_api_data"] = result.data
-            
-            # Проводим ту же логику, что и с прямым SQL
-            sub = result.data[0] if result.data else None
-            debug["backup_selected_row"] = sub
-            
-            if sub:
-                is_active_field = sub.get("is_active")
-                end_date_str = sub.get("end_date")
+            if result.data:
+                subscription = result.data[0]
+                logger.info(f"[subscription/status] ℹ️ Резервный запрос через API вернул: {subscription}")
                 
-                debug["backup_is_active_field"] = is_active_field
-                debug["backup_end_date_str"] = end_date_str
+                is_active = subscription.get("is_active", False)
+                subscription_end_date = subscription.get("end_date")
                 
-                # Проверка даты истечения
-                has_valid_end_date = False
-                if end_date_str:
+                # Проверяем end_date через API запрос
+                if subscription_end_date:
                     try:
-                        if "T" in end_date_str:
-                            end_date = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
-                        else:
-                            end_date = datetime.fromisoformat(f"{end_date_str}T00:00:00+00:00")
-                            
-                        debug["backup_parsed_end_date"] = end_date.isoformat()
-                        
+                        end_date = datetime.fromisoformat(subscription_end_date.replace("Z", "+00:00"))
                         if end_date > now:
-                            has_valid_end_date = True
-                            debug["backup_date_comparison"] = "end_date > now"
-                        else:
-                            debug["backup_date_comparison"] = "end_date <= now"
-                    except Exception as e:
-                        debug["backup_end_date_parse_error"] = str(e)
-                
-                # Устанавливаем статус активности
-                is_active = has_valid_end_date
-                has_subscription = has_valid_end_date
-                subscription_end_date = end_date_str if has_valid_end_date else None
-                
-                debug["backup_final_is_active"] = is_active
-                debug["backup_final_has_subscription"] = has_subscription
-            else:
-                is_active = False
-                has_subscription = False
-                subscription_end_date = None
-        
-        # Формируем итоговый ответ
-        response = {
+                            has_subscription = True
+                            is_active = True
+                    except Exception as api_date_err:
+                        logger.error(f"[subscription/status] ❌ Ошибка при парсинге даты из API: {api_date_err}")
+        except Exception as api_err:
+            logger.error(f"[subscription/status] ❌ Ошибка при резервном запросе через API: {api_err}")
+    
+    # Агрессивно логируем результат для отладки
+    logger.info(f"[subscription/status] РЕЗУЛЬТАТ: is_active={is_active}, has_subscription={has_subscription}, end_date={subscription_end_date}")
+    print(f"[subscription/status] 📊 РЕЗУЛЬТАТ: is_active={is_active}, has_subscription={has_subscription}, end_date={subscription_end_date}")
+    
+    # Возвращаем ответ с настройками кэширования
+    return FastAPIResponse(
+        content=json.dumps({
             "has_subscription": has_subscription,
-                "is_active": is_active,
-            "subscription_end_date": subscription_end_date,
-            "debug": debug
-        }
-        
-        logger.info(f"[subscription/status] ОТВЕТ: has_subscription={has_subscription}, is_active={is_active}")
-        print(f"[subscription/status] 📝 ОТВЕТ: has_subscription={has_subscription}, is_active={is_active}")
-        
-        # Возвращаем ответ с заголовками запрета кэширования
-        return FastAPIResponse(
-            content=json.dumps(response, default=str),  # default=str для сериализации datetime
-            media_type="application/json",
-            headers=cache_headers
-        )
-    except Exception as e:
-        logger.error(f"[subscription/status] КРИТИЧЕСКАЯ ОШИБКА: {str(e)}", exc_info=True)
-        print(f"[subscription/status] 💥 КРИТИЧЕСКАЯ ОШИБКА: {str(e)}")
-        
-        debug["exception"] = str(e)
-        debug["traceback"] = traceback.format_exc()
-        
-        return FastAPIResponse(
-            content=json.dumps({
-                "has_subscription": False,
-                "is_active": False,
-                "subscription_end_date": None,
-                "error": str(e),
-                "debug": debug
-            }, default=str),
-            media_type="application/json",
-            headers=cache_headers
-        )
+            "is_active": is_active,
+            "subscription_end_date": subscription_end_date
+        }),
+        media_type="application/json",
+        headers=cache_headers
+    )
 

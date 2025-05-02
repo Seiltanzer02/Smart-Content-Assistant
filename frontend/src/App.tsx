@@ -1449,7 +1449,10 @@ function App() {
               userId={userId}
               subscriptionStatus={subscriptionStatus}
               onSubscriptionUpdate={refetchSubscriptionStatus}
-              isActive={subscriptionStatus ? !!(subscriptionStatus.is_active && subscriptionStatus.has_subscription) : false}
+              isActive={subscriptionStatus ? 
+                (!!subscriptionStatus.is_active || 
+                 !!(subscriptionStatus.subscription_end_date && new Date(subscriptionStatus.subscription_end_date) > new Date())) : 
+                false}
             />
           </SimpleErrorBoundary>
         )}
