@@ -8,6 +8,13 @@ import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
 import { getUserSubscriptionStatus, SubscriptionStatus } from './api/subscription';
 
+// Добавляем CSS для контейнера подписки
+const subscriptionContainerStyle = {
+  marginBottom: '20px',
+  padding: '10px',
+  borderRadius: '8px'
+};
+
 // Определяем базовый URL API
 // Так как фронтенд и API на одном домене, используем пустую строку
 // чтобы axios использовал относительные пути (например, /generate-plan)
@@ -409,73 +416,94 @@ function App() {
     console.log('[refetchSubscriptionStatus] Запрос статуса с API...');
     try {
       // Добавляем флаг форсированного обновления для борьбы с кэшированием
-      const fetchedStatus = await getUserSubscriptionStatus(userId);
+      const fetchedStatus = await getUserSubscriptionStatus(userId, true);
       console.log('[refetchSubscriptionStatus] Получен статус:', fetchedStatus);
       
-      // Логируем сравнение с предыдущим статусом
-      if (previousStatusRef.current) {
-        console.log('[refetchSubscriptionStatus] Сравнение с предыдущим статусом:');
-        console.log(`Предыдущий: has_subscription=${previousStatusRef.current.has_subscription}, is_active=${previousStatusRef.current.is_active}`);
-        console.log(`Новый: has_subscription=${fetchedStatus.has_subscription}, is_active=${fetchedStatus.is_active}`);
-        
-        if (previousStatusRef.current.has_subscription !== fetchedStatus.has_subscription ||
-            previousStatusRef.current.is_active !== fetchedStatus.is_active) {
-          console.log('[refetchSubscriptionStatus] ВНИМАНИЕ! Статус изменился!');
+      // Проверяем валидность полученных данных
+      if (fetchedStatus && typeof fetchedStatus === 'object') {
+        // Проверяем на наличие всех полей
+        if ('has_subscription' in fetchedStatus && 
+            'is_active' in fetchedStatus && 
+            'subscription_end_date' in fetchedStatus) {
           
-          // Если новый статус показывает активную подписку, запускаем серию дополнительных проверок
-          if (fetchedStatus.has_subscription && fetchedStatus.is_active) {
-            console.log('[refetchSubscriptionStatus] Обнаружена активная подписка! Запускаем дополнительные проверки...');
+          // Логируем сравнение с предыдущим статусом
+          if (previousStatusRef.current) {
+            console.log('[refetchSubscriptionStatus] Сравнение с предыдущим статусом:');
+            console.log(`Предыдущий: has_subscription=${previousStatusRef.current.has_subscription}, is_active=${previousStatusRef.current.is_active}`);
+            console.log(`Новый: has_subscription=${fetchedStatus.has_subscription}, is_active=${fetchedStatus.is_active}`);
             
-            // Запускаем серию повторных запросов с разными интервалами для гарантии
-            const verificationIntervals = [1000, 2000, 3000, 5000];
-            
-            for (const interval of verificationIntervals) {
-              setTimeout(async () => {
-                console.log(`[refetchSubscriptionStatus] Дополнительная проверка через ${interval}ms...`);
-                try {
-                  const verificationStatus = await getUserSubscriptionStatus(userId);
-                  console.log(`[refetchSubscriptionStatus] Результат дополнительной проверки:`, verificationStatus);
-                  
-                  // Обновляем состояние только если подписка все еще активна
-                  if (verificationStatus.has_subscription && verificationStatus.is_active) {
-                    setSubscriptionStatus(verificationStatus);
-                    previousStatusRef.current = verificationStatus;
-                    console.log('[refetchSubscriptionStatus] Подтверждено: подписка активна!');
-                  }
-                } catch (e) {
-                  console.error(`[refetchSubscriptionStatus] Ошибка при дополнительной проверке:`, e);
+            if (previousStatusRef.current.has_subscription !== fetchedStatus.has_subscription ||
+                previousStatusRef.current.is_active !== fetchedStatus.is_active) {
+              console.log('[refetchSubscriptionStatus] ВНИМАНИЕ! Статус изменился!');
+              
+              // Если новый статус показывает активную подписку, запускаем серию дополнительных проверок
+              if (fetchedStatus.has_subscription && fetchedStatus.is_active) {
+                console.log('[refetchSubscriptionStatus] Обнаружена активная подписка! Запускаем дополнительные проверки...');
+                
+                // Запускаем серию повторных запросов с разными интервалами для гарантии
+                const verificationIntervals = [1000, 2000, 3000, 5000];
+                
+                for (const interval of verificationIntervals) {
+                  setTimeout(async () => {
+                    console.log(`[refetchSubscriptionStatus] Дополнительная проверка через ${interval}ms...`);
+                    try {
+                      const verificationStatus = await getUserSubscriptionStatus(userId, true);
+                      console.log(`[refetchSubscriptionStatus] Результат дополнительной проверки:`, verificationStatus);
+                      
+                      // Обновляем состояние только если подписка все еще активна
+                      if (verificationStatus.has_subscription && verificationStatus.is_active) {
+                        setSubscriptionStatus(verificationStatus);
+                        previousStatusRef.current = verificationStatus;
+                        console.log('[refetchSubscriptionStatus] Подтверждено: подписка активна!');
+                      }
+                    } catch (e) {
+                      console.error(`[refetchSubscriptionStatus] Ошибка при дополнительной проверке:`, e);
+                    }
+                  }, interval);
                 }
-              }, interval);
+              }
             }
           }
+          
+          // Обновляем ссылку на предыдущий статус
+          previousStatusRef.current = fetchedStatus;
+          
+          // Обновляем время последнего обновления
+          setLastRefreshTime(new Date().toISOString());
+          
+          // Обновляем debug info, если доступно
+          if (fetchedStatus.debug) {
+            setDebugInfo(fetchedStatus.debug);
+            console.log('[refetchSubscriptionStatus][DEBUG]:', fetchedStatus.debug);
+          } else {
+            setDebugInfo(null);
+          }
+          
+          // Обновляем статус на основе ответа API
+          setSubscriptionStatus({
+            has_subscription: fetchedStatus.has_subscription,
+            is_active: fetchedStatus.is_active,
+            subscription_end_date: fetchedStatus.subscription_end_date
+          });
+          
+          // Сбрасываем ошибку подписки, если она была
+          setSubscriptionError(null);
+          
+          // Возвращаем полученный статус для использования в Promise chain
+          return fetchedStatus;
+        } else {
+          console.error('[refetchSubscriptionStatus] Получен неполный ответ от API:', fetchedStatus);
+          setSubscriptionError('Получен неполный ответ от сервера');
+          return null;
         }
-      }
-      
-      // Обновляем ссылку на предыдущий статус
-      previousStatusRef.current = fetchedStatus;
-      
-      // Обновляем время последнего обновления
-      setLastRefreshTime(new Date().toISOString());
-      
-      if ((fetchedStatus as any).debug) {
-        setDebugInfo((fetchedStatus as any).debug); // Обновляем debug info
-        console.log('[refetchSubscriptionStatus][DEBUG]:', (fetchedStatus as any).debug);
       } else {
-        setDebugInfo(null);
+        console.error('[refetchSubscriptionStatus] Некорректный формат ответа API:', fetchedStatus);
+        setSubscriptionError('Некорректный формат ответа от сервера');
+        return null;
       }
-      
-      // Просто обновляем статус на основе ответа API
-      setSubscriptionStatus({
-        has_subscription: fetchedStatus.has_subscription,
-        is_active: fetchedStatus.is_active,
-        subscription_end_date: fetchedStatus.subscription_end_date
-      });
-      
-      // Возвращаем полученный статус для использования в Promise chain
-      return fetchedStatus;
     } catch (err) {
       console.error('[refetchSubscriptionStatus] Ошибка запроса статуса:', err);
-      setError('Не удалось получить статус подписки'); // Используем существующий setError вместо setFetchError
+      setSubscriptionError('Не удалось получить статус подписки');
       return null;
     }
   }, [userId]);
@@ -487,7 +515,15 @@ function App() {
     if (userId) {
       console.log(`[Initial Load Effect] userId установлен: ${userId}. Вызов refetchSubscriptionStatus...`);
       // Просто вызываем загрузку статуса ОДИН раз при наличии userId
-      refetchSubscriptionStatus();
+      refetchSubscriptionStatus().catch(err => {
+        console.error("[Initial Load Effect] Ошибка при загрузке статуса:", err);
+        // Устанавливаем дефолтный статус, чтобы не повредить работу приложения
+        setSubscriptionStatus({
+          has_subscription: false,
+          is_active: false,
+          subscription_end_date: null
+        });
+      });
     } else {
       console.log('[Initial Load Effect] userId пока null, статус не запрашиваем.');
     }
@@ -561,6 +597,7 @@ function App() {
 
   // Добавляем состояние для подписки
   const [showSubscription, setShowSubscription] = useState<boolean>(false);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
 
   // --- ВОССТАНОВЛЕНО: Состояние для текущего месяца календаря --- 
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
@@ -1405,7 +1442,12 @@ function App() {
             {/* Кнопка для управления подпиской */}
             <button
               className="icon-button"
-              onClick={() => setShowSubscription(!showSubscription)}
+              onClick={() => {
+                setShowSubscription(!showSubscription);
+                setSubscriptionError(null); // Сбрасываем ошибку при переключении
+                // Скрываем другие виды
+                setCurrentView('analyze');
+              }}
               title="Управление подпиской"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1444,17 +1486,34 @@ function App() {
         
         {/* Блок подписки */}
         {showSubscription && (
-          <SimpleErrorBoundary>
-            <SubscriptionWidget 
-              userId={userId}
-              subscriptionStatus={subscriptionStatus}
-              onSubscriptionUpdate={refetchSubscriptionStatus}
-              isActive={subscriptionStatus ? 
-                (!!subscriptionStatus.is_active || 
-                 !!(subscriptionStatus.subscription_end_date && new Date(subscriptionStatus.subscription_end_date) > new Date())) : 
-                false}
-            />
-          </SimpleErrorBoundary>
+          <div className="subscription-container" style={subscriptionContainerStyle}>
+            <SimpleErrorBoundary>
+              {subscriptionError ? (
+                <div className="error-message">
+                  <p>{subscriptionError}</p>
+                  <button 
+                    className="action-button small" 
+                    onClick={() => {
+                      setSubscriptionError(null);
+                      refetchSubscriptionStatus();
+                    }}
+                  >
+                    Попробовать снова
+                  </button>
+                </div>
+              ) : (
+                <SubscriptionWidget 
+                  userId={userId}
+                  subscriptionStatus={subscriptionStatus}
+                  onSubscriptionUpdate={refetchSubscriptionStatus}
+                  isActive={subscriptionStatus ? 
+                    (!!subscriptionStatus.is_active || 
+                    !!(subscriptionStatus.subscription_end_date && new Date(subscriptionStatus.subscription_end_date) > new Date())) : 
+                    false}
+                />
+              )}
+            </SimpleErrorBoundary>
+          </div>
         )}
 
         <main className="app-main">
