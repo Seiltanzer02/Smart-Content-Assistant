@@ -395,13 +395,28 @@ function App() {
   // Переименовываем для ясности
   const refetchSubscriptionStatus = useCallback(async () => {
     if (!userId) return;
+    console.log('[refetchSubscriptionStatus] Fetching status from API...');
     try {
-      const status = await getUserSubscriptionStatus(userId);
-      setSubscriptionStatus(status);
+      const fetchedStatus = await getUserSubscriptionStatus(userId);
+      console.log('[refetchSubscriptionStatus] Fetched status:', fetchedStatus);
+      // --- НОВАЯ ЛОГИКА: Защита от перезаписи Premium статуса старыми данными --- 
+      setSubscriptionStatus(currentStatus => {
+        // Если текущий статус уже Premium (из оптимистичного обновления),
+        // а новый статус Free, ИГНОРИРУЕМ новый статус.
+        if (currentStatus?.has_subscription && !fetchedStatus.has_subscription) {
+          console.warn('[refetchSubscriptionStatus] Ignoring fetched free status because current status is premium.');
+          return currentStatus; // Возвращаем текущий (Premium) статус
+        }
+        // Во всех остальных случаях обновляем на полученный с бэкенда статус
+        console.log('[refetchSubscriptionStatus] Updating state with fetched status.');
+        return fetchedStatus;
+      });
+      // --- КОНЕЦ НОВОЙ ЛОГИКИ ---
     } catch (e) {
-      setSubscriptionStatus(null);
+      console.error('[refetchSubscriptionStatus] Error fetching status:', e);
+      setSubscriptionStatus(null); // Сбрасываем при ошибке
     }
-  }, [userId]);
+  }, [userId]); // Зависимость только userId, т.к. setSubscriptionStatus стабилен
   useEffect(() => {
     refetchSubscriptionStatus(); // Используем новое имя
   }, [userId, refetchSubscriptionStatus]); // Обновляем зависимость
