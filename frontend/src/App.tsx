@@ -427,7 +427,8 @@ function App() {
       if (savedChannelKey) { 
           savedChannel = localStorage.getItem(savedChannelKey);
       }
-      if (savedChannel) setChannelName(savedChannel);
+      // Не сбрасываем канал, если он уже выбран
+      if (savedChannel && !channelName) setChannelName(savedChannel);
 
       const savedViewKey = getUserSpecificKey('currentView', userId);
       const savedView = savedViewKey ? localStorage.getItem(savedViewKey) as ViewType : null;
@@ -558,16 +559,13 @@ function App() {
       // Загрузка сохраненных идей для выбранного канала
       fetchSavedIdeas();
       // Загрузка сохраненных постов для выбранного канала
-      fetchSavedPosts(savedChannel as string); 
+      fetchSavedPosts(channelName); 
     } else if (isAuthenticated) {
       // Если канал не выбран, очищаем специфичные для канала данные
       setAnalysisResult(null);
       setSuggestedIdeas([]);
-      // --- ДОБАВЛЕНО: Также очищаем посты, если канал сброшен ---
       setSavedPosts([]); 
-      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
-    setSelectedIdea(null); 
-      // Возможно, загрузить все посты пользователя, если канал не выбран?
+      setSelectedIdea(null); 
       fetchSavedPosts(); // Загружаем все посты пользователя
     }
   }, [isAuthenticated, channelName]); // Зависимости остаются прежними
@@ -930,12 +928,9 @@ function App() {
     setIsAnalyzing(true);
     setError(null);
     setAnalysisResult(null);
-    // REMOVED: setAnalysisLoadedFromDB(false);
-    // REMOVED: setSuccess(null);
-    
+    setAnalysisLoadedFromDB(false);
     const channelKey = getUserSpecificKey('channelName', userId);
     if (channelKey) localStorage.setItem(channelKey, channelName);
-    
     try {
       const response = await axios.post(`${API_BASE_URL}/analyze-channel`, 
         { channel_name: channelName },
@@ -944,21 +939,20 @@ function App() {
       setAnalysisResult(response.data);
       setCurrentView('suggestions');
       toast.success("Анализ канала успешно завершен!");
-      
       if (!activeChannels.includes(channelName)) {
          const updatedChannels = [...activeChannels, channelName];
          setActiveChannels(updatedChannels);
-         // REMOVED: setAllChannels(updatedChannels);
-         // Update localStorage for activeChannels here
          const activeChannelsKey = getUserSpecificKey('activeChannels', userId);
          if (activeChannelsKey) localStorage.setItem(activeChannelsKey, JSON.stringify(updatedChannels));
       }
-      // REMOVED: setAnalysisLoadedFromDB(true);
-          
-    } catch (err: any) {
-      // ... error handling ...
+      setAnalysisLoadedFromDB(false);
+    } catch (err: any) { 
+      setError(err.response?.data?.detail || err.message || 'Ошибка при анализе канала');
+      setAnalysisResult(null);
+      setAnalysisLoadedFromDB(false);
     } finally {
       setIsAnalyzing(false);
+      setLoadingAnalysis(false);
     }
   };
 
@@ -1139,45 +1133,41 @@ function App() {
   const fetchSavedAnalysis = async (channel: string) => {
     if (!channel || !userId) return;
     setIsAnalyzing(true);
-    setAnalysisResult(null); 
-    // REMOVED: setLoadingAnalysis(true);
-    // REMOVED: setAnalysisLoadedFromDB(false);
+    setLoadingAnalysis(true);
+    setAnalysisResult(null);
+    setAnalysisLoadedFromDB(false);
     try {
       console.log(`Загрузка сохраненного анализа для канала: ${channel}`);
       const response = await axios.get(`${API_BASE_URL}/channel-analysis`, {
         params: { channel_name: channel },
         headers: { 'x-telegram-user-id': userId }
       });
-      
-      // Проверяем, что ответ содержит данные и не является объектом ошибки
       if (response.data && Object.keys(response.data).length > 0 && !response.data.error) {
         console.log('Сохраненный анализ найден:', response.data);
         setAnalysisResult(response.data); 
-        // REMOVED: setAnalysisLoadedFromDB(true);
+        setAnalysisLoadedFromDB(true);
         toast.success(`Загружен сохраненный анализ для @${channel}`, { id: `analysis-${channel}` });
-        // REMOVED: setSuccess(`Загружен сохраненный анализ для @${channel}`);
       } else {
         console.log(`Сохраненный анализ для @${channel} не найден.`);
-        // Если анализ не найден (или пришла ошибка), оставляем analysisResult null
         setAnalysisResult(null); 
-        // Можно очистить сообщение об успехе или установить сообщение о том, что анализ не найден
-        // REMOVED: setSuccess(null);
+        setAnalysisLoadedFromDB(false);
       }
     } catch (err: any) {
-      // Обрабатываем ошибку 404 (Не найдено) отдельно, чтобы не показывать как ошибку
       if (err.response && err.response.status === 404) {
          console.log(`Сохраненный анализ для @${channel} не найден (404).`);
          setAnalysisResult(null);
+         setAnalysisLoadedFromDB(false);
       } else {
         console.error('Ошибка при загрузке сохраненного анализа:', err);
         setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке сохраненного анализа');
-        setAnalysisResult(null); // Сбрасываем результат при ошибке
+        setAnalysisResult(null); 
+        setAnalysisLoadedFromDB(false);
       }
     } finally {
       setIsAnalyzing(false);
-      // REMOVED: setLoadingAnalysis(false);
+      setLoadingAnalysis(false);
     }
-  }; // <-- ДОБАВЛЕНА ТОЧКА С ЗАПЯТОЙ
+  };
 
   // Компонент загрузки
   if (loading) {
