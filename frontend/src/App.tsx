@@ -393,12 +393,10 @@ function App() {
   const [userId, setUserId] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus | null>(null);
   
-  // --- ДОБАВЛЕНО: Константа для ключа localStorage и времени жизни метки --- 
   const PREMIUM_TIMESTAMP_KEY = 'lastPremiumConfirmedAt';
-  const PREMIUM_TIMESTAMP_LIFETIME_MS = 60 * 60 * 1000; // 1 час (для теста, как в бэкенде)
-  // --- КОНЕЦ ДОБАВЛЕНИЯ --- 
+  const PREMIUM_TIMESTAMP_LIFETIME_MS = 60 * 60 * 1000; // 1 час (для теста)
 
-  // --- ИЗМЕНЕНО: refetchSubscriptionStatus теперь возвращает результат и проверяет localStorage --- 
+  // refetchSubscriptionStatus остается как есть (с проверкой localStorage)
   const refetchSubscriptionStatus = useCallback(async (): Promise<SubscriptionStatus | null> => {
     if (!userId) return null;
     console.log('[refetchSubscriptionStatus] Fetching status from API...');
@@ -452,66 +450,74 @@ function App() {
     }
   }, [userId]);
 
-  // --- ИЗМЕНЕНО: useEffect для ПЕРВОНАЧАЛЬНОЙ загрузки проверяет localStorage --- 
+  // --- КАРДИНАЛЬНОЕ ИЗМЕНЕНИЕ: useEffect для ПЕРВОНАЧАЛЬНОЙ загрузки --- 
   useEffect(() => {
-    if (!userId) return;
+    // Логируем установку userId
+    console.log(`[Initial Load Effect] Running. Current userId: ${userId}`);
+    if (!userId) {
+        console.log('[Initial Load Effect] userId is null, exiting.');
+        return;
+    }
+    console.log(`[Initial Load Effect] userId is set: ${userId}. Proceeding with status check.`);
 
     let isMounted = true; 
-    const initialFetchTimeout = 2000; 
+    const initialApiCallDelay = 500; // Задержка перед первым вызовом API
     const userTimestampKey = getUserSpecificKey(PREMIUM_TIMESTAMP_KEY, userId);
 
-    const performInitialFetch = async () => {
-      // --- ДОБАВЛЕНО: Проверка localStorage ПЕРЕД первым запросом --- 
-      let initialStatusIsPremium = false;
-      if (userTimestampKey) {
-          const storedTimestampStr = localStorage.getItem(userTimestampKey);
-          if (storedTimestampStr) {
-              const storedTimestamp = parseInt(storedTimestampStr, 10);
-              const now = Date.now();
-              if (!isNaN(storedTimestamp) && (now - storedTimestamp < PREMIUM_TIMESTAMP_LIFETIME_MS)) {
-                  console.log(`[Initial Fetch] Found recent timestamp in localStorage. Assuming Premium initially.`);
-                  setSubscriptionStatus({
-                      has_subscription: true,
-                      analysis_count: 999, // Предполагаемые значения
-                      post_generation_count: 999,
-                      subscription_end_date: undefined // Дату не знаем точно
-                  });
-                  initialStatusIsPremium = true;
-              }
-          }
-      }
-      // --- КОНЕЦ ДОБАВЛЕНИЯ --- 
-      
-      console.log('[Initial Fetch] Attempting first API fetch...');
-      const firstStatus = await refetchSubscriptionStatus(); // Он сам обновит состояние и проверит localStorage
+    // 1. Синхронная проверка localStorage ПЕРЕД ЛЮБЫМИ ЗАПРОСАМИ
+    let premiumForcedByLocalStorage = false;
+    if (userTimestampKey) {
+        const storedTimestampStr = localStorage.getItem(userTimestampKey);
+        if (storedTimestampStr) {
+            const storedTimestamp = parseInt(storedTimestampStr, 10);
+            const now = Date.now();
+            if (!isNaN(storedTimestamp) && (now - storedTimestamp < PREMIUM_TIMESTAMP_LIFETIME_MS)) {
+                console.warn(`[Initial Load Effect] Found RECENT timestamp in localStorage. Forcing Premium status immediately.`);
+                // Немедленно устанавливаем статус Premium
+                setSubscriptionStatus({
+                    has_subscription: true,
+                    analysis_count: 999, 
+                    post_generation_count: 999,
+                    subscription_end_date: undefined 
+                });
+                premiumForcedByLocalStorage = true;
+            }
+        }
+    }
 
-      // Если первый статус из API НЕ Premium И localStorage НЕ показал Premium, пробуем еще раз
-      if (!isMounted || (firstStatus?.has_subscription ?? initialStatusIsPremium)) {
-         console.log('[Initial Fetch] Exiting: component unmounted or first fetch confirmed premium.');
-         return;
-      }
+    // 2. Запускаем первый вызов API с задержкой
+    const initialFetchTimer = setTimeout(async () => {
+        if (!isMounted) return; // Проверка перед вызовом
+        console.log(`[Initial Load Effect] Delay (${initialApiCallDelay}ms) ended. Calling refetchSubscriptionStatus for the first time...`);
+        await refetchSubscriptionStatus(); // Этот вызов сам обработает ответ и localStorage
+    }, initialApiCallDelay);
 
-      console.log(`[Initial Fetch] First fetch result was not premium. Waiting ${initialFetchTimeout}ms for retry...`);
-      await new Promise(resolve => setTimeout(resolve, initialFetchTimeout));
+    // 3. Логика повторного запроса (если нужно, но теперь менее критично)
+    // Можно оставить для дополнительной надежности, но с учетом localStorage
+    const secondFetchTimeout = 3000; // Таймаут перед второй попыткой (после первой)
+    const retryTimer = setTimeout(async () => {
+        if (!isMounted) return;
+        // Проверяем текущий статус ПОСЛЕ первой попытки refetch
+        setSubscriptionStatus(currentStatus => {
+            if (!currentStatus?.has_subscription) {
+                console.warn(`[Initial Load Effect] Status is still not Premium after first fetch + delay. Attempting second fetch...`);
+                refetchSubscriptionStatus(); // Повторный вызов
+            }
+            return currentStatus; // Не меняем статус здесь, только читаем
+        });
+    }, initialApiCallDelay + secondFetchTimeout); // Запускаем через 3.5с после начала
 
-      if (isMounted) {
-        console.log('[Initial Fetch] Attempting second API fetch...');
-        await refetchSubscriptionStatus(); 
-        console.log('[Initial Fetch] Second fetch complete.');
-      } else {
-        console.log('[Initial Fetch] Exiting retry: component unmounted during wait.');
-      }
-    };
-
-    performInitialFetch();
-
+    // Функция очистки
     return () => {
       isMounted = false; 
-      console.log('[Initial Fetch] Cleanup: component unmounted.');
+      clearTimeout(initialFetchTimer); // Очищаем таймеры
+      clearTimeout(retryTimer);
+      console.log('[Initial Load Effect] Cleanup: component unmounted.');
     };
-  }, [userId, refetchSubscriptionStatus]);
-
-  // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+    // Перезапускаем эффект ТОЛЬКО при изменении userId
+  }, [userId]); 
+  // Убрали refetchSubscriptionStatus из зависимостей, чтобы избежать лишних перезапусков
+  // --- КОНЕЦ КАРДИНАЛЬНОГО ИЗМЕНЕНИЯ ---
 
   // useEffect для обновления при изменении видимости (остается без изменений)
   useEffect(() => {
