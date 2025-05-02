@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Toaster, toast } from 'react-hot-toast';
 import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
+import { getUserSubscriptionStatus } from './api/subscription';
 
 // Определяем базовый URL API
 // Так как фронтенд и API на одном домене, используем пустую строку
