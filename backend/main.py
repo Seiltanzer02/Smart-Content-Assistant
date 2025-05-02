@@ -343,9 +343,12 @@ async def telegram_webhook(request: Request):
             return {"ok": False, "error": "Некорректный user_id"}
         payment_id = successful_payment.get("telegram_payment_charge_id")
         now = datetime.now(timezone.utc) # <-- Используем timezone.utc
-        # Вычисляем правильную дату окончания
-        new_end_date = now + relativedelta(months=SUBSCRIPTION_DURATION_MONTHS)
-        logger.info('[telegram_webhook] Успешная оплата: user_id=%s, payment_id=%s, новая дата окончания: %s', user_id, payment_id, new_end_date.isoformat())
+
+        # --- ТЕСТИРОВАНИЕ: Устанавливаем end_date на 1 час вперед --- 
+        test_end_date = now + timedelta(hours=1)
+        logger.info('[telegram_webhook] ТЕСТОВАЯ длительность подписки: 1 час. Новая дата окончания: %s', test_end_date.isoformat())
+        # --- КОНЕЦ ТЕСТИРОВАНИЯ ---
+        
         try:
             # Ищем ПОСЛЕДНЮЮ запись о подписке (активную или неактивную)
             existing_sub_res = supabase.table("user_subscription").select("*, id").eq("user_id", user_id).order("end_date", desc=True).limit(1).execute()
@@ -354,34 +357,29 @@ async def telegram_webhook(request: Request):
             sub_id_to_update = None
             if existing_sub:
                 sub_id_to_update = existing_sub['id']
-                # Если последняя подписка все еще активна, продлеваем ее
-                existing_end_date_str = existing_sub.get("end_date")
-                if existing_end_date_str:
-                     try:
-                         existing_end_date = datetime.fromisoformat(existing_end_date_str.replace("Z", "+00:00"))
-                         # Теперь сравнение корректно, т.к. обе даты offset-aware
-                         if existing_end_date > now:
-                             new_end_date = existing_end_date + relativedelta(months=SUBSCRIPTION_DURATION_MONTHS)
-                             logger.info(f'[telegram_webhook] Продлеваем активную подписку до: {new_end_date.isoformat()}')
-                     except ValueError:
-                         logger.warning(f'[telegram_webhook] Некорректный формат end_date в существующей подписке: {existing_end_date_str}')
+                # Логику продления пока игнорируем для теста, всегда ставим +1 час от СЕЙЧАС
+                # existing_end_date_str = existing_sub.get("end_date")
+                # ... (код продления закомментирован или удален для теста)
+            
+            # Используем тестовую дату окончания
             update_data = {
                 "is_active": True,
-                "end_date": new_end_date.isoformat(),
-                "payment_id": payment_id # Сохраняем ID платежа
+                "end_date": test_end_date.isoformat(), 
+                "payment_id": payment_id
             }
+            
             if sub_id_to_update:
-                # Обновляем последнюю подписку
-                logger.info(f'[telegram_webhook] Обновляем подписку ID={sub_id_to_update} для user_id={user_id}: {update_data}')
+                # Обновляем последнюю подписку с тестовой датой
+                logger.info(f'[telegram_webhook] Обновляем подписку ID={sub_id_to_update} для user_id={user_id} (ТЕСТ +1 час): {update_data}')
                 supabase.table("user_subscription").update(update_data).eq("id", sub_id_to_update).execute()
             else:
-                # Создаём новую подписку, если существующей нет
+                # Создаём новую подписку с тестовой датой
                 insert_data = update_data.copy()
                 insert_data["user_id"] = user_id
-                insert_data["start_date"] = now.isoformat() # Добавляем дату начала
-                logger.info(f'[telegram_webhook] Создаём новую подписку для user_id={user_id}: {insert_data}')
+                insert_data["start_date"] = now.isoformat()
+                logger.info(f'[telegram_webhook] Создаём новую подписку для user_id={user_id} (ТЕСТ +1 час): {insert_data}')
                 supabase.table("user_subscription").insert(insert_data).execute()
-            logger.info('[telegram_webhook] Подписка успешно активирована/продлена для user_id=%s', user_id)
+            logger.info('[telegram_webhook] Подписка успешно активирована/продлена для user_id=%s (ТЕСТ +1 час)', user_id)
         except Exception as e:
             logger.error('[telegram_webhook] Ошибка при активации подписки: %s', e, exc_info=True)
         return {"ok": True, "successful_payment": True}
