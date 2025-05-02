@@ -144,6 +144,12 @@ async def _execute_sql_direct(sql_query: str) -> Dict[str, Any]:
     if not supabase_url or not supabase_key:
         logger.error("Не найдены переменные окружения SUPABASE_URL или SUPABASE_ANON_KEY для прямого SQL")
         return {"status_code": 500, "error": "Missing Supabase credentials"}
+    
+    # ИСПРАВЛЕНИЕ: удаляем точку с запятой из запроса SQL, если она есть в конце
+    sql_query = sql_query.strip()
+    if sql_query.endswith(';'):
+        sql_query = sql_query[:-1]
+        logger.info(f"Удалена точка с запятой из SQL запроса")
         
     url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json" # Используем нашу RPC функцию
     headers = {
@@ -314,215 +320,241 @@ async def generate_stars_invoice_link(request: Request):
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
     try:
+        # Получаем данные от Telegram
         data = await request.json()
         logger.info(f"[telegram_webhook] Получены данные: {json.dumps(data)}")
-        print(f"[telegram_webhook] 📨 Получены данные вебхука: {json.dumps(data, ensure_ascii=False)}")
+        print(f"[telegram_webhook] 📨 Получены данные вебхука: {json.dumps(data)}")
         
-        # Обработка pre_checkout_query (перед оплатой)
-        if "pre_checkout_query" in data:
+        # Обработка pre_checkout_query
+        if data.get("pre_checkout_query"):
             query_id = data["pre_checkout_query"]["id"]
             logger.info(f"[telegram_webhook] pre_checkout_query: query_id={query_id}")
             
-            # Принимаем платеж
-            bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-            response = requests.post(
-                f"https://api.telegram.org/bot{bot_token}/answerPreCheckoutQuery",
-                json={"pre_checkout_query_id": query_id, "ok": True}
-            )
-            logger.info(f"[telegram_webhook] Ответ на pre_checkout_query: {response.text}")
-            return {"ok": True}
+            # Подтверждаем запрос на оплату
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerPreCheckoutQuery",
+                    json={"pre_checkout_query_id": query_id, "ok": True}
+                )
+                logger.info(f"[telegram_webhook] Ответ на pre_checkout_query: {response.text}")
             
-        # Обработка successful_payment (после успешной оплаты)
-        if "message" in data and "successful_payment" in data["message"]:
+            return {"status": "ok"}
+        
+        # Обработка successful_payment
+        if data.get("message") and data["message"].get("successful_payment"):
             payment = data["message"]["successful_payment"]
             user_id = data["message"]["from"]["id"]
-            # Приводим явно к int для безопасности
-            user_id = int(user_id)
+            
+            # Преобразуем user_id в числовой тип, если это строка
+            if isinstance(user_id, str) and user_id.isdigit():
+                user_id = int(user_id)
+            
             logger.info(f"[telegram_webhook] user_id приведён к int: {user_id} ({type(user_id)})")
             
-            # ТЕСТОВАЯ функциональность: устанавливаем очень дальнюю дату
-            # Используем строго ISO формат даты для совместимости
-            end_date = datetime.now(timezone.utc) + relativedelta(years=75)  # 75 лет вперед для тестирования
-            iso_date = "2099-12-31T23:59:59+00:00"  # Используем фиксированную дату для тестирования
-            logger.info(f"[telegram_webhook] ТЕСТОВАЯ дата окончания: {iso_date}")
+            # Для тестирования используем далекую дату
+            test_date = "2099-12-31T23:59:59+00:00"
+            logger.info(f"[telegram_webhook] ТЕСТОВАЯ дата окончания: {test_date}")
             
-            # СУПЕР-ДИАГНОСТИКА: выполняем прямой SQL-запрос для проверки существующих подписок
-            # Ищем все подписки пользователя, отсортированные по дате окончания (сначала самые новые)
+            # ISO-формат для SQL
+            iso_date = test_date
+            
+            # Проверяем, есть ли у пользователя уже активная подписка
             check_sql = f"""
             SELECT * FROM user_subscription 
             WHERE user_id = {user_id} 
             ORDER BY end_date DESC;
             """
             
+            existing_subscriptions = []
+            
             try:
                 # Выполняем SQL-запрос
                 check_result = await _execute_sql_direct(check_sql)
-                existing_subscriptions = []
                 
-                if check_result and check_result.get("data") and len(check_result["data"]) > 0:
-                    existing_subscriptions = check_result["data"]
-                    logger.info(f"[telegram_webhook] Найдены существующие подписки для user_id={user_id}: {json.dumps(existing_subscriptions)}")
-                    print(f"[telegram_webhook] 🔎 Найдены существующие подписки: {len(existing_subscriptions)}")
-                    
-                    # Отдельно проверим и выведем несогласованность данных, если есть
-                    for sub in existing_subscriptions:
-                        sub_id = sub.get('id')
-                        sub_is_active = sub.get('is_active')
-                        sub_end_date = sub.get('end_date')
-                        
-                        # Если end_date в будущем, но is_active = False - это несогласованность
-                        if sub_end_date:
-                            try:
-                                end_date_dt = datetime.fromisoformat(sub_end_date.replace('Z', '+00:00'))
-                                now = datetime.now(timezone.utc)
-                                if end_date_dt > now and not sub_is_active:
-                                    logger.warning(f"[telegram_webhook] ⚠️ НЕСОГЛАСОВАННОСТЬ ДАННЫХ: ID={sub_id}, is_active={sub_is_active}, end_date={sub_end_date} (end_date в будущем, но is_active=False)")
-                                    print(f"[telegram_webhook] ⚠️ НЕСОГЛАСОВАННОСТЬ ДАННЫХ: ID={sub_id}, is_active={sub_is_active}, end_date={sub_end_date}")
-                            except Exception as date_err:
-                                logger.error(f"[telegram_webhook] Ошибка при проверке даты: {date_err}")
+                # ИСПРАВЛЕНИЕ: Добавляем проверку на структуру результата
+                if isinstance(check_result, dict) and check_result.get("data"):
+                    # Проверяем, является ли data словарем с ошибкой или списком результатов
+                    if isinstance(check_result["data"], list):
+                        existing_subscriptions = check_result["data"]
+                        logger.info(f"[telegram_webhook] Найдены существующие подписки для user_id={user_id}: {json.dumps(existing_subscriptions)}")
+                        print(f"[telegram_webhook] 🔎 Найдены существующие подписки: {len(existing_subscriptions)}")
+                    elif isinstance(check_result["data"], dict) and check_result["data"].get("error"):
+                        logger.error(f"[telegram_webhook] Ошибка SQL в запросе подписок: {check_result['data']}")
+                        print(f"[telegram_webhook] ❌ Ошибка SQL: {check_result['data'].get('message')}")
                 else:
-                    logger.info(f"[telegram_webhook] Подписки для user_id={user_id} не найдены")
-                    print(f"[telegram_webhook] ℹ️ Подписки не найдены для user_id={user_id}")
-            except Exception as check_err:
-                logger.error(f"[telegram_webhook] Ошибка при проверке существующих подписок: {check_err}")
-                print(f"[telegram_webhook] ❌ Ошибка при проверке подписок: {check_err}")
-            
-            # Теперь выполним прямой запрос к базе данных для поиска последней подписки
-            try:
-                # Сначала пробуем получить последнюю подписку
-                result = supabase.table("user_subscription").select("*,id").eq("user_id", user_id).order("end_date", desc=True).limit(1).execute()
+                    logger.warning(f"[telegram_webhook] Некорректный формат результата SQL запроса: {check_result}")
+                    print(f"[telegram_webhook] ⚠️ Некорректный формат результата")
                 
-                if result.data:
-                    # Нашли существующую подписку, обновляем ее
-                    subscription = result.data[0]
-                    logger.info(f"[telegram_webhook] Поиск последней подписки для user_id={user_id}: {json.dumps(result.data)}")
-                    print(f"[telegram_webhook] 📝 Найдена последняя подписка ID={subscription.get('id')}")
+                # Отдельно проверим и выведем несогласованность данных, если есть
+                for sub in existing_subscriptions:
+                    sub_id = sub.get('id')
+                    sub_is_active = sub.get('is_active')
+                    sub_end_date = sub.get('end_date')
                     
-                    # РАДИКАЛЬНОЕ ОБНОВЛЕНИЕ: выполняем SQL-запрос напрямую
-                    update_sql = f"""
-                    UPDATE user_subscription 
-                    SET is_active = TRUE, 
-                        end_date = '{iso_date}', 
-                        payment_id = '{payment.get('telegram_payment_charge_id')}',
-                        updated_at = NOW()
-                    WHERE id = {subscription.get('id')};
-                    """
-                    
-                    try:
-                        # Выполняем SQL-запрос
-                        update_result = await _execute_sql_direct(update_sql)
-                        if update_result and update_result.get("success"):
+                    # Если end_date в будущем, но is_active = False - это несогласованность
+                    if sub_end_date:
+                        try:
+                            end_date_dt = datetime.fromisoformat(sub_end_date.replace('Z', '+00:00'))
+                            now = datetime.now(timezone.utc)
+                            if end_date_dt > now and not sub_is_active:
+                                logger.warning(f"[telegram_webhook] ⚠️ НЕСОГЛАСОВАННОСТЬ ДАННЫХ: ID={sub_id}, is_active={sub_is_active}, end_date={sub_end_date} (end_date в будущем, но is_active=False)")
+                                print(f"[telegram_webhook] ⚠️ НЕСОГЛАСОВАННОСТЬ ДАННЫХ: ID={sub_id}, is_active={sub_is_active}, end_date={sub_end_date}")
+                        except Exception as date_err:
+                            logger.error(f"[telegram_webhook] Ошибка при проверке даты: {date_err}")
+            except Exception as e:
+                logger.error(f"[telegram_webhook] Ошибка при проверке существующих подписок: {e}")
+                print(f"[telegram_webhook] ❌ Ошибка при проверке подписок: {e}")
+            
+            # Получаем самую последнюю подписку пользователя (по дате окончания)
+            result = supabase.table("user_subscription") \
+                .select("*,id") \
+                .eq("user_id", user_id) \
+                .order("end_date", desc=True) \
+                .limit(1) \
+                .execute()
+                
+            logger.info(f"[telegram_webhook] Поиск последней подписки для user_id={user_id}: {json.dumps(result.data)}")
+            
+            if result.data:
+                # Нашли существующую подписку, обновляем ее
+                subscription = result.data[0]
+                logger.info(f"[telegram_webhook] Поиск последней подписки для user_id={user_id}: {json.dumps(result.data)}")
+                print(f"[telegram_webhook] 📝 Найдена последняя подписка ID={subscription.get('id')}")
+                
+                # РАДИКАЛЬНОЕ ОБНОВЛЕНИЕ: выполняем SQL-запрос напрямую
+                update_sql = f"""
+                UPDATE user_subscription 
+                SET is_active = TRUE, 
+                    end_date = '{iso_date}', 
+                    payment_id = '{payment.get('telegram_payment_charge_id')}',
+                    updated_at = NOW()
+                WHERE id = {subscription.get('id')}
+                """
+                
+                try:
+                    # Выполняем SQL-запрос
+                    update_result = await _execute_sql_direct(update_sql)
+                    if update_result and update_result.get("status_code") == 200:
+                        if not update_result.get("data") or not isinstance(update_result["data"], dict) or not update_result["data"].get("error"):
                             logger.info(f"[telegram_webhook] ОБНОВЛЕНИЕ НАПРЯМУЮ: Подписка ID={subscription.get('id')} обновлена")
                             print(f"[telegram_webhook] ✅ ПРЯМОЕ ОБНОВЛЕНИЕ: Подписка ID={subscription.get('id')} обновлена")
                         else:
                             logger.error(f"[telegram_webhook] Ошибка при обновлении подписки через SQL: {update_result}")
                             print(f"[telegram_webhook] ❌ ОШИБКА SQL-ОБНОВЛЕНИЯ: {update_result}")
-                    except Exception as update_err:
-                        logger.error(f"[telegram_webhook] Ошибка при выполнении SQL для обновления: {update_err}")
-                        print(f"[telegram_webhook] ❌ Исключение при SQL-обновлении: {update_err}")
-                    
-                    # ДОПОЛНИТЕЛЬНОЕ РЕЗЕРВНОЕ ОБНОВЛЕНИЕ через API Supabase
-                    try:
-                        backup_update = supabase.table("user_subscription").update({
-                            "is_active": True,
-                            "end_date": iso_date,
-                            "payment_id": payment.get('telegram_payment_charge_id')
-                        }).eq("id", subscription.get("id")).execute()
-                        
-                        logger.info(f"[telegram_webhook] РЕЗЕРВНОЕ ОБНОВЛЕНИЕ через API: Подписка ID={subscription.get('id')} обновлена")
-                        print(f"[telegram_webhook] ✅ РЕЗЕРВНОЕ ОБНОВЛЕНИЕ: Подписка ID={subscription.get('id')} обновлена")
-                    except Exception as api_err:
-                        logger.error(f"[telegram_webhook] Ошибка при обновлении через API: {api_err}")
-                        print(f"[telegram_webhook] ❌ Ошибка API-обновления: {api_err}")
-                    
-                    # Проверяем, что подписка действительно обновилась
-                    verification_sql = f"""
-                    SELECT * FROM user_subscription WHERE id = {subscription.get('id')};
-                    """
-                    
-                    try:
-                        verification_result = await _execute_sql_direct(verification_sql)
-                        if verification_result and verification_result.get("data") and len(verification_result["data"]) > 0:
-                            verified_sub = verification_result["data"][0]
-                            logger.info(f"[telegram_webhook] ВЕРИФИКАЦИЯ подписки ID={subscription.get('id')}: is_active={verified_sub.get('is_active')}, end_date={verified_sub.get('end_date')}")
-                            print(f"[telegram_webhook] 🔍 ВЕРИФИКАЦИЯ: is_active={verified_sub.get('is_active')}, end_date={verified_sub.get('end_date')}")
                             
-                            # Если по какой-то причине is_active остался False, но end_date в будущем, делаем еще одну попытку
-                            if not verified_sub.get('is_active') and verified_sub.get('end_date'):
-                                try:
-                                    end_date_dt = datetime.fromisoformat(verified_sub.get('end_date').replace('Z', '+00:00'))
-                                    now = datetime.now(timezone.utc)
-                                    if end_date_dt > now:
-                                        # ЭКСТРЕННОЕ исправление несогласованности
-                                        emergency_sql = f"""
-                                        UPDATE user_subscription 
-                                        SET is_active = TRUE 
-                                        WHERE id = {subscription.get('id')};
-                                        """
-                                        
-                                        emergency_result = await _execute_sql_direct(emergency_sql)
-                                        logger.warning(f"[telegram_webhook] 🔄 ЭКСТРЕННОЕ ИСПРАВЛЕНИЕ is_active для ID={subscription.get('id')}")
-                                        print(f"[telegram_webhook] ⚠️→✅ ЭКСТРЕННОЕ ИСПРАВЛЕНИЕ is_active для ID={subscription.get('id')}")
-                                except Exception as emerg_err:
-                                    logger.error(f"[telegram_webhook] Ошибка при экстренном исправлении: {emerg_err}")
-                    except Exception as verify_err:
-                        logger.error(f"[telegram_webhook] Ошибка при верификации: {verify_err}")
+                            # РЕЗЕРВНОЕ ОБНОВЛЕНИЕ через стандартное API Supabase
+                            backup_result = supabase.table("user_subscription") \
+                                .update({
+                                    "is_active": True, 
+                                    "end_date": iso_date,
+                                    "payment_id": payment.get('telegram_payment_charge_id'),
+                                    "updated_at": datetime.now(timezone.utc).isoformat()
+                                }) \
+                                .eq("id", subscription.get('id')) \
+                                .execute()
+                                
+                            logger.info(f"[telegram_webhook] РЕЗЕРВНОЕ ОБНОВЛЕНИЕ через API: Подписка ID={subscription.get('id')} обновлена")
+                            print(f"[telegram_webhook] ✅ РЕЗЕРВНОЕ ОБНОВЛЕНИЕ: Подписка ID={subscription.get('id')} обновлена")
+                    else:
+                        logger.error(f"[telegram_webhook] Ошибка при обновлении подписки через SQL: {update_result}")
+                        print(f"[telegram_webhook] ❌ ОШИБКА SQL-ОБНОВЛЕНИЯ: {update_result}")
+                except Exception as update_err:
+                    logger.error(f"[telegram_webhook] Ошибка при выполнении SQL для обновления: {update_err}")
+                    print(f"[telegram_webhook] ❌ Исключение при SQL-обновлении: {update_err}")
+                
+                # Верификация обновления
+                verification_sql = f"""
+                SELECT id, is_active, end_date
+                FROM user_subscription 
+                WHERE id = {subscription.get('id')}
+                """
+                
+                try:
+                    verification_result = await _execute_sql_direct(verification_sql)
+                    if verification_result and verification_result.get("data") and isinstance(verification_result["data"], list) and len(verification_result["data"]) > 0:
+                        verified_sub = verification_result["data"][0]
+                        logger.info(f"[telegram_webhook] ВЕРИФИКАЦИЯ подписки ID={subscription.get('id')}: is_active={verified_sub.get('is_active')}, end_date={verified_sub.get('end_date')}")
+                        print(f"[telegram_webhook] 🔍 ВЕРИФИКАЦИЯ: is_active={verified_sub.get('is_active')}, end_date={verified_sub.get('end_date')}")
                         
-                    logger.info(f"[telegram_webhook] Подписка успешно активирована/продлена для user_id={user_id} (ТЕСТ до 2099)")
-                else:
-                    # Создаем новую подписку
-                    logger.info(f"[telegram_webhook] Создание новой подписки для user_id={user_id} (ТЕСТ до 2099)")
+                        # Если по какой-то причине is_active остался False, но end_date в будущем, делаем еще одну попытку
+                        if not verified_sub.get('is_active') and verified_sub.get('end_date'):
+                            try:
+                                end_date_dt = datetime.fromisoformat(verified_sub.get('end_date').replace('Z', '+00:00'))
+                                now = datetime.now(timezone.utc)
+                                if end_date_dt > now:
+                                    # ЭКСТРЕННОЕ исправление несогласованности
+                                    emergency_sql = f"""
+                                    UPDATE user_subscription 
+                                    SET is_active = TRUE 
+                                    WHERE id = {subscription.get('id')}
+                                    """
+                                    
+                                    emergency_result = await _execute_sql_direct(emergency_sql)
+                                    logger.warning(f"[telegram_webhook] 🔄 ЭКСТРЕННОЕ ИСПРАВЛЕНИЕ is_active для ID={subscription.get('id')}")
+                                    print(f"[telegram_webhook] ⚠️→✅ ЭКСТРЕННОЕ ИСПРАВЛЕНИЕ is_active для ID={subscription.get('id')}")
+                            except Exception as emerg_err:
+                                logger.error(f"[telegram_webhook] Ошибка при экстренном исправлении: {emerg_err}")
+                    else:
+                        logger.error(f"[telegram_webhook] Ошибка при верификации: {verification_result}")
+                except Exception as verify_err:
+                    logger.error(f"[telegram_webhook] Ошибка при верификации: {verify_err}")
                     
-                    # РАДИКАЛЬНОЕ СОЗДАНИЕ: выполняем SQL-запрос напрямую
-                    create_sql = f"""
-                    INSERT INTO user_subscription 
-                    (user_id, start_date, end_date, payment_id, is_active, created_at, updated_at) 
-                    VALUES 
-                    ({user_id}, NOW(), '{iso_date}', '{payment.get('telegram_payment_charge_id')}', TRUE, NOW(), NOW());
-                    """
-                    
-                    try:
-                        # Выполняем SQL-запрос
-                        create_result = await _execute_sql_direct(create_sql)
-                        if create_result and create_result.get("success"):
+                logger.info(f"[telegram_webhook] Подписка успешно активирована/продлена для user_id={user_id} (ТЕСТ до 2099)")
+                print(f"[telegram_webhook] ✅ Подписка успешно активирована/продлена для user_id={user_id}")
+            else:
+                # Создаем новую подписку
+                logger.info(f"[telegram_webhook] Создание новой подписки для user_id={user_id} (ТЕСТ до 2099)")
+                
+                # РАДИКАЛЬНОЕ СОЗДАНИЕ: выполняем SQL-запрос напрямую
+                create_sql = f"""
+                INSERT INTO user_subscription 
+                (user_id, start_date, end_date, payment_id, is_active, created_at, updated_at) 
+                VALUES 
+                ({user_id}, NOW(), '{iso_date}', '{payment.get('telegram_payment_charge_id')}', TRUE, NOW(), NOW())
+                """
+                
+                try:
+                    # Выполняем SQL-запрос
+                    create_result = await _execute_sql_direct(create_sql)
+                    if create_result and create_result.get("status_code") == 200:
+                        if not create_result.get("data") or not isinstance(create_result["data"], dict) or not create_result["data"].get("error"):
                             logger.info(f"[telegram_webhook] СОЗДАНИЕ НАПРЯМУЮ: Новая подписка создана для user_id={user_id}")
                             print(f"[telegram_webhook] ✅ ПРЯМОЕ СОЗДАНИЕ: Новая подписка создана")
                         else:
                             logger.error(f"[telegram_webhook] Ошибка при создании подписки через SQL: {create_result}")
                             print(f"[telegram_webhook] ❌ ОШИБКА SQL-СОЗДАНИЯ: {create_result}")
-                    except Exception as create_err:
-                        logger.error(f"[telegram_webhook] Ошибка при выполнении SQL для создания: {create_err}")
-                        print(f"[telegram_webhook] ❌ Исключение при SQL-создании: {create_err}")
-                    
-                    # ДОПОЛНИТЕЛЬНОЕ РЕЗЕРВНОЕ СОЗДАНИЕ через API Supabase
-                    try:
-                        new_subscription = supabase.table("user_subscription").insert({
-                            "user_id": user_id,
-                            "start_date": datetime.now(timezone.utc).isoformat(),
-                            "end_date": iso_date,
-                            "payment_id": payment.get('telegram_payment_charge_id'),
-                            "is_active": True
-                        }).execute()
-                        
-                        logger.info(f"[telegram_webhook] РЕЗЕРВНОЕ СОЗДАНИЕ: Новая подписка создана для user_id={user_id}")
-                        print(f"[telegram_webhook] ✅ РЕЗЕРВНОЕ СОЗДАНИЕ: Новая подписка создана")
-                    except Exception as api_err:
-                        logger.error(f"[telegram_webhook] Ошибка при создании через API: {api_err}")
-                        print(f"[telegram_webhook] ❌ Ошибка API-создания: {api_err}")
-            except Exception as e:
-                logger.error(f"[telegram_webhook] Ошибка при обработке подписки: {e}", exc_info=True)
-                
-            # ФИНАЛЬНОЕ СООБЩЕНИЕ: статус обработки вебхука
+                            
+                            # РЕЗЕРВНОЕ СОЗДАНИЕ через стандартное API Supabase
+                            backup_create = supabase.table("user_subscription") \
+                                .insert({
+                                    "user_id": user_id,
+                                    "start_date": datetime.now(timezone.utc).isoformat(),
+                                    "end_date": iso_date,
+                                    "payment_id": payment.get('telegram_payment_charge_id'),
+                                    "is_active": True,
+                                    "created_at": datetime.now(timezone.utc).isoformat(),
+                                    "updated_at": datetime.now(timezone.utc).isoformat()
+                                }) \
+                                .execute()
+                                
+                            logger.info(f"[telegram_webhook] РЕЗЕРВНОЕ СОЗДАНИЕ через API: Новая подписка создана для user_id={user_id}")
+                            print(f"[telegram_webhook] ✅ РЕЗЕРВНОЕ СОЗДАНИЕ: Новая подписка создана")
+                    else:
+                        logger.error(f"[telegram_webhook] Ошибка при создании подписки через SQL: {create_result}")
+                        print(f"[telegram_webhook] ❌ ОШИБКА SQL-СОЗДАНИЯ: {create_result}")
+                except Exception as create_err:
+                    logger.error(f"[telegram_webhook] Ошибка при выполнении SQL для создания: {create_err}")
+                    print(f"[telegram_webhook] ❌ Исключение при SQL-создании: {create_err}")
+            
             logger.info(f"[telegram_webhook] Обработка webhook для платежа от пользователя {user_id} завершена")
             print(f"[telegram_webhook] ✅ Обработка webhook платежа завершена для user_id={user_id}")
-            return {"ok": True}
+            return {"status": "ok", "user_id": user_id}
             
-        # Если не распознан тип запроса
-        return {"ok": False, "error": "Неизвестный тип запроса"}
+        return {"status": "ok"}
     except Exception as e:
-        logger.error(f"[telegram_webhook] Глобальная ошибка обработки webhook: {e}", exc_info=True)
-        print(f"[telegram_webhook] 💥 КРИТИЧЕСКАЯ ОШИБКА: {e}")
-        return {"ok": False, "error": str(e)}
+        logger.error(f"[telegram_webhook] Ошибка: {e}", exc_info=True)
+        print(f"[telegram_webhook] 💥 Ошибка: {e}")
+        return {"error": str(e)}
 
 
 # --- Настройка обслуживания статических файлов ---

@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef, SetStateAction, Dispatch, useMemo }
 import '../styles/SubscriptionWidget.css';
 import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice } from '../api/subscription';
 import axios from 'axios';
+import { getUserId } from '../utils/auth';
+import { Button, Box, Typography, CircularProgress, Grid, Alert, Paper, Link } from '@mui/material';
+import moment from 'moment';
 
 // API_URL для относительных путей
 const API_URL = '';
@@ -10,13 +13,14 @@ const SubscriptionWidget: React.FC<{
   userId: string | null,
   subscriptionStatus: SubscriptionStatus | null,
   onSubscriptionUpdate: () => void,
-  isActive?: boolean
-}> = ({ userId, subscriptionStatus, onSubscriptionUpdate, isActive }) => {
+  isActive?: boolean,
+  onGetPremium?: () => void
+}> = ({ userId, subscriptionStatus, onSubscriptionUpdate, isActive, onGetPremium }) => {
   console.log('[SubscriptionWidget] 🔄 Монтирование компонента с пропсами:', 
     {userId, subscriptionStatus, isActive, 
-     hasSubscription: subscriptionStatus?.has_subscription,
-     isActiveFromStatus: subscriptionStatus?.is_active,
-     endDate: subscriptionStatus?.subscription_end_date});
+     has_subscription: subscriptionStatus?.has_subscription,
+     is_active: subscriptionStatus?.is_active,
+     subscription_end_date: subscriptionStatus?.subscription_end_date});
   
   const [error, setError] = useState<string | null>(null);
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
@@ -33,60 +37,65 @@ const SubscriptionWidget: React.FC<{
   const pollTimeoutRef = useRef<number | null>(null);
   const mountedRef = useRef(true); // Для проверки монтирования/размонтирования
 
-  // Проверка end_date для отображения
-  const isEndDateValid = useMemo(() => {
-    if (subscriptionStatus?.subscription_end_date) {
-      try {
-        const endDate = new Date(subscriptionStatus.subscription_end_date);
-        const now = new Date();
-        // Проверка валидности даты и что она в будущем
-        return !isNaN(endDate.getTime()) && endDate > now;
-      } catch (e) {
-        console.error('[SubscriptionWidget] ⚠️ Ошибка при проверке end_date:', e);
+  // ДОБАВЛЕНИЕ: Улучшенное вычисление статуса подписки
+  const [calculatedIsActive, setCalculatedIsActive] = useState<boolean>(false);
+  const [isEndDateValid, setIsEndDateValid] = useState<boolean>(false);
+  
+  // Функция проверки валидности даты end_date
+  const checkEndDateValidity = (endDateStr: string | null | undefined): boolean => {
+    if (!endDateStr) return false;
+    
+    try {
+      const endDate = new Date(endDateStr);
+      const now = new Date();
+      
+      // Проверяем, что дата корректна и находится в будущем
+      if (!isNaN(endDate.getTime()) && endDate > now) {
+        console.log(`%c[SubscriptionWidget] ✅ Дата окончания подписки действительна: ${endDateStr}`, 'color:green');
+        return true;
+      } else {
+        console.log(`%c[SubscriptionWidget] ❌ Дата окончания подписки недействительна: ${endDateStr}`, 'color:red');
         return false;
       }
+    } catch (e) {
+      console.error(`%c[SubscriptionWidget] 🛑 Ошибка при проверке даты: ${e}`, 'color:red');
+      return false;
     }
-    return false;
-  }, [subscriptionStatus?.subscription_end_date]);
-
-  // Вычисляем итоговый статус активности
-  const calculatedIsActive = useMemo(() => {
-    // Приоритизируем наши собственные проверки над данными API
-    if (isEndDateValid) {
-      console.log('[SubscriptionWidget] ✅ Подписка активна по end_date');
-      return true;
-    }
-    
-    // Затем проверяем is_active из API
-    if (subscriptionStatus?.is_active === true) {
-      console.log('[SubscriptionWidget] ✅ Подписка активна по is_active');
-      return true;
-    }
-    
-    // Затем has_subscription из API
-    if (subscriptionStatus?.has_subscription === true) {
-      console.log('[SubscriptionWidget] ✅ Подписка активна по has_subscription');
-      return true;
-    }
-    
-    console.log('[SubscriptionWidget] ❌ Подписка НЕ активна по всем проверкам');
-    return false;
-  }, [subscriptionStatus, isEndDateValid]);
-
-  // При изменении статуса добавляем запись в лог
+  };
+  
+  // Логирование изменений в обновлениях  
+  const addToRefreshLog = (message: string) => {
+    setRefreshLog(prev => {
+      const newLog = [`[${new Date().toLocaleTimeString()}] ${message}`, ...prev];
+      return newLog.slice(0, 10); // Храним только 10 последних записей
+    });
+    setLastUpdateTime(new Date().toLocaleTimeString());
+  };
+  
+  // Обновляем вычисляемые значения при изменении subscriptionStatus
   useEffect(() => {
-    const timestamp = new Date().toLocaleTimeString();
-    setLastUpdateTime(timestamp);
-    
-    const statusLog = `[${timestamp}] Статус: has_subscription=${subscriptionStatus?.has_subscription}, is_active=${subscriptionStatus?.is_active}, end_date=${subscriptionStatus?.subscription_end_date?.substring(0, 10) || 'null'}`;
-    setRefreshLog(prev => [statusLog, ...prev.slice(0, 4)]); // Храним последние 5 обновлений
-    
-    console.log(`[SubscriptionWidget] 🔄 Обновление статуса:`, 
-      {hasSubscription: subscriptionStatus?.has_subscription,
-       isActive: subscriptionStatus?.is_active,
-       endDate: subscriptionStatus?.subscription_end_date,
-       calculatedIsActive});
-  }, [subscriptionStatus, calculatedIsActive]);
+    if (subscriptionStatus) {
+      console.log('[SubscriptionWidget] 🔄 Обновление статуса на основе новых данных subscriptionStatus:', subscriptionStatus);
+      
+      // Проверяем валидность end_date
+      const endDateValid = checkEndDateValidity(subscriptionStatus.subscription_end_date);
+      setIsEndDateValid(endDateValid);
+      
+      // Вычисляем статус активности по комбинации критериев
+      // Если дата окончания действительна - статус ДОЛЖЕН быть активным
+      const calculated = endDateValid || (subscriptionStatus.is_active && subscriptionStatus.has_subscription);
+      setCalculatedIsActive(calculated);
+      
+      // Логируем результаты
+      addToRefreshLog(`Статус: has_subscription=${subscriptionStatus.has_subscription}, is_active=${subscriptionStatus.is_active}, end_date=${subscriptionStatus.subscription_end_date || 'null'}`);
+      
+      // Выявляем несоответствия
+      if (endDateValid && (!subscriptionStatus.is_active || !subscriptionStatus.has_subscription)) {
+        console.warn(`%c[SubscriptionWidget] ⚠️ Несоответствие статуса: end_date валидна, но is_active=${subscriptionStatus.is_active}, has_subscription=${subscriptionStatus.has_subscription}`, 'color:orange;font-weight:bold');
+        addToRefreshLog(`⚠️ Несоответствие: date_end валидна, но is_active=${subscriptionStatus.is_active}`);
+      }
+    }
+  }, [subscriptionStatus]);
 
   // Возвращаем функцию stopPolling
   const stopPolling = () => {
@@ -401,9 +410,38 @@ const SubscriptionWidget: React.FC<{
   // Переключает отображение информации об оплате
   const togglePaymentInfo = () => setShowPaymentInfo(!showPaymentInfo);
 
+  const handleGetPremium = () => {
+    if (onGetPremium) {
+      onGetPremium();
+    }
+  };
+
+  const renderSubscriptionStatus = () => {
+    if (!subscriptionStatus) return null;
+    
+    // УЛУЧШЕНИЕ: Используем вычисленный статус вместо непосредственного значения из API
+    const isActive = calculatedIsActive; 
+    
+    return (
+      <Box sx={{ mt: 2 }}>
+        <Typography variant="h6" align="center" gutterBottom sx={{ color: isActive ? 'success.main' : 'text.primary' }}>
+          {isActive ? 'Премиум активен' : 'Бесплатный план'}
+        </Typography>
+        
+        {isActive && subscriptionStatus.subscription_end_date && (
+          <Typography variant="body2" align="center" color="text.secondary">
+            Активен до: {moment(subscriptionStatus.subscription_end_date).format('DD.MM.YYYY')}
+          </Typography>
+        )}
+      </Box>
+    );
+  };
+
   return (
-    <div className="subscription-widget">
-      <h3>Статус подписки</h3>
+    <Paper elevation={3} sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+      <Typography variant="h5" align="center" gutterBottom>
+        Статус подписки
+      </Typography>
       
       {calculatedIsActive ? (
         <>
@@ -516,7 +554,48 @@ const SubscriptionWidget: React.FC<{
           </pre>
         </details>
       </div>
-    </div>
+      
+      {/* DEBUG-панель - показываем только в разработке */}
+      {window.location.hostname === 'localhost' && (
+        <Box sx={{ mt: 4, p: 2, bgcolor: '#FFFDE7', borderRadius: 1, fontSize: '0.75rem' }}>
+          <Typography variant="caption" display="block" sx={{ mb: 1, fontWeight: 'bold' }}>
+            userId: {userId}
+          </Typography>
+          <Typography variant="caption" display="block" sx={{ mb: 1 }}>
+            Статус подписки: {JSON.stringify(subscriptionStatus)}
+          </Typography>
+          <Typography variant="caption" display="block" sx={{ mb: 1 }}>
+            calculatedIsActive: {calculatedIsActive.toString()}
+          </Typography>
+          <Typography variant="caption" display="block" sx={{ mb: 1 }}>
+            isEndDateValid: {isEndDateValid.toString()}
+          </Typography>
+          <Typography variant="caption" display="block" sx={{ mb: 1 }}>
+            Последнее обновление: {lastUpdateTime}
+          </Typography>
+          <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
+            Обновить статус <Button size="small" onClick={refreshSubscriptionStatus} variant="outlined">DEBUG:</Button>
+          </Typography>
+          <Box 
+            sx={{ 
+              mt: 1, 
+              p: 1, 
+              bgcolor: '#ECEFF1', 
+              borderRadius: 1, 
+              maxHeight: '100px', 
+              overflow: 'auto',
+              fontSize: '0.7rem'
+            }}
+          >
+            {refreshLog.map((log, i) => (
+              <Typography key={i} variant="caption" display="block" sx={{ fontSize: '0.7rem' }}>
+                {log}
+              </Typography>
+            ))}
+          </Box>
+        </Box>
+      )}
+    </Paper>
   );
 };
 
