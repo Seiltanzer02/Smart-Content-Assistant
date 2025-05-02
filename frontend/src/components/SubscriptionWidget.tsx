@@ -17,6 +17,22 @@ const SubscriptionWidget: React.FC<{
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 1; // временно 1 Star для теста
   const [isSubscribing, setIsSubscribing] = useState(false);
+  // Возвращаем refs
+  const pollIntervalRef = useRef<number | null>(null);
+  const pollTimeoutRef = useRef<number | null>(null);
+
+  // Возвращаем функцию stopPolling
+  const stopPolling = () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+      console.log('Polling stopped by stopPolling function');
+    }
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
+  };
 
   const handleSubscribeViaMainButton = () => {
     if (window.Telegram?.WebApp?.showConfirm) {
@@ -63,11 +79,19 @@ const SubscriptionWidget: React.FC<{
               };
               setSubscriptionStatus(optimisticStatus);
 
-              console.log('Scheduling refetch of actual status in 3 seconds...');
-              setTimeout(() => {
-                console.log('Refetching actual status now...');
-                onSubscriptionUpdate();
-              }, 3000);
+              // 3. Запускаем агрессивный polling ВМЕСТО одного запроса с задержкой
+              stopPolling(); // Останавливаем предыдущие таймеры на всякий случай
+              console.log('Starting aggressive polling for status confirmation...');
+
+              pollIntervalRef.current = window.setInterval(() => {
+                console.log('Polling for subscription status...');
+                onSubscriptionUpdate(); // Вызываем refetch
+              }, 2000); // каждые 2 секунды
+
+              pollTimeoutRef.current = window.setTimeout(() => {
+                console.warn('Polling timeout reached. Stopping polling. Status might not be up-to-date.');
+                stopPolling();
+              }, 15000); // Таймаут 15 секунд
 
             } else if (status === 'failed') {
               console.log('Payment status: failed');
@@ -119,6 +143,25 @@ const SubscriptionWidget: React.FC<{
         });
       }
     }
+  }, [isActive, onSubscriptionUpdate]);
+
+  // Добавляем useEffect для остановки polling при подтверждении Premium статуса
+  useEffect(() => {
+    // Если статус стал Premium (неважно, оптимистично или через refetch)
+    if (subscriptionStatus?.has_subscription) {
+      console.log('Premium status confirmed. Stopping polling.');
+      stopPolling();
+    }
+  }, [subscriptionStatus]); // Зависимость от статуса подписки
+
+  // Возвращаем очистку таймеров при размонтировании
+  useEffect(() => {
+    return () => {
+      if (window.Telegram?.WebApp?.MainButton) {
+        window.Telegram.WebApp.MainButton.offClick(handleSubscribeViaMainButton);
+      }
+      stopPolling(); // Очищаем таймеры при размонтировании
+    };
   }, [isActive, onSubscriptionUpdate]);
 
   if (!userId) {
