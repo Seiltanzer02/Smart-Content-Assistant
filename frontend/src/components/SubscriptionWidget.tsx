@@ -44,21 +44,21 @@ const SubscriptionWidget: React.FC<{
       if (data.success && data.invoice_link) {
         if (window?.Telegram?.WebApp && typeof window?.Telegram?.WebApp.openInvoice === 'function') {
           window.Telegram.WebApp.openInvoice(data.invoice_link, async (status) => {
+            setIsSubscribing(false);
             if (status === 'paid') {
-              await onSubscriptionUpdate();
               if (window?.Telegram?.WebApp?.showPopup) {
                 window.Telegram.WebApp.showPopup({
                   title: 'Успешная оплата',
-                  message: 'Ваша подписка Premium активирована!',
+                  message: 'Ваша подписка Premium активирована! Обновляем статус...',
                   buttons: [{ type: 'ok' }]
                 });
               }
+              await onSubscriptionUpdate();
             } else if (status === 'failed') {
               setError('Оплата не удалась. Пожалуйста, попробуйте позже.');
             } else if (status === 'cancelled') {
-              setError('Платеж был отменен.');
+              // Ничего не делаем при отмене, просто закрыли окно
             }
-            setIsSubscribing(false);
           });
         } else {
           setError('Оплата через Stars недоступна в этом окружении.');
