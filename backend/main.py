@@ -3385,90 +3385,47 @@ async def get_subscription_status(request: Request):
     user_id = request.query_params.get("user_id")
     logger.info(f'Запрос /subscription/status для user_id: {user_id}')
     
-    # --- ДОБАВЛЕНО: Заголовки для запрета кэширования --- 
     cache_headers = {
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Pragma": "no-cache",
         "Expires": "0",
     }
-    # --- КОНЕЦ ДОБАВЛЕНИЯ --- 
-    
     if not user_id:
-        # Возвращаем JSONResponse с заголовками
         return FastAPIResponse(
             content=json.dumps({"error": "user_id обязателен", "user_id": user_id}),
             media_type="application/json",
             headers=cache_headers
         )
-        
     try:
-        logger.debug(f'[Subscription Status] Проверка для user_id={user_id}. Текущее время UTC: {datetime.now(timezone.utc).isoformat()}')
-        result = supabase.table("user_subscription").select("*").eq("user_id", int(user_id)).order("end_date", desc=True).execute()
-        logger.debug(f'[Subscription Status] Ответ от Supabase: {result.data}')
         now = datetime.now(timezone.utc)
-        active_sub = None
-        for sub in result.data or []:
-            sub_id = sub.get("id")
-            is_active_db = sub.get("is_active", False)
-            end_date_str = sub.get("end_date")
-            # Исправляем строку логгера
-            logger.debug(f'[Subscription Status] Проверяем запись ID={sub_id}: is_active={is_active_db}, end_date="{end_date_str}"')
-            if end_date_str:
-                 try:
-                     end_date = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
-                     logger.debug(f'[Subscription Status] Запись ID={sub_id}: end_date распарсена: {end_date.isoformat()}, now: {now.isoformat()}, end_date > now: {end_date > now}')
-                     if is_active_db and end_date > now:
-                         logger.info(f'[Subscription Status] Найдена АКТИВНАЯ подписка ID={sub_id} для user_id={user_id}.')
-                         active_sub = sub
-                         break 
-                     if not is_active_db and end_date > now:
-                         logger.warning(f'[Subscription Status] Найдена НЕАКТИВНАЯ, но ДЕЙСТВУЮЩАЯ подписка ID={sub_id}. Активируем...')
-                         # ... (код активации) ...
-                         active_sub = sub
-                         break
-                 except Exception as e_inner:
-                     logger.error(f'[Subscription Status] Ошибка обработки записи ID={sub_id}: {e_inner}', exc_info=True)
-                     continue
-            if active_sub: break
-        
-        # Возвращаем результат после цикла
-        if active_sub:
-            response_data = {
-                "user_id": user_id,
-                "has_subscription": True,
-                "subscription_end_date": active_sub.get("end_date"),
-                "is_active": True,
-                "analysis_count": active_sub.get("analysis_count", 0),
-                "post_generation_count": active_sub.get("post_generation_count", 0)
-            }
-            logger.info(f'Возвращаем статус для user_id {user_id}: {response_data}')
-            # Возвращаем JSONResponse с данными и заголовками
-            return FastAPIResponse(
-                content=json.dumps(response_data),
-                media_type="application/json",
-                headers=cache_headers
-            )
-        else:
-            response_data = {
-                "user_id": user_id,
-                "has_subscription": False,
-                "analysis_count": 0,
-                "post_generation_count": 0
-            }
-            logger.info(f'Подписка не найдена или истекла для user_id {user_id}, возвращаем: {response_data}')
-            # Возвращаем JSONResponse с данными и заголовками
-            return FastAPIResponse(
-                content=json.dumps(response_data),
-                media_type="application/json",
-                headers=cache_headers
-            )
-            
+        # 1. Выбираем только те подписки, у которых is_active=TRUE и end_date > now()
+        result = supabase.table("user_subscription")\
+            .select("*")\
+            .eq("user_id", int(user_id))\
+            .eq("is_active", True)\
+            .gt("end_date", now.isoformat())\
+            .order("end_date", desc=True)\
+            .execute()
+        logger.info(f'[Subscription Status] Найдено подписок: {len(result.data)} для user_id={user_id}')
+        # 2. Берём самую свежую
+        active_sub = result.data[0] if result.data else None
+        # 3. Возвращаем debug-ответ
+        response = {
+            "user_id": user_id,
+            "now": now.isoformat(),
+            "has_subscription": bool(active_sub is not None),
+            "active_subscription": active_sub,
+            "all_found": result.data
+        }
+        return FastAPIResponse(
+            content=json.dumps(response, default=str),
+            media_type="application/json",
+            headers=cache_headers
+        )
     except Exception as e:
-        logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True)
-        # Возвращаем JSONResponse с ошибкой и заголовками
+        logger.error(f'[Subscription Status] Ошибка: {e}', exc_info=True)
         return FastAPIResponse(
             content=json.dumps({"error": str(e), "user_id": user_id}),
-            status_code=500,
             media_type="application/json",
             headers=cache_headers
         )
