@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, SetStateAction, Dispatch } from 'react';
+import React, { useState, useEffect, useRef, SetStateAction, Dispatch, useMemo } from 'react';
 import '../styles/SubscriptionWidget.css';
 import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice } from '../api/subscription';
 import axios from 'axios';
@@ -12,18 +12,81 @@ const SubscriptionWidget: React.FC<{
   onSubscriptionUpdate: () => void,
   isActive?: boolean
 }> = ({ userId, subscriptionStatus, onSubscriptionUpdate, isActive }) => {
-  console.log('[SubscriptionWidget] Монтирование компонента. userId:', userId, 'subscriptionStatus:', subscriptionStatus, 'isActive:', isActive);
+  console.log('[SubscriptionWidget] 🔄 Монтирование компонента с пропсами:', 
+    {userId, subscriptionStatus, isActive, 
+     hasSubscription: subscriptionStatus?.has_subscription,
+     isActiveFromStatus: subscriptionStatus?.is_active,
+     endDate: subscriptionStatus?.subscription_end_date});
+  
   const [error, setError] = useState<string | null>(null);
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 1; // временно 1 Star для теста
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastUpdateTime, setLastUpdateTime] = useState<string | null>(null);
+  const [refreshLog, setRefreshLog] = useState<string[]>([]);
+  const [lastUpdateTime, setLastUpdateTime] = useState<string>(
+    new Date().toLocaleTimeString()
+  );
   
   // Возвращаем refs
   const pollIntervalRef = useRef<number | null>(null);
   const pollTimeoutRef = useRef<number | null>(null);
   const mountedRef = useRef(true); // Для проверки монтирования/размонтирования
+
+  // Проверка end_date для отображения
+  const isEndDateValid = useMemo(() => {
+    if (subscriptionStatus?.subscription_end_date) {
+      try {
+        const endDate = new Date(subscriptionStatus.subscription_end_date);
+        const now = new Date();
+        // Проверка валидности даты и что она в будущем
+        return !isNaN(endDate.getTime()) && endDate > now;
+      } catch (e) {
+        console.error('[SubscriptionWidget] ⚠️ Ошибка при проверке end_date:', e);
+        return false;
+      }
+    }
+    return false;
+  }, [subscriptionStatus?.subscription_end_date]);
+
+  // Вычисляем итоговый статус активности
+  const calculatedIsActive = useMemo(() => {
+    // Приоритизируем наши собственные проверки над данными API
+    if (isEndDateValid) {
+      console.log('[SubscriptionWidget] ✅ Подписка активна по end_date');
+      return true;
+    }
+    
+    // Затем проверяем is_active из API
+    if (subscriptionStatus?.is_active === true) {
+      console.log('[SubscriptionWidget] ✅ Подписка активна по is_active');
+      return true;
+    }
+    
+    // Затем has_subscription из API
+    if (subscriptionStatus?.has_subscription === true) {
+      console.log('[SubscriptionWidget] ✅ Подписка активна по has_subscription');
+      return true;
+    }
+    
+    console.log('[SubscriptionWidget] ❌ Подписка НЕ активна по всем проверкам');
+    return false;
+  }, [subscriptionStatus, isEndDateValid]);
+
+  // При изменении статуса добавляем запись в лог
+  useEffect(() => {
+    const timestamp = new Date().toLocaleTimeString();
+    setLastUpdateTime(timestamp);
+    
+    const statusLog = `[${timestamp}] Статус: has_subscription=${subscriptionStatus?.has_subscription}, is_active=${subscriptionStatus?.is_active}, end_date=${subscriptionStatus?.subscription_end_date?.substring(0, 10) || 'null'}`;
+    setRefreshLog(prev => [statusLog, ...prev.slice(0, 4)]); // Храним последние 5 обновлений
+    
+    console.log(`[SubscriptionWidget] 🔄 Обновление статуса:`, 
+      {hasSubscription: subscriptionStatus?.has_subscription,
+       isActive: subscriptionStatus?.is_active,
+       endDate: subscriptionStatus?.subscription_end_date,
+       calculatedIsActive});
+  }, [subscriptionStatus, calculatedIsActive]);
 
   // Возвращаем функцию stopPolling
   const stopPolling = () => {
@@ -44,18 +107,20 @@ const SubscriptionWidget: React.FC<{
     if (!userId || isRefreshing) return;
     
     try {
-      console.log('[SubscriptionWidget] Запускаем ручное обновление статуса подписки...');
+      console.log('[SubscriptionWidget] 🔄 Запрос принудительного обновления статуса...');
       setIsRefreshing(true);
       
       await onSubscriptionUpdate();
       
-      // Сохраняем время последнего обновления
-      const now = new Date();
-      setLastUpdateTime(now.toLocaleTimeString());
-      console.log('[SubscriptionWidget] Статус подписки успешно обновлен');
-    } catch (error) {
-      console.error('[SubscriptionWidget] Ошибка при обновлении статуса:', error);
-      setError('Не удалось обновить статус подписки');
+      const successTimestamp = new Date().toLocaleTimeString();
+      setRefreshLog(prev => [`[${successTimestamp}] ✅ Статус успешно обновлен`, ...prev.slice(0, 4)]);
+      console.log('[SubscriptionWidget] ✅ Статус успешно обновлен');
+    } catch (err) {
+      console.error('[SubscriptionWidget] ❌ Ошибка при обновлении статуса:', err);
+      setError('Не удалось обновить статус подписки. Пожалуйста, попробуйте позже.');
+      
+      const errorTimestamp = new Date().toLocaleTimeString();
+      setRefreshLog(prev => [`[${errorTimestamp}] ❌ Ошибка обновления: ${err}`, ...prev.slice(0, 4)]);
     } finally {
       if (mountedRef.current) {
         setIsRefreshing(false);
@@ -271,7 +336,7 @@ const SubscriptionWidget: React.FC<{
     return (
       <div className="subscription-widget error">
         <p>Ошибка: {error}</p>
-        <button onClick={onSubscriptionUpdate}>Повторить</button>
+        <button onClick={refreshSubscriptionStatus}>Попробовать снова</button>
         <pre style={{textAlign: 'left', fontSize: '12px', marginTop: '16px', color: '#888', background: '#222', padding: '8px', borderRadius: '6px'}}>
           userId: {userId}
         </pre>
@@ -285,13 +350,12 @@ const SubscriptionWidget: React.FC<{
   }
 
   // Новый простой рендеринг
-  const isPremium = subscriptionStatus.is_active && subscriptionStatus.has_subscription;
-  console.log('[SubscriptionWidget] Рендеринг. isPremium:', isPremium, 'subscriptionStatus:', subscriptionStatus);
+  console.log('[SubscriptionWidget] Рендеринг. isPremium:', calculatedIsActive, 'subscriptionStatus:', subscriptionStatus);
 
   // ======= ПОДРОБНОЕ ЛОГИРОВАНИЕ В РЕНДЕРЕ =======
   console.log('[SubscriptionWidget][RENDER] userId:', userId);
   console.log('[SubscriptionWidget][RENDER] subscriptionStatus:', subscriptionStatus);
-  console.log('[SubscriptionWidget][RENDER] isPremium:', subscriptionStatus?.is_active && subscriptionStatus?.has_subscription);
+  console.log('[SubscriptionWidget][RENDER] isPremium:', calculatedIsActive);
   console.log('[SubscriptionWidget][RENDER] error:', error);
   console.log('[SubscriptionWidget][RENDER] isSubscribing:', isSubscribing);
   console.log('[SubscriptionWidget][RENDER] showPaymentInfo:', showPaymentInfo);
@@ -334,93 +398,122 @@ const SubscriptionWidget: React.FC<{
     console.log('[SubscriptionWidget][useEffect] showPaymentInfo изменился:', showPaymentInfo);
   }, [showPaymentInfo]);
 
+  // Переключает отображение информации об оплате
+  const togglePaymentInfo = () => setShowPaymentInfo(!showPaymentInfo);
+
   return (
     <div className="subscription-widget">
       <h3>Статус подписки</h3>
-      {isPremium ? (
-        <div className="subscription-active">
-          <div className="status-badge premium">Premium</div>
-          <p>У вас активная подписка{subscriptionStatus.subscription_end_date ? ` до ${new Date(subscriptionStatus.subscription_end_date).toLocaleDateString()}` : ''}</p>
-          <p>Все функции доступны без ограничений</p>
-          
-          {/* Добавляем кнопку обновления статуса */}
-          <div className="refresh-status">
-            <button 
-              className="refresh-button"
-              onClick={refreshSubscriptionStatus}
-              disabled={isRefreshing}
-            >
-              {isRefreshing ? 'Обновление...' : 'Обновить статус'}
-            </button>
-            {lastUpdateTime && <small>Последнее обновление: {lastUpdateTime}</small>}
+      
+      {calculatedIsActive ? (
+        <>
+          <div className="status-badge premium">Премиум</div>
+          <div className="subscription-active">
+            <h4>Активная подписка</h4>
+            <p>
+              У вас активирована премиум-подписка, открывающая полный доступ к функциям:
+            </p>
+            <ul>
+              <li>Неограниченный анализ каналов</li>
+              <li>Расширенная генерация идей</li>
+              <li>Доступ к базе изображений</li>
+              <li>Планирование и автоматизация публикаций</li>
+            </ul>
+            
+            {subscriptionStatus.subscription_end_date && (
+              <p>
+                <strong>Действует до:</strong> {new Date(subscriptionStatus.subscription_end_date).toLocaleDateString()}
+              </p>
+            )}
           </div>
-        </div>
+        </>
       ) : (
-        <div className="subscription-free">
+        <>
           <div className="status-badge free">Бесплатный план</div>
-          <p>Доступ ограничен. Для безлимитного доступа оформите подписку.</p>
-          {showPaymentInfo ? (
-            <div className="payment-info">
-              <h4>Процесс оплаты</h4>
-              <p>Для оплаты подписки выполните следующие шаги:</p>
-              <ol>
-                <li>Нажмите кнопку "Оплатить" выше</li>
-                <li>Откроется чат с нашим ботом</li>
-                <li>Нажмите кнопку "Оплатить {SUBSCRIPTION_PRICE} Stars" в боте</li>
-                <li>Подтвердите платеж</li>
-                <li>Вернитесь в это приложение</li>
-              </ol>
-              <p>После успешной оплаты ваша подписка активируется автоматически!</p>
-              <button 
-                className="cancel-button"
-                onClick={() => {
-                  setShowPaymentInfo(false);
-                  console.log('[SubscriptionWidget] Пользователь отменил просмотр paymentInfo');
-                }}
-              >
-                Отменить
-              </button>
-            </div>
-          ) : (
+          <div className="subscription-free">
+            <h4>Ограниченный доступ</h4>
+            <p>Используйте премиум-подписку для полного доступа ко всем функциям приложения.</p>
+            
             <div className="subscription-offer">
-              <h4>Получите безлимитный доступ</h4>
+              <h4>Премиум-подписка включает:</h4>
               <ul>
                 <li>Неограниченный анализ каналов</li>
-                <li>Неограниченная генерация постов</li>
-                <li>Сохранение данных в облаке</li>
+                <li>Расширенную генерацию идей</li>
+                <li>Доступ к базе изображений</li>
+                <li>Планирование и автоматизацию публикаций</li>
               </ul>
               <button 
-                className="subscribe-button"
-                onClick={() => {
-                  console.log('[SubscriptionWidget] Клик по кнопке подписки');
-                  handleSubscribe();
-                }}
+                className="subscribe-button" 
+                onClick={handleSubscribe}
                 disabled={isSubscribing}
               >
-                {isSubscribing ? 'Создание платежа...' : 'Подписаться за 70 Stars'}
+                {isSubscribing ? 'Создание платежа...' : 'Получить премиум доступ'} 
               </button>
               
-              {/* Добавляем кнопку ручного обновления */}
-              <div className="refresh-status">
-                <button 
-                  className="refresh-button"
-                  onClick={refreshSubscriptionStatus}
-                  disabled={isRefreshing}
-                >
-                  {isRefreshing ? 'Обновление...' : 'Обновить статус'}
-                </button>
-                {lastUpdateTime && <small>Последнее обновление: {lastUpdateTime}</small>}
-              </div>
+              <p style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
+                <a href="#" onClick={togglePaymentInfo}>
+                  {showPaymentInfo ? 'Скрыть информацию об оплате' : 'Как оплатить?'}
+                </a>
+              </p>
+              
+              {showPaymentInfo && (
+                <div className="payment-info">
+                  <h4>Информация об оплате</h4>
+                  <p>Оплата производится через Telegram Stars:</p>
+                  <ol>
+                    <li>Нажмите на кнопку "Получить премиум доступ"</li>
+                    <li>Подтвердите платеж в Telegram</li>
+                    <li>После успешной оплаты премиум-статус будет активирован</li>
+                  </ol>
+                  <p>
+                    <small>
+                      * Стоимость подписки: {SUBSCRIPTION_PRICE} Telegram Stars
+                    </small>
+                  </p>
+                  <button className="cancel-button" onClick={togglePaymentInfo}>
+                    Закрыть
+                  </button>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        </>
       )}
       
-      {/* Отладочная информация */}
-      <div className="debug-info" style={{fontSize: '10px', color: '#888', marginTop: '20px', textAlign: 'left'}}>
+      {/* Блок для ручного обновления статуса */}
+      <div className="refresh-status">
+        <button
+          className="refresh-button"
+          onClick={refreshSubscriptionStatus}
+          disabled={isRefreshing}
+        >
+          {isRefreshing ? 'Обновление...' : 'Обновить статус'}
+        </button>
+        <small>Последнее обновление: {lastUpdateTime}</small>
+      </div>
+      
+      {/* Отладочная информация о подписке */}
+      <div className="debug-info">
         <details>
-          <summary>Debug info</summary>
-          <pre>{JSON.stringify({userId, subscriptionStatus, lastUpdateTime}, null, 2)}</pre>
+          <summary>Информация о подписке (для отладки)</summary>
+          <pre>
+{JSON.stringify({
+  userId: userId,
+  subscriptionStatus: {
+    has_subscription: subscriptionStatus.has_subscription,
+    is_active: subscriptionStatus.is_active,
+    subscription_end_date: subscriptionStatus.subscription_end_date
+  },
+  calculatedIsActive: calculatedIsActive,
+  isEndDateValid: isEndDateValid,
+  lastUpdateTime: lastUpdateTime
+}, null, 2)}
+          </pre>
+          
+          <h5>Журнал обновлений:</h5>
+          <pre>
+{refreshLog.join('\n')}
+          </pre>
         </details>
       </div>
     </div>
