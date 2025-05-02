@@ -8,13 +8,17 @@ import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
 
 // Определяем базовый URL API
+// Так как фронтенд и API на одном домене, используем пустую строку
+// чтобы axios использовал относительные пути (например, /generate-plan)
 const API_BASE_URL = '';
+// const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000'; // Убираем использование process.env
 
-// Вспомогательная функция для ключей localStorage
+// --- ДОБАВЛЕНО: Вспомогательная функция для ключей localStorage ---
 const getUserSpecificKey = (baseKey: string, userId: string | null): string | null => {
-  if (!userId) return null;
+  if (!userId) return null; // Не работаем с localStorage без ID пользователя
   return `${userId}_${baseKey}`;
 };
+// --- КОНЕЦ ДОБАВЛЕНИЯ ---
 
 // Компоненты для отображения загрузки и сообщений
 const Loading = ({ message }: { message: string }) => (
@@ -26,6 +30,13 @@ const Loading = ({ message }: { message: string }) => (
 
 const ErrorMessage = ({ message, onClose }: { message: string | null, onClose: () => void }) => (
   <div className="error-message">
+    <p>{message}</p>
+    <button className="action-button small" onClick={onClose}>Закрыть</button>
+  </div>
+);
+
+const SuccessMessage = ({ message, onClose }: { message: string | null, onClose: () => void }) => (
+  <div className="success-message">
     <p>{message}</p>
     <button className="action-button small" onClick={onClose}>Закрыть</button>
   </div>
@@ -149,6 +160,8 @@ interface CalendarDay {
 }
 
 // Компонент загрузки изображений
+// --- ИЗМЕНЕНО: Добавляем userId в пропсы --- 
+// --- ИСПРАВЛЕНО: Синтаксис типа пропсов --- 
 const ImageUploader = ({ onImageUploaded, userId }: { onImageUploaded: (imageUrl: string) => void, userId: string | null }) => {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -373,212 +386,132 @@ const CalendarDay = ({
   );
 };
 
-// --- ДОБАВЛЕНО: компонент SuccessMessage ---
-const SuccessMessage = ({ message, onClose }: { message: string | null, onClose: () => void }) => (
-  <div className="success-message">
-    <p>{message}</p>
-    <button className="action-button small" onClick={onClose}>Закрыть</button>
-  </div>
-);
-// --- КОНЕЦ ДОБАВЛЕНИЯ ---
-
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null); 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [channelName, setChannelName] = useState('');
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [suggestedIdeas, setSuggestedIdeas] = useState<SuggestedIdea[]>([]);
-  const [isGeneratingIdeas, setIsGeneratingIdeas] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<ViewType>('analyze');
-  const [detailedPost, setDetailedPost] = useState<DetailedPost | null>(null);
+  const [channelName, setChannelName] = useState<string>('');
+  
+  // Состояния для функциональности приложения
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [loadingAnalysis, setLoadingAnalysis] = useState(false);
+  const [analysisLoadedFromDB, setAnalysisLoadedFromDB] = useState(false);
+  const [isGeneratingIdeas, setIsGeneratingIdeas] = useState(false);
+  const [suggestedIdeas, setSuggestedIdeas] = useState<SuggestedIdea[]>([]);
   const [selectedIdea, setSelectedIdea] = useState<SuggestedIdea | null>(null);
-  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
-  const [savedPosts, setSavedPosts] = useState<SavedPost[]>([]);
-  const [isSavingPost, setIsSavingPost] = useState(false);
+  const [isGeneratingPostDetails, setIsGeneratingPostDetails] = useState<boolean>(false);
+  const [suggestedImages, setSuggestedImages] = useState<PostImage[]>([]);
+  const [error, setError] = useState<string | null>(null); 
+  const [success, setSuccess] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<PostImage | null>(null);
-  const [isEditing, setIsEditing] = useState<boolean>(false);
+
+  // Состояния для календаря и сохраненных постов
+  const [savedPosts, setSavedPosts] = useState<SavedPost[]>([]);
+  const [loadingSavedPosts, setLoadingSavedPosts] = useState(false);
+  const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
+  
+  const [isSavingPost, setIsSavingPost] = useState(false);
+  const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
+  const [allChannels, setAllChannels] = useState<string[]>([]);
+
+  // Состояния для редактирования/создания поста
   const [currentPostId, setCurrentPostId] = useState<string | null>(null);
   const [currentPostDate, setCurrentPostDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [currentPostTopic, setCurrentPostTopic] = useState('');
   const [currentPostFormat, setCurrentPostFormat] = useState('');
   const [currentPostText, setCurrentPostText] = useState('');
+
+  // Добавляем состояние для подписки
   const [showSubscription, setShowSubscription] = useState<boolean>(false);
+
+  // --- ВОССТАНОВЛЕНО: Состояние для текущего месяца календаря --- 
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
-  const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]); // State for calendar days
-  const [loadingSavedPosts, setLoadingSavedPosts] = useState(false); // State for loading saved posts
-  const [activeChannels, setActiveChannels] = useState<string[]>([]); // Use activeChannels instead of allChannels
-  const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
-  // --- ДОБАВЛЕНО: недостающие состояния ---
-  const [suggestedImages, setSuggestedImages] = useState<PostImage[]>([]);
-  const [isGeneratingPostDetails, setIsGeneratingPostDetails] = useState(false);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [loadingAnalysis, setLoadingAnalysis] = useState(false);
-  const [analysisLoadedFromDB, setAnalysisLoadedFromDB] = useState(false);
-  // --- КОНЕЦ ДОБАВЛЕНИЯ ---
-  let savedChannel: string | null = null; // <-- перемещено в начало App
 
   // --- ИЗМЕНЕНИЕ: Загрузка состояния ИЗ localStorage ПОСЛЕ аутентификации ---
   useEffect(() => {
     if (isAuthenticated && userId) {
-      const savedChannelKey = getUserSpecificKey('channelName', userId);
-      if (savedChannelKey) { 
-          savedChannel = localStorage.getItem(savedChannelKey);
-      }
-      // Не сбрасываем канал, если он уже выбран
-      if (savedChannel && !channelName) setChannelName(savedChannel);
-
-      const savedViewKey = getUserSpecificKey('currentView', userId);
-      const savedView = savedViewKey ? localStorage.getItem(savedViewKey) as ViewType : null;
-      if (savedView) setCurrentView(savedView);
-      
-      const activeChannelsKey = getUserSpecificKey('activeChannels', userId);
-      if (activeChannelsKey) {
-        const storedChannels = localStorage.getItem(activeChannelsKey);
-        if (storedChannels) {
-          try { setActiveChannels(JSON.parse(storedChannels)); } 
-          catch (e) { console.error('Ошибка при восстановлении активных каналов:', e); }
+      // Восстанавливаем состояние из localStorage, используя user-specific ключи
+      const channelKey = getUserSpecificKey('channelName', userId);
+      if (channelKey) {
+        const storedChannel = localStorage.getItem(channelKey);
+    if (storedChannel) {
+      setChannelName(storedChannel);
         }
-      } else {
-        // Maybe fetch active channels from posts if not in local storage
-      }
-      
+    }
+    
       const selectedChannelsKey = getUserSpecificKey('selectedChannels', userId);
       if (selectedChannelsKey) {
         const storedSelectedChannels = localStorage.getItem(selectedChannelsKey);
-        if (storedSelectedChannels) {
-          try { setSelectedChannels(JSON.parse(storedSelectedChannels)); } 
-          catch (e) { console.error('Ошибка при восстановлении выбранных каналов:', e); }
-        } else {
-           // Initialize selected channels if not in storage? Maybe from active channels?
-           // setSelectedChannels(activeChannels); // Example
-        }
-      } else {
-          // Initialize selected channels if key missing?
-          // setSelectedChannels(activeChannels); // Example
-      }
-
-      // Исправлено: вызываем функции только если savedChannel не null
-      if (savedChannel) { 
-          fetchSavedAnalysis(savedChannel);
-          fetchSavedIdeas(); 
-          fetchSavedPosts(savedChannel as string); 
-      } else {
-          fetchSavedPosts();
-      }
-    }
-  }, [isAuthenticated, userId, activeChannels, setActiveChannels, setSelectedChannels]); // Added dependencies
-
-  // --- ИЗМЕНЕНИЕ: Сохранение состояния В localStorage ПРИ ИЗМЕНЕНИИ и наличии userId ---
-  useEffect(() => {
-    if (userId) {
-      const channelKey = getUserSpecificKey('channelName', userId);
-      if (channelKey) localStorage.setItem(channelKey, channelName);
-    }
-  }, [channelName, userId]);
-
-  useEffect(() => {
-    if (userId) {
-      const viewKey = getUserSpecificKey('currentView', userId);
-      if (viewKey) localStorage.setItem(viewKey, currentView);
-    }
-  }, [currentView, userId]);
-  
-  // --- КОНЕЦ ИЗМЕНЕНИЙ localStorage ---
-
-  useEffect(() => {
-      if (userId) {
-          const activeChannelsKey = getUserSpecificKey('activeChannels', userId);
-          if (activeChannelsKey) localStorage.setItem(activeChannelsKey, JSON.stringify(activeChannels));
-      }
-  }, [activeChannels, userId]);
-
-  useEffect(() => {
-      if (userId) {
-          const selectedChannelsKey = getUserSpecificKey('selectedChannels', userId);
-          if (selectedChannelsKey) localStorage.setItem(selectedChannelsKey, JSON.stringify(selectedChannels));
-      }
-  }, [selectedChannels, userId]);
-  // --- КОНЕЦ useEffects для сохранения --- 
-
-  const editorRef = useRef<any>(null); // Ref для доступа к Editor
-
-  // --- ИЗМЕНЕНИЕ: Инициализация Telegram WebApp и получение данных ---
-  useEffect(() => {
-    const initApp = async () => {
+    if (storedSelectedChannels) {
       try {
-        console.log("App.tsx: Инициализация Telegram WebApp...");
-        const TWA = window.Telegram?.WebApp;
-        if (TWA) {
-          TWA.ready();
-          TWA.expand();
-          TWA.setHeaderColor('#1a1a1a'); // Темный цвет хедера
-          TWA.setBackgroundColor('#1a1a1a'); // Темный фон
-
-          console.log("App.tsx: Telegram WebApp инициализирован.");
-
-          // Попытка получить userId через TelegramAuth компонент
-          // `handleAuthSuccess` будет вызван TelegramAuth компонентом
-          setLoading(false); // Убираем главный лоадер после инициализации TWA
-                                // Теперь ждем аутентификации через TelegramAuth
-                                
-        } else {
-          console.error("App.tsx: Telegram WebApp не найден.");
-          setError("Не удалось инициализировать приложение Telegram. Пожалуйста, убедитесь, что вы запускаете его внутри Telegram.");
-          setLoading(false);
-        }
-      } catch (e) {
-        console.error('App.tsx: Ошибка при инициализации Telegram WebApp:', e);
-        setError("Произошла ошибка при запуске приложения.");
-        setLoading(false);
+        setSelectedChannels(JSON.parse(storedSelectedChannels));
+    } catch (e) {
+        console.error('Ошибка при восстановлении выбранных каналов:', e);
       }
-    };
-    initApp();
-  }, []);
-
-  // Обновляем заголовки axios при изменении userId
-  useEffect(() => {
-    axios.defaults.headers.common['x-telegram-user-id'] = userId || '';
-    console.log(`App.tsx: Установлен заголовок x-telegram-user-id: ${userId}`);
-  }, [userId]);
-
-  // --- ИЗМЕНЕНИЕ: useEffect для загрузки данных при смене канала --- 
-  useEffect(() => {
-    if (isAuthenticated && channelName) {
-      // --- ДОБАВЛЕНО: Очистка состояния перед загрузкой ---
-      setAnalysisResult(null); // Очищаем предыдущий анализ
-      setSuggestedIdeas([]);  // Очищаем предыдущие идеи
-      setSavedPosts([]); // Очищаем предыдущие посты
-      setSelectedIdea(null); // Сбрасываем выбранную идею
-      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
-
-      // Загрузка сохраненного анализа для выбранного канала
-      fetchSavedAnalysis(channelName);
-      // Загрузка сохраненных идей для выбранного канала
-      fetchSavedIdeas();
-      // Загрузка сохраненных постов для выбранного канала
-      fetchSavedPosts(channelName); 
-    } else if (isAuthenticated) {
-      // Если канал не выбран, очищаем специфичные для канала данные
-      setAnalysisResult(null);
-      setSuggestedIdeas([]);
-      setSavedPosts([]); 
-      setSelectedIdea(null); 
-      fetchSavedPosts(); // Загружаем все посты пользователя
     }
-  }, [isAuthenticated, channelName]); // Зависимости остаются прежними
-  // --- КОНЕЦ ИЗМЕНЕНИЯ --- 
-  
-  // --- Re-add useEffect for calendar --- 
+      }
+
+      const allChannelsKey = getUserSpecificKey('allChannels', userId);
+      if (allChannelsKey) {
+        const storedChannels = localStorage.getItem(allChannelsKey);
+      if (storedChannels) {
+        try {
+          setAllChannels(JSON.parse(storedChannels));
+        } catch (e) {
+          console.error('Ошибка при восстановлении списка каналов:', e);
+        }
+        }
+      } else {
+          // Если список каналов не найден, загружаем его из постов
+          // (Это произойдет ниже в другом useEffect, зависящем от isAuthenticated)
+      }
+      
+      // Загружаем сохраненные посты (перенесено сюда для ясности, т.к. зависит от userId для заголовка)
+      fetchSavedPosts();
+
+      // Загрузка сохраненного анализа для ТЕКУЩЕГО выбранного канала
+      if (channelName) { // channelName будет установлен выше, если есть в localStorage
+        fetchSavedAnalysis(channelName);
+    }
+    }
+
+    // Устанавливаем флаг загрузки после попытки аутентификации/загрузки
+    // (Перенесено из старого useEffect)
+    setTimeout(() => {
+      setLoading(false);
+    }, 500);
+  }, [isAuthenticated, userId]); // Запускаем при изменении статуса аутентификации и userId
+
+  // --- ИЗМЕНЕНИЕ: Сохраняем канал в localStorage при изменении (ИСПОЛЬЗУЯ user-specific ключ) ---
   useEffect(() => {
-    if (currentMonth && currentView === 'calendar') { 
+    const key = getUserSpecificKey('channelName', userId);
+    if (key && channelName) {
+      localStorage.setItem(key, channelName);
+    }
+  }, [channelName, userId]); // Запускаем при изменении канала ИЛИ userId
+
+  // Загружаем список всех каналов при авторизации (этот useEffect можно упростить или объединить)
+  useEffect(() => {
+    if (isAuthenticated && userId) {
+       // Если allChannels пуст после попытки загрузки из localStorage, пробуем собрать из постов
+       if (allChannels.length === 0) {
+         console.log("Список каналов пуст, пытаемся обновить из постов...");
+         updateChannelsFromPosts(savedPosts); // Используем уже загруженные посты
+       }
+    }
+  }, [isAuthenticated, userId, allChannels.length, savedPosts]); // Добавили allChannels.length и savedPosts
+  
+  // --- ВОССТАНОВЛЕНО: useEffect для генерации дней календаря --- 
+  useEffect(() => {
+    if (currentMonth && currentView === 'calendar') { // Добавляем проверку currentView
       generateCalendarDays();
     }
-  }, [currentMonth, savedPosts, currentView]);
+  }, [currentMonth, savedPosts, currentView]); // Добавляем currentView в зависимости
+  // --- КОНЕЦ ВОССТАНОВЛЕНИЯ ---
   
-  // --- Re-add calendar functions --- 
+  // --- ВОССТАНОВЛЕНО: Функция для генерации дней календаря --- 
   const generateCalendarDays = () => {
     const year = currentMonth.getFullYear();
     const month = currentMonth.getMonth();
@@ -623,7 +556,9 @@ function App() {
     
     setCalendarDays(days);
   };
-
+  // --- КОНЕЦ ВОССТАНОВЛЕНИЯ ---
+  
+  // --- ВОССТАНОВЛЕНО: Функции навигации по месяцам --- 
   const goToPrevMonth = () => {
     setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
   };
@@ -631,269 +566,404 @@ function App() {
   const goToNextMonth = () => {
     setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
   };
-  // --- End re-added calendar functions --- 
+  // --- КОНЕЦ ВОССТАНОВЛЕНИЯ ---
+  
+  // --- ИЗМЕНЕНИЕ: useEffect для загрузки данных при смене канала --- 
+  useEffect(() => {
+    if (isAuthenticated && channelName) {
+      // --- ДОБАВЛЕНО: Очистка состояния перед загрузкой ---
+      setAnalysisResult(null); // Очищаем предыдущий анализ
+      setSuggestedIdeas([]);  // Очищаем предыдущие идеи
+      setSavedPosts([]); // Очищаем предыдущие посты
+      setSelectedIdea(null); // Сбрасываем выбранную идею
+      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
 
-  // --- Function to fetch saved posts (add loading state) --- 
-  const fetchSavedPosts = async (channel?: string) => {
-    if (!userId) return; 
-    setLoadingSavedPosts(true); // Use the re-added state
+      // Загрузка сохраненного анализа для выбранного канала
+      fetchSavedAnalysis(channelName);
+      // Загрузка сохраненных идей для выбранного канала
+      fetchSavedIdeas();
+      // Загрузка сохраненных постов для выбранного канала
+      fetchSavedPosts(); 
+    } else if (isAuthenticated) {
+      // Если канал не выбран, очищаем специфичные для канала данные
+      setAnalysisResult(null);
+      setSuggestedIdeas([]);
+      // --- ДОБАВЛЕНО: Также очищаем посты, если канал сброшен ---
+      setSavedPosts([]); 
+      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+    setSelectedIdea(null); 
+      // Возможно, загрузить все посты пользователя, если канал не выбран?
+      fetchSavedPosts(); // Загружаем все посты пользователя
+    }
+  }, [isAuthenticated, channelName]); // Зависимости остаются прежними
+  // --- КОНЕЦ ИЗМЕНЕНИЯ --- 
+  
+  // Функция для загрузки сохраненных постов
+  const fetchSavedPosts = async () => {
+    setLoadingSavedPosts(true);
     setError(null);
+    
+    // --- ДОБАВЛЕНО: Логирование userId перед запросом --- 
+    console.log(`[fetchSavedPosts] Используемый userId для заголовка: ${userId}`);
+    if (!userId) {
+      console.error("[fetchSavedPosts] userId отсутствует, запрос постов не будет выполнен корректно.");
+      setLoadingSavedPosts(false);
+      // --- ДОБАВЛЕНО: Очищаем посты при ошибке userId ---
+      setSavedPosts([]);
+      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+      return; // Прерываем выполнение
+    }
+    // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
     try {
-      const params = channel ? { channel_name: channel } : {};
-      // Use selectedChannels if available and no specific channel is passed
-      if (!channel && selectedChannels.length > 0) {
-         // Fetch posts for multiple selected channels - requires backend support or multiple requests
-         // For now, let's just fetch all user posts if multiple channels selected
-         console.log("Fetching posts for selected channels: ", selectedChannels);
-         // Fetching all user posts for now if multiple selected
-         delete params.channel_name; 
-      } 
-      const response = await axios.get(`${API_BASE_URL}/posts`, { params });
-      const posts: SavedPost[] = response.data || [];
-      setSavedPosts(posts);
-      updateChannelsFromPosts(posts); // Keep updating active channels
-    } catch (err) {
-      console.error("Ошибка при загрузке сохраненных постов:", err);
-      setError("Не удалось загрузить сохраненные посты.");
+      // --- ИЗМЕНЕНИЕ: Заменяем postsToSet на postsResult, чтобы гарантировать перезапись --- 
+      let postsResult: SavedPost[] = [];
+      const useChannelFilter = selectedChannels.length > 0;
+      
+      if (useChannelFilter) {
+        // Используем фильтр selectedChannels
+        const allFilteredPosts: SavedPost[] = [];
+        // --- ИЗМЕНЕНО: Используем Promise.all для параллельной загрузки ---
+        const promises = selectedChannels.map(channel =>
+          axios.get('/posts', {
+            params: { channel_name: channel },
+            headers: { 'x-telegram-user-id': userId }
+          }).then(response => {
+            if (response.data && Array.isArray(response.data)) {
+              return response.data;
+            }
+            return [];
+          }).catch(err => {
+            console.error(`Ошибка при загрузке постов для канала ${channel}:`, err);
+            return []; // Возвращаем пустой массив при ошибке
+          })
+        );
+        const results = await Promise.all(promises);
+        postsResult = results.flat(); // Объединяем массивы результатов
+        // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+      } else if (channelName) {
+        // Если фильтр не активен, но выбран канал вверху, грузим посты для него
+        const response = await axios.get('/posts', {
+          params: { channel_name: channelName }, 
+          headers: { 'x-telegram-user-id': userId } 
+        });
+        if (response.data && Array.isArray(response.data)) {
+          postsResult = response.data;
+        }
+      } else {
+        // Если ни фильтр, ни канал не выбраны, грузим все посты пользователя
+        const response = await axios.get('/posts', { 
+           headers: { 'x-telegram-user-id': userId } 
+        });
+        if (response.data && Array.isArray(response.data)) {
+          postsResult = response.data;
+        }
+      }
+      
+      // --- ИЗМЕНЕНИЕ: Гарантированно перезаписываем состояние --- 
+      setSavedPosts(postsResult); 
+      // Обновляем список всех каналов на основе ТОЛЬКО ЧТО полученных постов
+      updateChannelsFromPosts(postsResult); 
+      // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+      
+    } catch (err: any) {
+      console.error('Ошибка при загрузке сохраненных постов:', err);
+      setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке сохраненных постов');
+      // --- ДОБАВЛЕНО: Очищаем посты при ошибке загрузки ---
+      setSavedPosts([]); 
+      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
     } finally {
-       setLoadingSavedPosts(false); // Use the re-added state
+      setLoadingSavedPosts(false);
     }
   };
   
   // Вспомогательная функция для обновления списка каналов из постов
   const updateChannelsFromPosts = (posts: SavedPost[]) => {
-    const uniqueChannels = Array.from(new Set(posts.map(p => p.channel_name).filter(Boolean))) as string[];
-    setActiveChannels(uniqueChannels);
-    const allChannelsKey = getUserSpecificKey('allChannels', userId);
-    if (allChannelsKey) {
-        localStorage.setItem(allChannelsKey, JSON.stringify(uniqueChannels));
+    const currentUserPosts = posts.filter(post => String(post.user_id) === String(userId));
+    if (posts.length !== currentUserPosts.length) {
+        console.warn(`[updateChannelsFromPosts] Обнаружены посты (${posts.length - currentUserPosts.length} шт.), не принадлежащие текущему пользователю (${userId}). Они будут проигнорированы при обновлении списка каналов.`);
     }
-    if (selectedChannels.length === 0 || !uniqueChannels.some(ch => selectedChannels.includes(ch))) {
-        setSelectedChannels(uniqueChannels);
-        const selectedChannelsKey = getUserSpecificKey('selectedChannels', userId);
-        if (selectedChannelsKey) {
-            localStorage.setItem(selectedChannelsKey, JSON.stringify(uniqueChannels));
+    
+    // Собираем уникальные каналы из ТОЛЬКО ЧТО полученных и отфильтрованных постов
+    const newChannels = [...new Set(currentUserPosts 
+      .map(post => post.channel_name)
+      .filter((channel): channel is string => !!channel) 
+    )];
+    
+    // Обновляем список всех каналов, добавляя новые, которых еще нет
+    if (newChannels.length > 0) {
+      // --- ИЗМЕНЕНИЕ: Обновляем, беря текущее состояние и добавляя новые каналы ---
+      setAllChannels(prevChannels => {
+        const updatedChannels = [...new Set([...prevChannels, ...newChannels])];
+        // Сохраняем обновленный список в localStorage
+        const key = getUserSpecificKey('allChannels', userId);
+        if (key) {
+          localStorage.setItem(key, JSON.stringify(updatedChannels));
         }
+        return updatedChannels; // Возвращаем новое состояние
+      });
+      // --- КОНЕЦ ИЗМЕНЕНИЯ ---
     }
   };
   
   // Добавляем функцию для регенерации только изображений
   const regeneratePostDetails = async () => {
-    if (!selectedIdea || !userId) return;
-    setIsLoadingDetails(true);
-    setError(null);
+    if (!selectedIdea) return;
+    
+    setIsGeneratingPostDetails(true);
+    setError('');
+    setSuccess('');
+
     try {
-        const response = await axios.post(
-            `${API_BASE_URL}/generate-detailed-post/${selectedIdea.id}`,
-            {},
-            { headers: { 'x-telegram-user-id': userId } } 
-        );
-        if (response.data && response.data.post_text) {
-            setDetailedPost(response.data);
-            toast.success("Детали поста успешно обновлены.");
-        } else {
-            throw new Error(response.data.error || "Не удалось получить детали поста.");
+      const response = await axios.post(`${API_BASE_URL}/generate-post-details`, {
+        topic_idea: selectedIdea.topic_idea,
+        format_style: selectedIdea.format_style || '',
+        channel_name: selectedIdea.channel_name || '',
+        regenerate_images_only: true
+      }, {
+        headers: {
+          'x-telegram-user-id': userId ? userId : 'unknown'
         }
+      });
+
+      if (response.data && response.data.found_images && selectedIdea) {
+        const newImages = response.data.found_images.map((img: any) => ({
+          url: img.url || img.urls?.regular || img.regular_url || img.preview_url || '',
+          alt: img.alt_description || img.description || 'Изображение для поста',
+          author: img.user?.name || img.author_name || '',
+          author_url: img.user?.links?.html || img.author_url || ''
+        }));
+
+        setSelectedIdea(prevState => {
+          if (!prevState) return null;
+          return {
+            ...prevState,
+            images: newImages
+          };
+        });
+
+        if (selectedIdea) {
+          setSuggestedImages(newImages);
+        setSuccess('Изображения успешно обновлены');
+        }
+      }
     } catch (err: any) {
-        console.error("Ошибка при повторной генерации деталей поста:", err);
-        setError(err.message || "Произошла ошибка при обновлении деталей поста.");
-        toast.error(err.message || "Произошла ошибка при обновлении деталей поста.");
+      setError(err.response?.data?.detail || err.message || 'Ошибка при обновлении изображений');
+      console.error('Ошибка при обновлении изображений:', err);
     } finally {
-        setIsLoadingDetails(false);
+      setIsGeneratingPostDetails(false);
     }
   };
 
   // Функция сохранения поста
   const handleSaveOrUpdatePost = async () => {
-      if (!currentPostTopic || !currentPostText || !userId) {
-          setError("Необходимо указать тему и текст поста.");
-          return;
-      }
-      setIsSavingPost(true);
-      setError(null);
-      // setSuccess(null); // Удалено
-      const TWA = window.Telegram?.WebApp;
+    setIsSavingPost(true);
+    setError("");
+    setSuccess("");
 
-      const postData: Partial<SavedPost> & { images_ids?: string[] } = {
-          user_id: userId,
-          target_date: currentPostDate,
-          topic_idea: currentPostTopic,
-          format_style: currentPostFormat,
-          final_text: currentPostText,
-          channel_name: channelName, // Используем текущий канал из состояния App
-          // Передаем ID выбранного изображения, если оно есть и имеет id
-          images_ids: selectedImage && selectedImage.id ? [selectedImage.id] : [],
-      };
+    // Prepare payload
+    const postPayload: {
+      target_date: string;
+      topic_idea: string;
+      format_style: string;
+      final_text: string;
+      channel_name?: string;
+      selected_image_data?: PostImage | null;
+    } = {
+      target_date: currentPostDate,
+      topic_idea: currentPostTopic,
+      format_style: currentPostFormat,
+      final_text: currentPostText,
+      channel_name: channelName || undefined,
+      selected_image_data: selectedImage
+    };
 
-      try {
-          let response;
-          if (isEditing && currentPostId) {
-              // Обновление существующего поста
-              response = await axios.put(`${API_BASE_URL}/posts/${currentPostId}`, postData);
-              toast.success("Пост успешно обновлен!");
-              // setSuccess("Пост успешно обновлен!"); // Заменено
-          } else {
-              // Создание нового поста
-              response = await axios.post(`${API_BASE_URL}/posts`, postData);
-              setCurrentPostId(response.data.id); // Сохраняем ID нового поста
-              setIsEditing(true); // Переключаемся в режим редактирования после первого сохранения
-              toast.success("Пост успешно сохранен!");
-              // setSuccess("Пост успешно сохранен!"); // Заменено
-          }
-          
-          // Обновляем список постов после сохранения/обновления
-          await fetchSavedPosts(channelName); 
-          
-          // Показываем сообщение в TWA, если доступно
-          if (TWA?.showPopup) {
-              TWA.showPopup({
-                  title: "Успех",
-                  message: isEditing ? "Пост успешно обновлен!" : "Пост успешно сохранен!",
-                  buttons: [{ type: 'ok' }]
-              });
-          }
-          
-          // Очищаем выбор изображения после сохранения
-          setSelectedImage(null);
-          
-          // Переключаемся на просмотр постов или календаря
-          setCurrentView('posts'); 
-          
-      } catch (err: any) {
-          console.error("Ошибка при сохранении поста:", err);
-          const errorMsg = err.response?.data?.detail || err.message || "Не удалось сохранить пост.";
-          setError(errorMsg);
-          toast.error(errorMsg);
-      } finally {
-          setIsSavingPost(false);
+    try {
+      let response;
+      if (currentPostId) {
+        // Update existing post
+        console.log(`Updating post ${currentPostId} with payload:`, postPayload);
+        response = await axios.put(`/posts/${currentPostId}`, postPayload, {
+           headers: { 'x-telegram-user-id': userId }
+        });
+        setSuccess("Пост успешно обновлен");
+      } else {
+        // Create new post
+        console.log("Creating new post with payload:", postPayload);
+        response = await axios.post('/posts', postPayload, {
+           headers: { 'x-telegram-user-id': userId }
+        });
+        setSuccess("Пост успешно сохранен");
       }
+      
+      if (response.data) {
+        // Update local state and navigate
+        await fetchSavedPosts();
+        setCurrentView('calendar');
+        setCurrentPostId(null);
+        setCurrentPostDate(new Date().toISOString().split('T')[0]);
+        setCurrentPostTopic('');
+        setCurrentPostFormat('');
+        setCurrentPostText('');
+        setSelectedImage(null);
+        setSuggestedImages([]);
+      }
+    } catch (err: any) { 
+      const errorMsg = err.response?.data?.detail || err.message || (currentPostId ? 'Ошибка при обновлении поста' : 'Ошибка при сохранении поста');
+      setError(errorMsg);
+      console.error(currentPostId ? 'Ошибка при обновлении поста:' : 'Ошибка при сохранении поста:', err);
+    } finally {
+      setIsSavingPost(false);
+    }
   };
   
   // Функция для удаления поста
   const deletePost = async (postId: string) => {
-      if (!userId) return;
-      if (!confirm("Вы уверены, что хотите удалить этот пост?")) {
-          return;
+    try {
+      setLoadingSavedPosts(true);
+      const response = await axios.delete(`/posts/${postId}`, {
+        headers: { 'x-telegram-user-id': userId ? userId : undefined }
+      });
+      
+      if (response.data && response.data.success) {
+        // Удаляем пост из локального состояния
+        setSavedPosts(currentPosts => currentPosts.filter(post => post.id !== postId));
+        setSuccess('Пост успешно удален');
       }
-      try {
-          await axios.delete(`${API_BASE_URL}/posts/${postId}`);
-          // setSuccess("Пост успешно удален"); // Заменено
-          toast.success("Пост успешно удален");
-          // Обновляем список постов
-          setSavedPosts(prevPosts => prevPosts.filter(post => post.id !== postId));
-      } catch (err: any) {
-          console.error("Ошибка при удалении поста:", err);
-          setError(err.response?.data?.detail || "Не удалось удалить пост");
-          toast.error(err.response?.data?.detail || "Не удалось удалить пост");
-      }
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message || 'Ошибка при удалении поста');
+    } finally {
+      setLoadingSavedPosts(false);
+    }
   };
   
   // Функция для загрузки данных сохраненного изображения и установки его как выбранного
   const fetchAndSetSavedImage = async (imageId: string) => {
-      if (!imageId || !userId) return;
-      try {
-          console.log(`Загрузка данных для сохраненного изображения: ${imageId}`);
-          const response = await axios.get(`${API_BASE_URL}/images/${imageId}`);
-          if (response.data && !response.data.error) {
-              const imageData = response.data;
-              const imageObject: PostImage = {
-                  id: imageData.id,
-                  url: imageData.url,
-                  preview_url: imageData.preview_url || imageData.url,
-                  alt: imageData.alt || '',
-                  author: imageData.author || '',
-                  author_url: imageData.author_url || '',
-                  source: imageData.source || 'db'
-              };
-              setSelectedImage(imageObject);
-              console.log(`Установлено сохраненное изображение:`, imageObject);
-          } else {
-              console.warn(`Не удалось загрузить данные для изображения ${imageId}. Ошибка: ${response.data.error}`);
-              setSelectedImage(null);
-              toast.error(`Не удалось загрузить данные для изображения ${imageId}.`);
-          }
-      } catch (err: any) {
-          if (err.response && err.response.status === 404) {
-              console.warn(`Сохраненное изображение ${imageId} не найдено (404).`);
-              // toast.warn(`Сохраненное изображение ${imageId} не найдено.`);
-              toast(`Сохраненное изображение ${imageId} не найдено.`); // Заменяем toast.warn на toast()
-          } else {
-              console.error(`Ошибка при загрузке сохраненного изображения ${imageId}:`, err);
-              toast.error(`Ошибка при загрузке изображения ${imageId}.`);
-          }
-          setSelectedImage(null);
+    if (!imageId) return;
+    try {
+      console.log(`Загрузка данных для сохраненного изображения: ${imageId}`);
+      const response = await axios.get(`${API_BASE_URL}/images/${imageId}`, {
+          headers: { 'x-telegram-user-id': userId }
+      });
+      if (response.data && !response.data.error) {
+          // Преобразуем данные из БД в формат PostImage
+          const imageData = response.data;
+          const imageObject: PostImage = {
+              id: imageData.id,
+              url: imageData.url,
+              preview_url: imageData.preview_url || imageData.url, 
+              alt: imageData.alt || '',
+              author: imageData.author_name || '', // Используем author_name из БД
+              author_url: imageData.author_url || '',
+              source: imageData.source || 'db'
+          };
+          setSelectedImage(imageObject);
+          console.log(`Установлено сохраненное изображение:`, imageObject);
+      } else {
+          console.warn(`Не удалось загрузить данные для изображения ${imageId}.`);
+          setSelectedImage(null); // Сбрасываем, если не удалось загрузить
       }
+    } catch (err: any) {
+        if (err.response && err.response.status === 404) {
+            console.warn(`Сохраненное изображение ${imageId} не найдено (404).`);
+        } else {
+            console.error(`Ошибка при загрузке сохраненного изображения ${imageId}:`, err);
+        }
+        setSelectedImage(null); // Сбрасываем при любой ошибке
+    }
   };
 
   // --- ДОБАВЛЕНО: Обработчик загрузки своего изображения --- 
   const handleCustomImageUpload = (imageUrl: string) => {
-    // Сразу устанавливаем загруженное изображение как выбранное
-    const newImage: PostImage = {
-      id: uuidv4(), // Генерируем временный ID
-      url: imageUrl,
-      preview_url: imageUrl,
+    if (!imageUrl) return;
+    // --- ИЗМЕНЕНИЕ: Преобразуем относительный URL в абсолютный ---
+    // Предполагаем, что бэкенд запущен на том же хосте, порт 8000
+    const backendBaseUrl = `${window.location.protocol}//${window.location.hostname}:8000`;
+    const absoluteImageUrl = imageUrl.startsWith('http') ? imageUrl : `${backendBaseUrl}${imageUrl}`;
+    // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
+    // Создаем объект PostImage для загруженного файла
+    const uploadedImage: PostImage = {
+      id: `uploaded-${uuidv4()}`, // Генерируем уникальный ID
+      // --- ИЗМЕНЕНИЕ: Используем абсолютный URL ---
+      url: absoluteImageUrl,
+      preview_url: absoluteImageUrl, // Используем тот же URL для превью
+      // --- КОНЕЦ ИЗМЕНЕНИЯ ---
       alt: 'Загруженное изображение',
-      author: 'Пользователь (upload)',
-      source: 'upload'
+      // --- ИЗМЕНЕНИЕ: Добавим отметку об источнике в автора для ясности ---
+      author: 'Пользователь (upload)', 
+      // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+      source: 'upload' // Указываем источник
     };
-    setSelectedImage(newImage);
-    // setSuccess("Изображение успешно загружено и выбрано!"); // Заменено
-    toast.success("Изображение успешно загружено и выбрано!");
-    
-    // Здесь можно добавить логику для немедленного сохранения данных изображения в БД,
-    // если это необходимо, или положиться на сохранение при сохранении поста.
+    setSelectedImage(uploadedImage); // Устанавливаем как выбранное
+    // Опционально: можно добавить в suggestedImages, но лучше держать их раздельно
+    // setSuggestedImages(prev => [uploadedImage, ...prev]); 
+    setSuccess("Изображение успешно загружено и выбрано");
   };
   // --- КОНЕЦ ДОБАВЛЕНИЯ ---
   
   // Функция для открытия редактирования поста
   const startEditingPost = (post: SavedPost) => {
-      setCurrentPostId(post.id);
-      setCurrentPostDate(post.target_date.split('T')[0]); // Форматируем дату
-      setCurrentPostTopic(post.topic_idea);
-      setCurrentPostFormat(post.format_style);
-      setCurrentPostText(post.final_text);
-      setIsEditing(true);
-      // setSuggestedImages([]); // Очищаем предложенные ранее изображения
-      setSelectedImage(null); // Очищаем выбранное изображение
-      // Загружаем данные сохраненного изображения, если оно есть
-      if (post.images_ids && post.images_ids.length > 0) {
-        fetchAndSetSavedImage(post.images_ids[0]);
+    setCurrentPostId(post.id);
+    setCurrentPostDate(post.target_date);
+    setCurrentPostTopic(post.topic_idea);
+    setCurrentPostFormat(post.format_style);
+    setCurrentPostText(post.final_text);
+    setChannelName(post.channel_name || '');
+    setSuggestedImages([]); // Очищаем предложенные
+    setIsGeneratingPostDetails(false);
+    setError(null);
+    setSuccess(null);
+    setCurrentView('edit');
+
+    // --- ИСПРАВЛЕНО: Используем selected_image_data напрямую ---
+    // Проверяем, есть ли данные о выбранном изображении
+    if (post.selected_image_data) {
+      // Используем данные напрямую, не нужно загружать их отдельно
+      setSelectedImage(post.selected_image_data);
+    } else {
+      // Для обратной совместимости: если selected_image_data нет, но есть images_ids
+      const savedImageId = post.images_ids && post.images_ids.length > 0 ? post.images_ids[0] : null;
+      if (savedImageId) {
+        fetchAndSetSavedImage(savedImageId);
+      } else {
+        // Если нет ни selected_image_data, ни images_ids, сбрасываем selectedImage
+        setSelectedImage(null);
       }
-      setCurrentView('edit');
-      // Прокрутка вверх
-      window.scrollTo(0, 0);
+    }
+    // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
   };
   
   // Функция для сохранения идей в базу данных
-  const saveIdeasToDatabase = async (ideasToSave: SuggestedIdea[]) => { 
-      if (!userId) {
-          console.error("Невозможно сохранить идеи: userId отсутствует.");
-          toast.error("Ошибка: Не удалось определить пользователя для сохранения идей.");
-          return;
-      }
-      try {
-          console.log("Отправка идей на сохранение в БД:", ideasToSave);
-          const response = await axios.post(`${API_BASE_URL}/ideas/batch`, {
-              ideas: ideasToSave,
-              user_id: parseInt(userId, 10), // Убедимся, что user_id это число
-              channel_name: channelName 
-          });
-          if (response.data && response.data.success) {
-              console.log("Идеи успешно сохранены в БД", response.data);
-              // setSuccess("Идеи успешно сохранены!"); // Заменено
-              toast.success("Идеи успешно сохранены!");
-              // Обновляем список идей из ответа, чтобы получить ID
-              if (response.data.saved_ideas && response.data.saved_ideas.length > 0) {
-                  setSuggestedIdeas(response.data.saved_ideas);
-              }
-          } else {
-              throw new Error(response.data?.error || 'Неизвестная ошибка при сохранении идей.');
+  const saveIdeasToDatabase = async (ideasToSave: SuggestedIdea[]) => { // Принимаем идеи как аргумент
+    if (!userId) {
+      console.error('Невозможно сохранить идеи: userId отсутствует');
+      return; 
+    }
+    
+    console.log('Попытка сохранения идей в БД:', ideasToSave);
+    
+    try {
+      await axios.post(
+        `${API_BASE_URL}/save-suggested-ideas`, 
+        {
+          ideas: ideasToSave,
+          channel_name: channelName // Передаем текущее имя канала
+        },
+        {
+          headers: {
+            'x-telegram-user-id': userId
           }
-      } catch (error: any) {
-          console.error('Ошибка при сохранении идей в БД:', error);
-          setError(error.response?.data?.detail || error.message || 'Не удалось сохранить идеи.');
-          toast.error(error.response?.data?.detail || error.message || 'Не удалось сохранить идеи.');
-      }
+        }
+      );
+      console.log('Идеи успешно отправлены на сохранение');
+      // Опционально: показать сообщение об успехе, но тихое сохранение лучше
+      // toast.success('Идеи сохранены в фоне');
+    } catch (err: any) {
+      console.error('Ошибка при сохранении идей:', err);
+      setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении идей');
+      toast.error('Ошибка при сохранении идей'); // Показываем ошибку пользователю
+    }
   };
   
   // Функция для фильтрации постов по каналам
@@ -921,38 +991,51 @@ function App() {
 
   // Функция для анализа канала
   const analyzeChannel = async () => {
-    if (!channelName || !userId) {
-      setError("Пожалуйста, введите название канала");
+    if (!channelName) {
+      setError("Введите имя канала");
       return;
     }
+
     setIsAnalyzing(true);
-    setError(null);
-    setAnalysisResult(null);
+    // Сбрасываем флаг загрузки из БД перед новым анализом
     setAnalysisLoadedFromDB(false);
-    const channelKey = getUserSpecificKey('channelName', userId);
-    if (channelKey) localStorage.setItem(channelKey, channelName);
+    setError(null);
+    setSuccess(null);
+    setAnalysisResult(null);
+
     try {
-      const response = await axios.post(`${API_BASE_URL}/analyze-channel`, 
-        { channel_name: channelName },
-        { headers: { 'x-telegram-user-id': userId } }
-      );
+      const response = await axios.post('/analyze', { username: channelName }, {
+        headers: { 'x-telegram-user-id': userId }
+      });
       setAnalysisResult(response.data);
-      setCurrentView('suggestions');
-      toast.success("Анализ канала успешно завершен!");
-      if (!activeChannels.includes(channelName)) {
-         const updatedChannels = [...activeChannels, channelName];
-         setActiveChannels(updatedChannels);
-         const activeChannelsKey = getUserSpecificKey('activeChannels', userId);
-         if (activeChannelsKey) localStorage.setItem(activeChannelsKey, JSON.stringify(updatedChannels));
+      setSuccess('Анализ успешно завершен');
+      
+      // Только после успешного анализа добавляем канал в список всех каналов
+      if (!allChannels.includes(channelName)) {
+        const updatedChannels = [...allChannels, channelName];
+        setAllChannels(updatedChannels);
+        const allKey = getUserSpecificKey('allChannels', userId);
+        if (allKey) {
+          localStorage.setItem(allKey, JSON.stringify(updatedChannels));
+        }
+      
+        // Добавляем канал в список выбранных, если его там нет
+        if (!selectedChannels.includes(channelName)) {
+          const updatedSelected = [...selectedChannels, channelName];
+          setSelectedChannels(updatedSelected);
+          const selectedKey = getUserSpecificKey('selectedChannels', userId);
+          if (selectedKey) {
+            localStorage.setItem(selectedKey, JSON.stringify(updatedSelected));
+          }
+        }
       }
-      setAnalysisLoadedFromDB(false);
+      // Устанавливаем флаг, что анализ загружен из БД
+      setAnalysisLoadedFromDB(true);
     } catch (err: any) { 
       setError(err.response?.data?.detail || err.message || 'Ошибка при анализе канала');
-      setAnalysisResult(null);
-      setAnalysisLoadedFromDB(false);
+      console.error('Ошибка при анализе:', err);
     } finally {
       setIsAnalyzing(false);
-      setLoadingAnalysis(false);
     }
   };
 
@@ -1008,18 +1091,17 @@ function App() {
         }));
 
         setSuggestedIdeas(formattedIdeas);
-        // REMOVED: setSuccess('Идеи успешно сгенерированы'); // REMOVE
-        toast.success('Идеи успешно сгенерированы'); // Replace setSuccess
+        setSuccess('Идеи успешно сгенерированы');
         
         // Сохраняем сгенерированные идеи В ФОНЕ (не ждем завершения)
         saveIdeasToDatabase(formattedIdeas); // Передаем новые идеи в функцию сохранения
-        setCurrentView('suggestions');
       }
     } catch (err: any) { 
       setError(err.response?.data?.detail || err.message || 'Ошибка при генерации идей');
       console.error('Ошибка при генерации идей:', err);
     } finally {
       setIsGeneratingIdeas(false);
+      setCurrentView('suggestions');
     }
   };
 
@@ -1068,7 +1150,8 @@ function App() {
       setSelectedImage(null);
     setSuggestedImages([]);
     setError(null);
-    // REMOVED: setSuccess(null); // REMOVE
+    setSuccess(null);
+    
     setCurrentView('edit');
   };
 
@@ -1089,9 +1172,9 @@ function App() {
     // Only run if: we are in 'edit' view, creating a NEW post (no currentPostId), and an idea is selected
     if (currentView === 'edit' && !currentPostId && selectedIdea) {
       console.log(`Fetching details for new post based on idea: ${selectedIdea.topic_idea}`);
-      // REMOVED: setIsGeneratingPostDetails(true); // REMOVE
+      setIsGeneratingPostDetails(true);
       setError(null);
-      // REMOVED: setSuccess(null); // REMOVE
+      setSuccess(null);
       setSuggestedImages([]); // Clear any potentially stale images
       setSelectedImage(null); // Ensure no image is pre-selected
 
@@ -1109,14 +1192,13 @@ function App() {
         );
         setCurrentPostText(response.data.generated_text);
         setSuggestedImages(response.data.found_images || []);
-        // REMOVED: setSuccess("Детали поста успешно сгенерированы"); // REMOVE
-        toast.success("Детали поста успешно сгенерированы"); // Replace setSuccess
+        setSuccess("Детали поста успешно сгенерированы");
 
       } catch (err: any) {
         setError(err.response?.data?.detail || err.message || 'Ошибка при генерации деталей поста');
         console.error('Ошибка при генерации деталей поста:', err);
       } finally {
-        // REMOVED: setIsGeneratingPostDetails(false); // REMOVE
+        setIsGeneratingPostDetails(false);
       }
     }
     // Зависимости для useCallback: все внешние переменные, используемые внутри
@@ -1131,10 +1213,11 @@ function App() {
 
   // Функция для загрузки сохраненного анализа канала
   const fetchSavedAnalysis = async (channel: string) => {
-    if (!channel || !userId) return;
-    setIsAnalyzing(true);
+    if (!channel) return;
     setLoadingAnalysis(true);
+    // Сбрасываем текущий результат, чтобы не показывать старые данные во время загрузки
     setAnalysisResult(null);
+    // Сбрасываем флаг загрузки из БД
     setAnalysisLoadedFromDB(false);
     try {
       console.log(`Загрузка сохраненного анализа для канала: ${channel}`);
@@ -1142,32 +1225,35 @@ function App() {
         params: { channel_name: channel },
         headers: { 'x-telegram-user-id': userId }
       });
-      if (response.data && Object.keys(response.data).length > 0 && !response.data.error) {
+      
+      // Проверяем, что ответ содержит данные и не является объектом ошибки
+      if (response.data && !response.data.error) {
         console.log('Сохраненный анализ найден:', response.data);
         setAnalysisResult(response.data); 
+        setSuccess(`Загружен сохраненный анализ для @${channel}`);
+        // Устанавливаем флаг, что анализ загружен из БД
         setAnalysisLoadedFromDB(true);
-        toast.success(`Загружен сохраненный анализ для @${channel}`, { id: `analysis-${channel}` });
       } else {
         console.log(`Сохраненный анализ для @${channel} не найден.`);
+        // Если анализ не найден (или пришла ошибка), оставляем analysisResult null
         setAnalysisResult(null); 
-        setAnalysisLoadedFromDB(false);
+        // Можно очистить сообщение об успехе или установить сообщение о том, что анализ не найден
+        // setSuccess(null);
       }
     } catch (err: any) {
+      // Обрабатываем ошибку 404 (Не найдено) отдельно, чтобы не показывать как ошибку
       if (err.response && err.response.status === 404) {
          console.log(`Сохраненный анализ для @${channel} не найден (404).`);
          setAnalysisResult(null);
-         setAnalysisLoadedFromDB(false);
       } else {
         console.error('Ошибка при загрузке сохраненного анализа:', err);
         setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке сохраненного анализа');
-        setAnalysisResult(null); 
-        setAnalysisLoadedFromDB(false);
+        setAnalysisResult(null); // Сбрасываем результат при ошибке
       }
     } finally {
-      setIsAnalyzing(false);
       setLoadingAnalysis(false);
     }
-  };
+  }; // <-- ДОБАВЛЕНА ТОЧКА С ЗАПЯТОЙ
 
   // Компонент загрузки
   if (loading) {
@@ -1232,14 +1318,12 @@ function App() {
       
       {/* Блок подписки */}
       {showSubscription && (
-        // Remove isActive prop
-        <SubscriptionWidget userId={userId} /> 
+        <SubscriptionWidget userId={userId} isActive={true} />
       )}
 
       <main className="app-main">
-        {/* Сообщения об ошибках и успешном выполнении */} 
+        {/* Сообщения об ошибках и успешном выполнении */}
         {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
-        {/* Use success state for now */} 
         {success && <SuccessMessage message={success} onClose={() => setSuccess(null)} />}
 
         {/* Навигация */}
@@ -1291,8 +1375,7 @@ function App() {
             className="channel-select"
           >
             <option value="">Выберите канал</option>
-            {/* Use activeChannels */} 
-            {activeChannels.map(channel => (
+            {allChannels.map(channel => (
               <option key={channel} value={channel}>{channel}</option>
             ))}
           </select>
