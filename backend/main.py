@@ -3388,10 +3388,15 @@ async def get_subscription_status(request: Request):
         "Pragma": "no-cache",
         "Expires": "0",
     }
-    debug = {}
+    debug = {"user_id_from_query": user_id}
     if not user_id:
         return FastAPIResponse(
-            content=json.dumps({"error": "user_id обязателен", "debug": debug}),
+            content=json.dumps({
+                "has_subscription": False,
+                "is_active": False,
+                "subscription_end_date": None,
+                "debug": {"error": "user_id обязателен"}
+            }),
             media_type="application/json",
             headers=cache_headers
         )
@@ -3403,7 +3408,6 @@ async def get_subscription_status(request: Request):
             .eq("user_id", int(user_id))\
             .order("end_date", desc=True)\
             .execute()
-        debug["requested_user_id"] = user_id
         debug["db_rows"] = result.data
         sub = result.data[0] if result.data else None
         debug["used_row"] = sub
@@ -3423,8 +3427,8 @@ async def get_subscription_status(request: Request):
                 debug["end_date_parse_error"] = str(e)
         response = {
             "has_subscription": has_subscription,
-            "subscription_end_date": subscription_end_date,
             "is_active": is_active,
+            "subscription_end_date": subscription_end_date,
             "debug": debug
         }
         return FastAPIResponse(
@@ -3435,7 +3439,12 @@ async def get_subscription_status(request: Request):
     except Exception as e:
         debug["exception"] = str(e)
         return FastAPIResponse(
-            content=json.dumps({"error": str(e), "debug": debug}),
+            content=json.dumps({
+                "has_subscription": False,
+                "is_active": False,
+                "subscription_end_date": None,
+                "debug": debug
+            }),
             media_type="application/json",
             headers=cache_headers
         )
