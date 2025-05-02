@@ -395,6 +395,8 @@ function App() {
   const [userId, setUserId] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus | null>(null);
   const [debugInfo, setDebugInfo] = useState<any>(null); // Оставляем debug
+  const [lastRefreshTime, setLastRefreshTime] = useState<string>(new Date().toISOString());
+  const previousStatusRef = useRef<SubscriptionStatus | null>(null);
 
   // --- УДАЛЕНЫ: Константы для localStorage ---
   // const PREMIUM_TIMESTAMP_KEY = 'lastPremiumConfirmedAt';
@@ -407,12 +409,32 @@ function App() {
     try {
       const fetchedStatus = await getUserSubscriptionStatus(userId);
       console.log('[refetchSubscriptionStatus] Получен статус:', fetchedStatus);
+      
+      // Логируем сравнение с предыдущим статусом
+      if (previousStatusRef.current) {
+        console.log('[refetchSubscriptionStatus] Сравнение с предыдущим статусом:');
+        console.log(`Предыдущий: has_subscription=${previousStatusRef.current.has_subscription}, is_active=${previousStatusRef.current.is_active}`);
+        console.log(`Новый: has_subscription=${fetchedStatus.has_subscription}, is_active=${fetchedStatus.is_active}`);
+        
+        if (previousStatusRef.current.has_subscription !== fetchedStatus.has_subscription ||
+            previousStatusRef.current.is_active !== fetchedStatus.is_active) {
+          console.log('[refetchSubscriptionStatus] ВНИМАНИЕ! Статус изменился!');
+        }
+      }
+      
+      // Обновляем ссылку на предыдущий статус
+      previousStatusRef.current = fetchedStatus;
+      
+      // Обновляем время последнего обновления
+      setLastRefreshTime(new Date().toISOString());
+      
       if ((fetchedStatus as any).debug) {
         setDebugInfo((fetchedStatus as any).debug); // Обновляем debug info
         console.log('[refetchSubscriptionStatus][DEBUG]:', (fetchedStatus as any).debug);
       } else {
         setDebugInfo(null);
       }
+      
       // Просто обновляем статус на основе ответа API
       setSubscriptionStatus({
         has_subscription: fetchedStatus.has_subscription,
@@ -423,7 +445,8 @@ function App() {
     } catch (error) {
       console.error('[refetchSubscriptionStatus] Ошибка при получении статуса:', error);
       setDebugInfo({ error: String(error) }); // Показываем ошибку в debug
-      setSubscriptionStatus(null); // Сбрасываем статус при ошибке
+      // НЕ сбрасываем статус при ошибке, чтобы сохранить предыдущий статус
+      // setSubscriptionStatus(null);
     }
   }, [userId]); // Зависит только от userId
   // --- КОНЕЦ ИЗМЕНЕНИЯ ---
@@ -441,11 +464,32 @@ function App() {
     // Этот эффект должен зависеть ТОЛЬКО от userId
   }, [userId, refetchSubscriptionStatus]); // Добавляем refetchSubscriptionStatus в зависимости, так как он используется внутри
   // --- КОНЕЦ КАРДИНАЛЬНОГО ИЗМЕНЕНИЯ ---
+  
+  // --- ДОБАВЛЕНО: Периодический опрос статуса подписки ---
+  useEffect(() => {
+    if (!userId) return;
+    
+    console.log('[SubscriptionPoller] Запуск периодического опроса статуса подписки');
+    
+    // Запускаем опрос каждые 10 секунд
+    const intervalId = setInterval(() => {
+      console.log('[SubscriptionPoller] Выполняем периодический запрос статуса...');
+      refetchSubscriptionStatus();
+    }, 10000); // 10 секунд
+    
+    // Очистка при размонтировании
+    return () => {
+      console.log('[SubscriptionPoller] Остановка периодического опроса');
+      clearInterval(intervalId);
+    };
+  }, [userId, refetchSubscriptionStatus]);
+  // --- КОНЕЦ ДОБАВЛЕНИЯ ---
 
   // useEffect для обновления при изменении видимости (остается без изменений)
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
+        console.log('[VisibilityChange] Документ стал видимым, обновляем статус...');
         refetchSubscriptionStatus();
       }
     };
@@ -1316,6 +1360,13 @@ function App() {
       <div style={{ background: '#ffe', color: '#333', padding: 8, marginBottom: 8, fontSize: 12 }}>
         <b>userId:</b> {String(userId)}<br/>
         <b>Статус подписки:</b> {JSON.stringify(subscriptionStatus)}<br/>
+        <b>Последнее обновление:</b> {new Date(lastRefreshTime).toLocaleTimeString()}<br/>
+        <button 
+          onClick={() => refetchSubscriptionStatus()} 
+          style={{ padding: '2px 5px', marginTop: '4px', cursor: 'pointer' }}
+        >
+          Обновить статус
+        </button>
         <b>DEBUG:</b> <pre style={{whiteSpace:'pre-wrap'}}>{JSON.stringify(debugInfo, null, 2)}</pre>
       </div>
       <div className="app-container">

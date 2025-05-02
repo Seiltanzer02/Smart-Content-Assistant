@@ -74,10 +74,51 @@ const SubscriptionWidget: React.FC<{
         if (typeof window.Telegram.WebApp?.openInvoice === 'function') {
           window.Telegram.WebApp.openInvoice(data.invoice_link, async (status) => {
             setIsSubscribing(false);
-            console.log('[SubscriptionWidget] openInvoice callback статус:', status);
+            const timestamp = new Date().toISOString();
+            console.log(`[SubscriptionWidget] [${timestamp}] 💰 openInvoice callback статус: ${status}`);
+            
             if (status === 'paid') {
-              console.log('[SubscriptionWidget] Payment status: paid. Updating status from server...');
-              if (window.Telegram.WebApp?.showPopup) {
+              console.log(`[SubscriptionWidget] [${timestamp}] ✅ Payment status: paid. Обработка успешной оплаты...`);
+              
+              // --- Добавляем усиленный опрос статуса подписки ---
+              // Функция для одного запроса с детальным логированием
+              const checkSubscriptionStatus = async () => {
+                const checkTimestamp = new Date().toISOString();
+                console.log(`[SubscriptionWidget] [${checkTimestamp}] 🔄 Запрашиваем обновление статуса подписки...`);
+                
+                try {
+                  // Вызываем обновление через родительский компонент
+                  onSubscriptionUpdate();
+                  console.log(`[SubscriptionWidget] [${checkTimestamp}] ✓ Запрос на обновление статуса отправлен`);
+                  return true;
+                } catch (err) {
+                  console.error(`[SubscriptionWidget] [${checkTimestamp}] ❌ Ошибка при запросе обновления:`, err);
+                  return false;
+                }
+              };
+
+              // Запускаем первый запрос сразу после оплаты
+              console.log(`[SubscriptionWidget] [${timestamp}] 🚀 Запускаем немедленное обновление статуса`);
+              await checkSubscriptionStatus();
+              
+              // Запускаем серию дополнительных запросов с интервалами
+              const intervals = [1000, 2000, 3000, 5000, 8000]; // интервалы в мс
+              
+              for (let i = 0; i < intervals.length; i++) {
+                console.log(`[SubscriptionWidget] [${new Date().toISOString()}] ⏰ Планируем запрос #${i+1} через ${intervals[i]/1000} сек...`);
+                
+                // Ждем указанный интервал
+                await new Promise(resolve => setTimeout(resolve, intervals[i]));
+                
+                // Выполняем запрос
+                console.log(`[SubscriptionWidget] [${new Date().toISOString()}] 🔄 Выполняем запрос #${i+1}...`);
+                await checkSubscriptionStatus();
+              }
+              
+              console.log(`[SubscriptionWidget] [${new Date().toISOString()}] 🏁 Серия запросов статуса завершена`);
+              // --- Конец усиленного опроса ---
+              
+              if (window?.Telegram?.WebApp?.showPopup) {
                 window.Telegram.WebApp.showPopup({
                   title: 'Успешная оплата',
                   message: 'Подписка активирована! Обновляем статус...',
@@ -85,13 +126,9 @@ const SubscriptionWidget: React.FC<{
                 });
               }
               stopPolling();
-              console.log('[SubscriptionWidget] Вызываем onSubscriptionUpdate для получения реального статуса...');
-              onSubscriptionUpdate();
-            } else if (status === 'failed') {
-              console.log('[SubscriptionWidget] Payment status: failed');
-              setError('Оплата не удалась. Пожалуйста, попробуйте позже.');
-            } else if (status === 'cancelled') {
-              console.log('[SubscriptionWidget] Payment status: cancelled');
+              console.log(`[SubscriptionWidget] [${new Date().toISOString()}] 🔔 Оповещаем пользователя об успешной активации подписки`);
+            } else {
+              console.log(`[SubscriptionWidget] [${timestamp}] ❌ Payment status: ${status}. Оплата не произведена или отменена.`);
             }
           });
         } else {

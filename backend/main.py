@@ -44,6 +44,7 @@ import shutil # Добавляем импорт shutil
 import base64
 import urllib.parse
 from dateutil.relativedelta import relativedelta
+import tempfile  # Добавляем этот импорт
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -3383,13 +3384,26 @@ async def resolve_user_id(request: Request):
 @app.get("/subscription/status")
 async def get_subscription_status(request: Request):
     user_id = request.query_params.get("user_id")
+    # Агрессивный запрет кэширования
     cache_headers = {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
         "Pragma": "no-cache",
         "Expires": "0",
     }
-    debug = {"user_id_from_query": user_id}
+    
+    # Добавляем вывод в стандартный лог
+    print(f"[subscription/status] ЗАПРОС для user_id={user_id}")
+    logger.info(f"[subscription/status] ЗАПРОС для user_id={user_id}")
+    
+    # Расширенная отладочная информация
+    debug = {
+        "user_id_from_query": user_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "request_headers": dict(request.headers)
+    }
+    
     if not user_id:
+        logger.error("[subscription/status] Ошибка: user_id не передан")
         return FastAPIResponse(
             content=json.dumps({
                 "has_subscription": False,
@@ -3400,51 +3414,120 @@ async def get_subscription_status(request: Request):
             media_type="application/json",
             headers=cache_headers
         )
+        
     now = datetime.now(timezone.utc)
     try:
-        # Получаем все записи по user_id
-        result = supabase.table("user_subscription")\
-            .select("*")\
-            .eq("user_id", int(user_id))\
-            .order("end_date", desc=True)\
+        # Формируем полный SQL запрос для явной отладки
+        sql_query = f"""
+        SELECT * FROM user_subscription 
+        WHERE user_id = {int(user_id)} 
+        ORDER BY end_date DESC;
+        """
+        debug["sql_query"] = sql_query
+        
+        # Выполняем запрос к базе
+        result = supabase.table("user_subscription") \
+            .select("*") \
+            .eq("user_id", int(user_id)) \
+            .order("end_date", desc=True) \
             .execute()
+            
+        debug["raw_response"] = str(result)
         debug["db_rows"] = result.data
+        
+        # Логируем результат в стандартный вывод и в логгер
+        print(f"[subscription/status] Найдено {len(result.data)} записей для user_id={user_id}")
+        logger.info(f"[subscription/status] Найдено {len(result.data)} записей для user_id={user_id}")
+        
+        # Берем самую свежую запись
         sub = result.data[0] if result.data else None
-        debug["used_row"] = sub
+        debug["selected_row"] = sub
+        
+        # Значения по умолчанию
         is_active = False
         has_subscription = False
         subscription_end_date = None
-        if sub and sub.get("is_active") and sub.get("end_date"):
-            try:
-                end_date = datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00"))
-                debug["parsed_end_date"] = str(end_date)
-                debug["now"] = str(now)
-                if end_date > now:
-                    is_active = True
-                    has_subscription = True
-                    subscription_end_date = sub["end_date"]
-            except Exception as e:
-                debug["end_date_parse_error"] = str(e)
+        
+        # Проверка статуса подписки
+        if sub:
+            print(f"[subscription/status] Запись найдена: {sub}")
+            logger.info(f"[subscription/status] Запись найдена: {sub}")
+            
+            # Проверяем наличие поля is_active и его значение
+            is_active_field = sub.get("is_active")
+            debug["is_active_field"] = is_active_field
+            
+            # Проверка даты истечения
+            has_valid_end_date = False
+            end_date_str = sub.get("end_date")
+            debug["end_date_str"] = end_date_str
+            
+            if is_active_field is not None and end_date_str:
+                try:
+                    # Парсим строку даты в datetime объект
+                    if "T" in end_date_str:
+                        # Формат ISO с T: 2099-12-31T00:00:00+00:00
+                        end_date = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                    else:
+                        # Простой формат: 2099-12-31
+                        end_date = datetime.fromisoformat(f"{end_date_str}T00:00:00+00:00")
+                        
+                    debug["parsed_end_date"] = end_date.isoformat()
+                    debug["now"] = now.isoformat()
+                    
+                    # Сравниваем даты
+                    if end_date > now:
+                        has_valid_end_date = True
+                        debug["date_comparison"] = "end_date > now"
+                    else:
+                        debug["date_comparison"] = "end_date <= now"
+                except Exception as e:
+                    debug["end_date_parse_error"] = str(e)
+            
+            # Устанавливаем статус активности
+            # Пользователь с подпиской должен иметь is_active=True и end_date в будущем
+            is_active = bool(is_active_field) and has_valid_end_date
+            has_subscription = is_active
+            subscription_end_date = end_date_str if is_active else None
+            
+            # Записываем финальный результат проверки
+            debug["final_is_active"] = is_active
+            debug["final_has_subscription"] = has_subscription
+        else:
+            print(f"[subscription/status] Запись НЕ найдена для user_id={user_id}")
+            logger.info(f"[subscription/status] Запись НЕ найдена для user_id={user_id}")
+        
+        # Формируем ответ
         response = {
             "has_subscription": has_subscription,
             "is_active": is_active,
             "subscription_end_date": subscription_end_date,
             "debug": debug
         }
+        
+        print(f"[subscription/status] ОТВЕТ: has_subscription={has_subscription}, is_active={is_active}")
+        logger.info(f"[subscription/status] ОТВЕТ: has_subscription={has_subscription}, is_active={is_active}")
+        
         return FastAPIResponse(
-            content=json.dumps(response),
+            content=json.dumps(response, default=str),  # default=str для сериализации datetime
             media_type="application/json",
             headers=cache_headers
         )
     except Exception as e:
+        logger.error(f"[subscription/status] ОШИБКА: {str(e)}", exc_info=True)
+        print(f"[subscription/status] ОШИБКА: {str(e)}")
+        
         debug["exception"] = str(e)
+        debug["traceback"] = traceback.format_exc()
+        
         return FastAPIResponse(
             content=json.dumps({
                 "has_subscription": False,
                 "is_active": False,
                 "subscription_end_date": None,
+                "error": str(e),
                 "debug": debug
-            }),
+            }, default=str),
             media_type="application/json",
             headers=cache_headers
         )
