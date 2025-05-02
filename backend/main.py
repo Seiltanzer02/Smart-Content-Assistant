@@ -3382,60 +3382,138 @@ async def resolve_user_id(request: Request):
 
 @app.get("/subscription/status")
 async def get_subscription_status(request: Request):
-    user_id = request.query_params.get("user_id")
+    # Генерируем уникальный ID для этого запроса для логов
+    request_id = str(uuid.uuid4())
+    logger.info(f"[ReqID: {request_id}] Processing /subscription/status request...")
+    
+    user_id_str = request.query_params.get("user_id")
+    logger.info(f"[ReqID: {request_id}] Received user_id (string): '{user_id_str}'")
+    
     cache_headers = {
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Pragma": "no-cache",
         "Expires": "0",
     }
-    debug = {}
-    if not user_id:
+    
+    # Инициализируем переменные по умолчанию
+    has_subscription = False
+    is_active = False
+    subscription_end_date = None
+    response_data = {}
+    error_message = None
+
+    if not user_id_str:
+        error_message = "user_id обязателен"
+        logger.error(f"[ReqID: {request_id}] {error_message}")
+        response_data = {"error": error_message}
+        # УБРАНО ПОЛЕ DEBUG
         return FastAPIResponse(
-            content=json.dumps({"error": "user_id обязателен", "debug": debug}),
+            content=json.dumps(response_data),
+            status_code=400, 
             media_type="application/json",
             headers=cache_headers
         )
-    now = datetime.now(timezone.utc)
+
     try:
-        # Получаем все записи по user_id
+        # Пытаемся преобразовать user_id в int
+        user_id = int(user_id_str)
+        logger.info(f"[ReqID: {request_id}] Converted user_id to int: {user_id}")
+    except ValueError:
+        error_message = "user_id должен быть числом"
+        logger.error(f"[ReqID: {request_id}] {error_message} (получено: '{user_id_str}')")
+        response_data = {"error": error_message}
+        # УБРАНО ПОЛЕ DEBUG
+        return FastAPIResponse(
+            content=json.dumps(response_data),
+            status_code=400,
+            media_type="application/json",
+            headers=cache_headers
+        )
+
+    now = datetime.now(timezone.utc)
+    logger.info(f"[ReqID: {request_id}] Current UTC time: {now}")
+
+    try:
+        logger.info(f"[ReqID: {request_id}] Querying Supabase for user_subscription, user_id={user_id}, ordering by end_date desc...")
+        # Получаем ВСЕ записи по user_id, сортируем по end_date (последняя активная будет первой)
         result = supabase.table("user_subscription")\
-            .select("*")\
-            .eq("user_id", int(user_id))\
+            .select("id, user_id, start_date, end_date, payment_id, is_active, created_at, updated_at")\
+            .eq("user_id", user_id)\
             .order("end_date", desc=True)\
             .execute()
-        debug["requested_user_id"] = user_id
-        debug["db_rows"] = result.data
+
+        logger.info(f"[ReqID: {request_id}] Supabase raw response: count={len(result.data) if result.data else 0}, data={result.data}")
+        
+        # Берем самую последнюю по дате окончания запись, если она есть
         sub = result.data[0] if result.data else None
-        debug["used_row"] = sub
-        is_active = False
-        has_subscription = False
-        subscription_end_date = None
-        if sub and sub.get("is_active") and sub.get("end_date"):
-            try:
-                end_date = datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00"))
-                debug["parsed_end_date"] = str(end_date)
-                debug["now"] = str(now)
-                if end_date > now:
-                    is_active = True
-                    has_subscription = True
-                    subscription_end_date = sub["end_date"]
-            except Exception as e:
-                debug["end_date_parse_error"] = str(e)
-        response = {
+
+        if sub:
+            logger.info(f"[ReqID: {request_id}] Found latest subscription record: {sub}")
+            # Проверяем, активна ли она и не истекла ли
+            db_is_active = sub.get("is_active", False)
+            db_end_date_str = sub.get("end_date")
+            logger.info(f"[ReqID: {request_id}] Record details: db_is_active={db_is_active}, db_end_date_str='{db_end_date_str}'")
+
+            if db_is_active and db_end_date_str:
+                try:
+                    # Парсим дату окончания
+                    end_date = datetime.fromisoformat(db_end_date_str.replace("Z", "+00:00"))
+                    logger.info(f"[ReqID: {request_id}] Parsed end_date: {end_date}")
+                    
+                    # Сравниваем с текущим временем
+                    if end_date > now:
+                        logger.info(f"[ReqID: {request_id}] Subscription is active and end_date is in the future. Setting status to Premium.")
+                        is_active = True
+                        has_subscription = True
+                        subscription_end_date = db_end_date_str
+                    else:
+                        logger.warning(f"[ReqID: {request_id}] Subscription found but end_date is in the past ({end_date} <= {now}). Status remains Free.")
+                        # is_active и has_subscription остаются False
+                except Exception as e:
+                    error_message = f"Ошибка парсинга даты '{db_end_date_str}': {e}"
+                    logger.error(f"[ReqID: {request_id}] {error_message}", exc_info=True)
+                    # Не устанавливаем has_subscription/is_active, оставляем False
+            else:
+                logger.warning(f"[ReqID: {request_id}] Latest subscription record found but is_active={db_is_active} or end_date is missing. Status remains Free.")
+                # is_active и has_subscription остаются False
+        else:
+            logger.info(f"[ReqID: {request_id}] No subscription records found for user_id={user_id}. Status is Free.")
+            # is_active и has_subscription остаются False
+
+        # Формируем ответ ВСЕГДА с обязательными полями
+        response_data = {
             "has_subscription": has_subscription,
-            "subscription_end_date": subscription_end_date,
             "is_active": is_active,
-            "debug": debug
+            "subscription_end_date": subscription_end_date,
         }
+        # --- УБРАНО ПОЛЕ DEBUG ИЗ ОТВЕТА --- 
+
+        logger.info(f"[ReqID: {request_id}] Final response data being sent: {response_data}")
         return FastAPIResponse(
-            content=json.dumps(response),
+            content=json.dumps(response_data),
+            media_type="application/json",
+            headers=cache_headers
+        )
+
+    except APIError as supabase_error:
+        error_message = f"Ошибка Supabase API при получении статуса подписки: {supabase_error.message}"
+        logger.error(f"[ReqID: {request_id}] {error_message}", exc_info=True)
+        response_data = {"error": error_message}
+        # УБРАНО ПОЛЕ DEBUG
+        return FastAPIResponse(
+            content=json.dumps(response_data),
+            status_code=500,
             media_type="application/json",
             headers=cache_headers
         )
     except Exception as e:
-        debug["exception"] = str(e)
+        error_message = f"Непредвиденная ошибка при получении статуса подписки: {str(e)}"
+        logger.error(f"[ReqID: {request_id}] {error_message}", exc_info=True)
+        response_data = {"error": error_message}
+        # УБРАНО ПОЛЕ DEBUG
         return FastAPIResponse(
-            content=json.dumps({"error": str(e), "debug": debug}),
+            content=json.dumps(response_data),
+            status_code=500,
             media_type="application/json",
             headers=cache_headers
         )
