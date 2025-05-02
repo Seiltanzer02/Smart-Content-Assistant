@@ -1444,12 +1444,14 @@ function App() {
         
         {/* Блок подписки */}
         {showSubscription && (
-          <SubscriptionWidget 
-            userId={userId}
-            subscriptionStatus={subscriptionStatus}
-            onSubscriptionUpdate={refetchSubscriptionStatus}
-            isActive={!!(subscriptionStatus?.is_active && subscriptionStatus?.has_subscription)}
-          />
+          <SimpleErrorBoundary>
+            <SubscriptionWidget 
+              userId={userId}
+              subscriptionStatus={subscriptionStatus}
+              onSubscriptionUpdate={refetchSubscriptionStatus}
+              isActive={subscriptionStatus ? !!(subscriptionStatus.is_active && subscriptionStatus.has_subscription) : false}
+            />
+          </SimpleErrorBoundary>
         )}
 
         <main className="app-main">
