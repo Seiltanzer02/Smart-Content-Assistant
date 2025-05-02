@@ -1,69 +1,53 @@
-import React, { useState, useEffect, useRef, SetStateAction, Dispatch, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import '../styles/SubscriptionWidget.css';
-import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice } from '../api/subscription';
-import axios from 'axios';
-import { getUserId } from '../utils/auth';
-import { Button, Box, Typography, CircularProgress, Grid, Alert, Paper, Link } from '@mui/material';
+import { SubscriptionStatus } from '../api/subscription';
+import { Button, Box, Typography, CircularProgress, Paper } from '@mui/material';
 import moment from 'moment';
 
-// API_URL для относительных путей
-const API_URL = '';
+// Константы
+const SUBSCRIPTION_PRICE = 1; // временно 1 Star для теста
+
+// Вспомогательная функция для проверки валидности даты end_date
+const isEndDateValid = (dateStr: string | null | undefined): boolean => {
+  if (!dateStr) return false;
+  
+  try {
+    const endDate = new Date(dateStr);
+    const now = new Date();
+    return !isNaN(endDate.getTime()) && endDate > now;
+  } catch (e) {
+    console.error(`[SubscriptionWidget] Ошибка при проверке даты: ${e}`);
+    return false;
+  }
+};
 
 const SubscriptionWidget: React.FC<{
-  userId: string | null,
-  subscriptionStatus: SubscriptionStatus | null,
-  onSubscriptionUpdate: () => void,
-  isActive?: boolean,
-  onGetPremium?: () => void
-}> = ({ userId, subscriptionStatus, onSubscriptionUpdate, isActive, onGetPremium }) => {
-  console.log('[SubscriptionWidget] 🔄 Монтирование компонента с пропсами:', 
-    {userId, subscriptionStatus, isActive, 
-     has_subscription: subscriptionStatus?.has_subscription,
-     is_active: subscriptionStatus?.is_active,
-     subscription_end_date: subscriptionStatus?.subscription_end_date});
-  
+  userId: string | null;
+  subscriptionStatus: SubscriptionStatus | null;
+  onSubscriptionUpdate: () => void;
+  isActive?: boolean;
+}> = ({ userId, subscriptionStatus, onSubscriptionUpdate }) => {
+  // Основные состояния
   const [error, setError] = useState<string | null>(null);
-  const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
-  const SUBSCRIPTION_PRICE = 1; // временно 1 Star для теста
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshLog, setRefreshLog] = useState<string[]>([]);
   const [lastUpdateTime, setLastUpdateTime] = useState<string>(
     new Date().toLocaleTimeString()
   );
-  
-  // Возвращаем refs
-  const pollIntervalRef = useRef<number | null>(null);
-  const pollTimeoutRef = useRef<number | null>(null);
-  const mountedRef = useRef(true); // Для проверки монтирования/размонтирования
 
-  // ДОБАВЛЕНИЕ: Улучшенное вычисление статуса подписки
+  // Вычисленные состояния
   const [calculatedIsActive, setCalculatedIsActive] = useState<boolean>(false);
-  const [isEndDateValid, setIsEndDateValid] = useState<boolean>(false);
+  const [validEndDate, setValidEndDate] = useState<boolean>(false);
   
-  // Функция проверки валидности даты end_date
-  const checkEndDateValidity = (endDateStr: string | null | undefined): boolean => {
-    if (!endDateStr) return false;
-    
-    try {
-      const endDate = new Date(endDateStr);
-      const now = new Date();
-      
-      // Проверяем, что дата корректна и находится в будущем
-      if (!isNaN(endDate.getTime()) && endDate > now) {
-        console.log(`%c[SubscriptionWidget] ✅ Дата окончания подписки действительна: ${endDateStr}`, 'color:green');
-        return true;
-      } else {
-        console.log(`%c[SubscriptionWidget] ❌ Дата окончания подписки недействительна: ${endDateStr}`, 'color:red');
-        return false;
-      }
-    } catch (e) {
-      console.error(`%c[SubscriptionWidget] 🛑 Ошибка при проверке даты: ${e}`, 'color:red');
-      return false;
-    }
-  };
+  // Состояние UI
+  const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   
-  // Логирование изменений в обновлениях  
+  // Рефы для таймеров и монтирования
+  const mountedRef = useRef(true);
+  const statusIntervalRef = useRef<number | null>(null);
+
+  // Добавление записи в лог обновлений
   const addToRefreshLog = (message: string) => {
     setRefreshLog(prev => {
       const newLog = [`[${new Date().toLocaleTimeString()}] ${message}`, ...prev];
@@ -71,65 +55,56 @@ const SubscriptionWidget: React.FC<{
     });
     setLastUpdateTime(new Date().toLocaleTimeString());
   };
-  
-  // Обновляем вычисляемые значения при изменении subscriptionStatus
+
+  // Обновление вычисленных состояний при изменении данных подписки
   useEffect(() => {
-    if (subscriptionStatus) {
-      console.log('[SubscriptionWidget] 🔄 Обновление статуса на основе новых данных subscriptionStatus:', subscriptionStatus);
-      
-      // Проверяем валидность end_date
-      const endDateValid = checkEndDateValidity(subscriptionStatus.subscription_end_date);
-      setIsEndDateValid(endDateValid);
-      
-      // Вычисляем статус активности по комбинации критериев
-      // Если дата окончания действительна - статус ДОЛЖЕН быть активным
-      const calculated = endDateValid || (subscriptionStatus.is_active && subscriptionStatus.has_subscription);
-      setCalculatedIsActive(calculated);
-      
-      // Логируем результаты
-      addToRefreshLog(`Статус: has_subscription=${subscriptionStatus.has_subscription}, is_active=${subscriptionStatus.is_active}, end_date=${subscriptionStatus.subscription_end_date || 'null'}`);
-      
-      // Выявляем несоответствия
-      if (endDateValid && (!subscriptionStatus.is_active || !subscriptionStatus.has_subscription)) {
-        console.warn(`%c[SubscriptionWidget] ⚠️ Несоответствие статуса: end_date валидна, но is_active=${subscriptionStatus.is_active}, has_subscription=${subscriptionStatus.has_subscription}`, 'color:orange;font-weight:bold');
-        addToRefreshLog(`⚠️ Несоответствие: date_end валидна, но is_active=${subscriptionStatus.is_active}`);
+    try {
+      if (subscriptionStatus) {
+        console.log('[SubscriptionWidget] 🔄 Обработка новых данных subscriptionStatus:', subscriptionStatus);
+        
+        // Проверка валидности end_date
+        const hasValidEndDate = isEndDateValid(subscriptionStatus.subscription_end_date);
+        setValidEndDate(hasValidEndDate);
+        
+        // Расчет статуса активности по всем критериям
+        const isActive = hasValidEndDate || (subscriptionStatus.is_active && subscriptionStatus.has_subscription);
+        setCalculatedIsActive(isActive);
+        
+        // Логирование
+        addToRefreshLog(`Статус: has_sub=${subscriptionStatus.has_subscription}, is_active=${subscriptionStatus.is_active}, end_date=${subscriptionStatus.subscription_end_date || 'null'}`);
+        
+        // Выявление несоответствий
+        if (hasValidEndDate && (!subscriptionStatus.is_active || !subscriptionStatus.has_subscription)) {
+          console.warn('[SubscriptionWidget] ⚠️ Несоответствие: end_date валидна, но статус неактивен');
+          addToRefreshLog(`⚠️ Несоответствие: date_end валидна, но статус неактивен`);
+        }
+      } else {
+        console.log('[SubscriptionWidget] subscriptionStatus отсутствует');
+        setCalculatedIsActive(false);
+        setValidEndDate(false);
       }
+    } catch (err) {
+      console.error('[SubscriptionWidget] Ошибка при обработке данных подписки:', err);
+      setError('Ошибка при обработке данных о подписке');
     }
   }, [subscriptionStatus]);
 
-  // Возвращаем функцию stopPolling
-  const stopPolling = () => {
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-      console.log('[SubscriptionWidget] Polling stopped by stopPolling function');
-    }
-    if (pollTimeoutRef.current) {
-      clearTimeout(pollTimeoutRef.current);
-      pollTimeoutRef.current = null;
-      console.log('[SubscriptionWidget] Polling timeout cleared');
-    }
-  };
-  
-  // Функция для обновления статуса подписки с индикацией загрузки
+  // Функция для обновления статуса подписки
   const refreshSubscriptionStatus = async () => {
     if (!userId || isRefreshing) return;
     
     try {
       console.log('[SubscriptionWidget] 🔄 Запрос принудительного обновления статуса...');
       setIsRefreshing(true);
+      addToRefreshLog('Запрос обновления статуса...');
       
       await onSubscriptionUpdate();
       
-      const successTimestamp = new Date().toLocaleTimeString();
-      setRefreshLog(prev => [`[${successTimestamp}] ✅ Статус успешно обновлен`, ...prev.slice(0, 4)]);
-      console.log('[SubscriptionWidget] ✅ Статус успешно обновлен');
+      addToRefreshLog('✅ Статус успешно обновлен');
     } catch (err) {
       console.error('[SubscriptionWidget] ❌ Ошибка при обновлении статуса:', err);
-      setError('Не удалось обновить статус подписки. Пожалуйста, попробуйте позже.');
-      
-      const errorTimestamp = new Date().toLocaleTimeString();
-      setRefreshLog(prev => [`[${errorTimestamp}] ❌ Ошибка обновления: ${err}`, ...prev.slice(0, 4)]);
+      setError('Не удалось обновить статус подписки');
+      addToRefreshLog(`❌ Ошибка обновления: ${err}`);
     } finally {
       if (mountedRef.current) {
         setIsRefreshing(false);
@@ -137,306 +112,219 @@ const SubscriptionWidget: React.FC<{
     }
   };
 
-  // Принудительно обновляем статус подписки при монтировании
+  // Инициализация компонента и установка интервала для опроса статуса
   useEffect(() => {
-    console.log('[SubscriptionWidget] Инициализация компонента, обновляем статус подписки');
+    console.log('[SubscriptionWidget] Инициализация компонента');
     refreshSubscriptionStatus();
     
-    // Устанавливаем интервал для регулярного опроса статуса подписки
-    const statusInterval = setInterval(() => {
+    // Установка интервала для регулярного опроса статуса
+    statusIntervalRef.current = window.setInterval(() => {
       if (mountedRef.current) {
-        console.log('[SubscriptionWidget] Плановая проверка статуса подписки (интервал)');
+        console.log('[SubscriptionWidget] Плановая проверка статуса');
         onSubscriptionUpdate();
       }
     }, 30000); // Проверка каждые 30 секунд
     
     return () => {
       mountedRef.current = false;
-      clearInterval(statusInterval);
-      console.log('[SubscriptionWidget] Компонент размонтирован, очищаем интервалы');
+      if (statusIntervalRef.current) {
+        clearInterval(statusIntervalRef.current);
+      }
+      console.log('[SubscriptionWidget] Компонент размонтирован');
     };
-  }, [userId]);
+  }, [userId, onSubscriptionUpdate]);
 
-  const handleSubscribeViaMainButton = () => {
-    console.log('[SubscriptionWidget] Нажатие на MainButton для подписки');
-    if (window.Telegram?.WebApp?.showConfirm) {
-      window.Telegram.WebApp.showConfirm(
-        'Вы хотите оформить подписку за ' + SUBSCRIPTION_PRICE + ' Stars?',
-        (confirmed) => {
-          console.log('[SubscriptionWidget] showConfirm ответ:', confirmed);
-          if (confirmed) {
-            handleSubscribe();
+  // Инициализация Telegram WebApp
+  useEffect(() => {
+    try {
+      if (window.Telegram?.WebApp) {
+        window.Telegram.WebApp.ready();
+        
+        if (window.Telegram.WebApp.MainButton) {
+          window.Telegram.WebApp.MainButton.setText(`Подписаться за ${SUBSCRIPTION_PRICE} Stars`);
+          window.Telegram.WebApp.MainButton.color = '#2481cc';
+          window.Telegram.WebApp.MainButton.textColor = '#ffffff';
+          
+          if (calculatedIsActive) {
+            window.Telegram.WebApp.MainButton.hide();
+          } else {
+            window.Telegram.WebApp.MainButton.show();
+            window.Telegram.WebApp.MainButton.onClick(handleSubscribeViaMainButton);
           }
         }
-      );
-    } else {
-      handleSubscribe();
+        
+        if (typeof window.Telegram.WebApp.onEvent === 'function') {
+          window.Telegram.WebApp.onEvent('popup_closed', () => {
+            console.log('[SubscriptionWidget] popup_closed event');
+            onSubscriptionUpdate();
+          });
+          
+          window.Telegram.WebApp.onEvent('invoiceClosed', () => {
+            console.log('[SubscriptionWidget] invoiceClosed event');
+            onSubscriptionUpdate();
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[SubscriptionWidget] Ошибка при инициализации Telegram WebApp:', e);
+    }
+  }, [calculatedIsActive, onSubscriptionUpdate]);
+
+  // Очистка MainButton при размонтировании
+  useEffect(() => {
+    return () => {
+      try {
+        if (window.Telegram?.WebApp?.MainButton && typeof window.Telegram.WebApp.MainButton.offClick === 'function') {
+          window.Telegram.WebApp.MainButton.offClick(handleSubscribeViaMainButton);
+        }
+      } catch (e) {
+        console.error('[SubscriptionWidget] Ошибка при очистке MainButton:', e);
+      }
+    };
+  }, []);
+
+  // Обработчик клика на MainButton
+  const handleSubscribeViaMainButton = () => {
+    try {
+      console.log('[SubscriptionWidget] Нажатие на MainButton для подписки');
+      if (window.Telegram?.WebApp?.showConfirm) {
+        window.Telegram.WebApp.showConfirm(
+          `Вы хотите оформить подписку за ${SUBSCRIPTION_PRICE} Stars?`,
+          (confirmed) => {
+            if (confirmed) {
+              handleSubscribe();
+            }
+          }
+        );
+      } else {
+        handleSubscribe();
+      }
+    } catch (e) {
+      console.error('[SubscriptionWidget] Ошибка при обработке MainButton:', e);
+      setError('Ошибка при обработке кнопки');
     }
   };
 
+  // Обработчик подписки
+  const handleSubscribe = async () => {
+    if (!userId) {
+      setError('Не удалось получить ID пользователя');
+      return;
+    }
+    
+    await handleInvoiceGeneration(userId);
+  };
+
+  // Функция генерации и открытия инвойса для оплаты Stars
   const handleInvoiceGeneration = async (userId: string) => {
-    console.log('[SubscriptionWidget] handleInvoiceGeneration вызван для userId:', userId);
     if (!window.Telegram?.WebApp) {
-      console.error('[SubscriptionWidget] Telegram WebApp не инициализирован!');
-      setError('Не удалось инициализировать Telegram WebApp для оплаты.');
-      setIsSubscribing(false);
+      setError('Не удалось инициализировать Telegram WebApp для оплаты');
       return;
     }
 
     try {
       setIsSubscribing(true);
+      
       const response = await fetch('/generate-stars-invoice-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, amount: 1 })
+        body: JSON.stringify({ user_id: userId, amount: SUBSCRIPTION_PRICE })
       });
+      
       const data = await response.json();
       console.log('[SubscriptionWidget] Ответ от /generate-stars-invoice-link:', data);
+      
       if (data.success && data.invoice_link) {
-        if (typeof window.Telegram.WebApp?.openInvoice === 'function') {
+        if (typeof window.Telegram.WebApp.openInvoice === 'function') {
           window.Telegram.WebApp.openInvoice(data.invoice_link, async (status) => {
             setIsSubscribing(false);
-            const timestamp = new Date().toISOString();
-            console.log(`[SubscriptionWidget] [${timestamp}] 💰 openInvoice callback статус: ${status}`);
+            console.log(`[SubscriptionWidget] openInvoice callback статус: ${status}`);
             
             if (status === 'paid') {
-              console.log(`[SubscriptionWidget] [${timestamp}] ✅ Payment status: paid. Обработка успешной оплаты...`);
+              console.log('[SubscriptionWidget] Платеж успешен, обновляем статус...');
               
-              // --- Добавляем усиленный опрос статуса подписки ---
-              // Функция для одного запроса с детальным логированием
-              const checkSubscriptionStatus = async () => {
-                const checkTimestamp = new Date().toISOString();
-                console.log(`[SubscriptionWidget] [${checkTimestamp}] 🔄 Запрашиваем обновление статуса подписки...`);
-                
-                try {
-                  // Вызываем обновление через родительский компонент
-                  onSubscriptionUpdate();
-                  console.log(`[SubscriptionWidget] [${checkTimestamp}] ✓ Запрос на обновление статуса отправлен`);
-                  return true;
-                } catch (err) {
-                  console.error(`[SubscriptionWidget] [${checkTimestamp}] ❌ Ошибка при запросе обновления:`, err);
-                  return false;
-                }
-              };
-
-              // Запускаем первый запрос сразу после оплаты
-              console.log(`[SubscriptionWidget] [${timestamp}] 🚀 Запускаем немедленное обновление статуса`);
-              await checkSubscriptionStatus();
+              // Серия запросов статуса с интервалами
+              const intervals = [1000, 2000, 3000, 5000, 10000];
               
-              // Запускаем серию дополнительных запросов с интервалами
-              const intervals = [1000, 2000, 3000, 5000, 8000]; // интервалы в мс
+              await onSubscriptionUpdate();
               
-              for (let i = 0; i < intervals.length; i++) {
-                console.log(`[SubscriptionWidget] [${new Date().toISOString()}] ⏰ Планируем запрос #${i+1} через ${intervals[i]/1000} сек...`);
-                
-                // Ждем указанный интервал
-                await new Promise(resolve => setTimeout(resolve, intervals[i]));
-                
-                // Выполняем запрос
-                console.log(`[SubscriptionWidget] [${new Date().toISOString()}] 🔄 Выполняем запрос #${i+1}...`);
-                await checkSubscriptionStatus();
+              for (const interval of intervals) {
+                await new Promise(resolve => setTimeout(resolve, interval));
+                await onSubscriptionUpdate();
               }
               
-              console.log(`[SubscriptionWidget] [${new Date().toISOString()}] 🏁 Серия запросов статуса завершена`);
-              // --- Конец усиленного опроса ---
-              
-              if (window?.Telegram?.WebApp?.showPopup) {
+              if (window.Telegram.WebApp.showPopup) {
                 window.Telegram.WebApp.showPopup({
                   title: 'Успешная оплата',
                   message: 'Подписка активирована! Обновляем статус...',
                   buttons: [{ type: 'ok' }]
                 });
               }
-              stopPolling();
-              console.log(`[SubscriptionWidget] [${new Date().toISOString()}] 🔔 Оповещаем пользователя об успешной активации подписки`);
-            } else {
-              console.log(`[SubscriptionWidget] [${timestamp}] ❌ Payment status: ${status}. Оплата не произведена или отменена.`);
             }
           });
         } else {
-          setError('Оплата через Stars недоступна в этом окружении.');
+          setError('Оплата через Stars недоступна в этом окружении');
           setIsSubscribing(false);
-          console.error('[SubscriptionWidget] openInvoice не поддерживается');
         }
       } else {
         setError(data.error || 'Ошибка генерации инвойса');
         setIsSubscribing(false);
-        console.error('[SubscriptionWidget] Ошибка генерации инвойса:', data.error);
       }
     } catch (error) {
       setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
       setIsSubscribing(false);
-      console.error('[SubscriptionWidget] Ошибка в handleInvoiceGeneration:', error);
     }
   };
 
-  const handleSubscribe = async () => {
-    console.log('[SubscriptionWidget] handleSubscribe вызван. userId:', userId);
-    if (!userId) {
-      setError('Не удалось получить корректный ID пользователя');
-      console.error('[SubscriptionWidget] Нет userId при попытке подписки');
-      return;
-    }
-    await handleInvoiceGeneration(userId);
-  };
-
-  useEffect(() => {
-    console.log('[SubscriptionWidget] useEffect инициализации Telegram WebApp. isActive:', isActive);
-    if (window.Telegram?.WebApp) {
-      window.Telegram.WebApp.ready();
-      if (window.Telegram.WebApp.MainButton) {
-        window.Telegram.WebApp.MainButton.setText('Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars');
-        window.Telegram.WebApp.MainButton.color = '#2481cc';
-        window.Telegram.WebApp.MainButton.textColor = '#ffffff';
-        if (isActive) {
-          window.Telegram.WebApp.MainButton.hide();
-        }
-        window.Telegram.WebApp.MainButton.onClick(handleSubscribeViaMainButton);
-        console.log('[SubscriptionWidget] MainButton настроен');
-      }
-      if (typeof window.Telegram.WebApp.onEvent === 'function') {
-        window.Telegram.WebApp.onEvent('popup_closed', () => {
-          console.log('[SubscriptionWidget] popup_closed event');
-          onSubscriptionUpdate();
-        });
-        window.Telegram.WebApp.onEvent('invoiceClosed', () => {
-          console.log('[SubscriptionWidget] invoiceClosed event');
-          onSubscriptionUpdate();
-        });
-      }
-    }
-  }, [isActive, onSubscriptionUpdate]);
-
-  // Добавляем useEffect для остановки polling при подтверждении Premium статуса
-  useEffect(() => {
-    console.log('[SubscriptionWidget] useEffect: изменение subscriptionStatus:', subscriptionStatus);
-    if (subscriptionStatus?.has_subscription) {
-      console.log('[SubscriptionWidget] Premium status confirmed. Stopping polling.');
-      stopPolling();
-    }
-  }, [subscriptionStatus]); // Зависимость от статуса подписки
-
-  // Возвращаем очистку таймеров при размонтировании
-  useEffect(() => {
-    return () => {
-      console.log('[SubscriptionWidget] Размонтирование компонента. Очищаю MainButton и polling');
-      if (window.Telegram?.WebApp?.MainButton && typeof window.Telegram.WebApp.MainButton.offClick === 'function') {
-        window.Telegram.WebApp.MainButton.offClick(handleSubscribeViaMainButton);
-      }
-      stopPolling(); // Очищаем таймеры при размонтировании
-    };
-  }, [isActive, onSubscriptionUpdate]);
-
-  if (!userId) {
-    console.error('[SubscriptionWidget] Нет userId!');
-    return (
-      <div className="subscription-widget error">
-        <p>Ошибка: Не удалось получить корректный ID пользователя из Telegram.<br/>Пожалуйста, перезапустите мини-приложение из Telegram.<br/>Если ошибка повторяется — попробуйте очистить кэш Telegram или обновить приложение.</p>
-        <button onClick={() => window.Telegram?.WebApp?.close?.()}>Закрыть мини-приложение</button>
-        <pre style={{textAlign: 'left', fontSize: '12px', marginTop: '16px', color: '#888', background: '#222', padding: '8px', borderRadius: '6px'}}>
-          userId: {userId}
-        </pre>
-      </div>
-    );
-  }
-
-  if (error) {
-    console.error('[SubscriptionWidget] Ошибка:', error);
-    return (
-      <div className="subscription-widget error">
-        <p>Ошибка: {error}</p>
-        <button onClick={refreshSubscriptionStatus}>Попробовать снова</button>
-        <pre style={{textAlign: 'left', fontSize: '12px', marginTop: '16px', color: '#888', background: '#222', padding: '8px', borderRadius: '6px'}}>
-          userId: {userId}
-        </pre>
-      </div>
-    );
-  }
-
-  if (!subscriptionStatus) {
-    console.log('[SubscriptionWidget] subscriptionStatus отсутствует, показываю лоадер');
-    return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
-  }
-
-  // Новый простой рендеринг
-  console.log('[SubscriptionWidget] Рендеринг. isPremium:', calculatedIsActive, 'subscriptionStatus:', subscriptionStatus);
-
-  // ======= ПОДРОБНОЕ ЛОГИРОВАНИЕ В РЕНДЕРЕ =======
-  console.log('[SubscriptionWidget][RENDER] userId:', userId);
-  console.log('[SubscriptionWidget][RENDER] subscriptionStatus:', subscriptionStatus);
-  console.log('[SubscriptionWidget][RENDER] isPremium:', calculatedIsActive);
-  console.log('[SubscriptionWidget][RENDER] error:', error);
-  console.log('[SubscriptionWidget][RENDER] isSubscribing:', isSubscribing);
-  console.log('[SubscriptionWidget][RENDER] showPaymentInfo:', showPaymentInfo);
-  console.log('[SubscriptionWidget][RENDER] pollIntervalRef:', pollIntervalRef.current);
-  console.log('[SubscriptionWidget][RENDER] pollTimeoutRef:', pollTimeoutRef.current);
-
-  // ======= ЛОГИРУЕМ ВСЕ ПРОПСЫ И СОСТОЯНИЯ =======
-  console.log('[SubscriptionWidget][RENDER] props:', { userId, subscriptionStatus, isActive });
-  console.log('[SubscriptionWidget][RENDER] state:', { error, showPaymentInfo, isSubscribing });
-
-  // ======= ОБЕРТКА ДЛЯ onSubscriptionUpdate С ЛОГАМИ =======
-  const onSubscriptionUpdateWithLog = () => {
-    console.log('[SubscriptionWidget] Вызов onSubscriptionUpdateWithLog');
-    setIsRefreshing(true);
-    onSubscriptionUpdate();
-    
-    // Сбрасываем состояние загрузки через некоторое время
-    setTimeout(() => {
-      if (mountedRef.current) {
-        setIsRefreshing(false);
-        setLastUpdateTime(new Date().toLocaleTimeString());
-      }
-    }, 1500);
-  };
-
-  // ======= ЛОГИРУЕМ useEffect'ы =======
-  useEffect(() => {
-    console.log('[SubscriptionWidget][useEffect] Монтирование/обновление компонента. userId:', userId, 'subscriptionStatus:', subscriptionStatus, 'isActive:', isActive);
-  }, [userId, subscriptionStatus, isActive]);
-
-  useEffect(() => {
-    console.log('[SubscriptionWidget][useEffect] error изменился:', error);
-  }, [error]);
-
-  useEffect(() => {
-    console.log('[SubscriptionWidget][useEffect] isSubscribing изменился:', isSubscribing);
-  }, [isSubscribing]);
-
-  useEffect(() => {
-    console.log('[SubscriptionWidget][useEffect] showPaymentInfo изменился:', showPaymentInfo);
-  }, [showPaymentInfo]);
-
-  // Переключает отображение информации об оплате
+  // Переключатель отображения информации об оплате
   const togglePaymentInfo = () => setShowPaymentInfo(!showPaymentInfo);
 
-  const handleGetPremium = () => {
-    if (onGetPremium) {
-      onGetPremium();
-    }
-  };
-
-  const renderSubscriptionStatus = () => {
-    if (!subscriptionStatus) return null;
-    
-    // УЛУЧШЕНИЕ: Используем вычисленный статус вместо непосредственного значения из API
-    const isActive = calculatedIsActive; 
-    
+  // Обработка отсутствия userId
+  if (!userId) {
     return (
-      <Box sx={{ mt: 2 }}>
-        <Typography variant="h6" align="center" gutterBottom sx={{ color: isActive ? 'success.main' : 'text.primary' }}>
-          {isActive ? 'Премиум активен' : 'Бесплатный план'}
+      <Paper elevation={3} sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+        <Typography variant="h6" align="center" color="error" gutterBottom>
+          Ошибка идентификации пользователя
         </Typography>
-        
-        {isActive && subscriptionStatus?.subscription_end_date && (
-          <Typography variant="body2" align="center" color="text.secondary">
-            Активен до: {moment(subscriptionStatus.subscription_end_date).format('DD.MM.YYYY')}
-          </Typography>
-        )}
-      </Box>
+        <Typography>
+          Не удалось получить корректный ID пользователя. Пожалуйста, перезапустите приложение.
+        </Typography>
+      </Paper>
     );
-  };
+  }
 
+  // Обработка ошибок
+  if (error) {
+    return (
+      <Paper elevation={3} sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+        <Typography variant="h6" align="center" color="error" gutterBottom>
+          Ошибка
+        </Typography>
+        <Typography paragraph>{error}</Typography>
+        <Button 
+          variant="contained" 
+          onClick={refreshSubscriptionStatus} 
+          disabled={isRefreshing}
+        >
+          {isRefreshing ? 'Обновление...' : 'Попробовать снова'}
+        </Button>
+      </Paper>
+    );
+  }
+
+  // Отображение загрузки
+  if (!subscriptionStatus) {
+    return (
+      <Paper elevation={3} sx={{ p: 3, mb: 3, borderRadius: 2, textAlign: 'center' }}>
+        <CircularProgress size={40} />
+        <Typography variant="body1" sx={{ mt: 2 }}>
+          Загрузка информации о подписке...
+        </Typography>
+      </Paper>
+    );
+  }
+
+  // Основной рендеринг
   return (
     <Paper elevation={3} sx={{ p: 3, mb: 3, borderRadius: 2 }}>
       <Typography variant="h5" align="center" gutterBottom>
@@ -444,74 +332,103 @@ const SubscriptionWidget: React.FC<{
       </Typography>
       
       {calculatedIsActive ? (
+        // Отображение для активной подписки
         <>
           <div className="status-badge premium">Премиум</div>
+          <Box sx={{ mt: 2, mb: 2 }}>
+            <Typography variant="h6" align="center" color="success.main" gutterBottom>
+              Премиум активен
+            </Typography>
+            
+            {subscriptionStatus.subscription_end_date && (
+              <Typography variant="body2" align="center" color="text.secondary">
+                Активен до: {moment(subscriptionStatus.subscription_end_date).format('DD.MM.YYYY')}
+              </Typography>
+            )}
+          </Box>
+          
           <div className="subscription-active">
-            <h4>Активная подписка</h4>
-            <p>
+            <Typography variant="body1" paragraph>
               У вас активирована премиум-подписка, открывающая полный доступ к функциям:
-            </p>
+            </Typography>
             <ul>
               <li>Неограниченный анализ каналов</li>
               <li>Расширенная генерация идей</li>
               <li>Доступ к базе изображений</li>
               <li>Планирование и автоматизация публикаций</li>
             </ul>
-            
-            {subscriptionStatus?.subscription_end_date && (
-              <p>
-                <strong>Действует до:</strong> {new Date(subscriptionStatus.subscription_end_date).toLocaleDateString()}
-              </p>
-            )}
           </div>
         </>
       ) : (
+        // Отображение для неактивной подписки
         <>
           <div className="status-badge free">Бесплатный план</div>
+          <Box sx={{ mt: 2, mb: 2 }}>
+            <Typography variant="h6" align="center" gutterBottom>
+              Бесплатный план
+            </Typography>
+          </Box>
+          
           <div className="subscription-free">
-            <h4>Ограниченный доступ</h4>
-            <p>Используйте премиум-подписку для полного доступа ко всем функциям приложения.</p>
+            <Typography variant="body1" paragraph>
+              Используйте премиум-подписку для полного доступа ко всем функциям приложения.
+            </Typography>
             
             <div className="subscription-offer">
-              <h4>Премиум-подписка включает:</h4>
+              <Typography variant="h6" gutterBottom>
+                Премиум-подписка включает:
+              </Typography>
               <ul>
                 <li>Неограниченный анализ каналов</li>
                 <li>Расширенную генерацию идей</li>
                 <li>Доступ к базе изображений</li>
                 <li>Планирование и автоматизацию публикаций</li>
               </ul>
-              <button 
-                className="subscribe-button" 
+              
+              <Button 
+                variant="contained" 
+                color="primary"
                 onClick={handleSubscribe}
                 disabled={isSubscribing}
+                fullWidth
+                sx={{ mt: 2, mb: 1 }}
               >
                 {isSubscribing ? 'Создание платежа...' : 'Получить премиум доступ'} 
-              </button>
+              </Button>
               
-              <p style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
-                <a href="#" onClick={togglePaymentInfo}>
-                  {showPaymentInfo ? 'Скрыть информацию об оплате' : 'Как оплатить?'}
-                </a>
-              </p>
+              <Typography 
+                variant="body2" 
+                sx={{ mt: 1, textAlign: 'center', cursor: 'pointer', color: 'primary.main' }}
+                onClick={togglePaymentInfo}
+              >
+                {showPaymentInfo ? 'Скрыть информацию об оплате' : 'Как оплатить?'}
+              </Typography>
               
               {showPaymentInfo && (
-                <div className="payment-info">
-                  <h4>Информация об оплате</h4>
-                  <p>Оплата производится через Telegram Stars:</p>
+                <Box sx={{ mt: 2, p: 2, bgcolor: 'background.paper', borderRadius: 1 }}>
+                  <Typography variant="h6" gutterBottom>
+                    Информация об оплате
+                  </Typography>
+                  <Typography variant="body2" paragraph>
+                    Оплата производится через Telegram Stars:
+                  </Typography>
                   <ol>
                     <li>Нажмите на кнопку "Получить премиум доступ"</li>
                     <li>Подтвердите платеж в Telegram</li>
                     <li>После успешной оплаты премиум-статус будет активирован</li>
                   </ol>
-                  <p>
-                    <small>
-                      * Стоимость подписки: {SUBSCRIPTION_PRICE} Telegram Stars
-                    </small>
-                  </p>
-                  <button className="cancel-button" onClick={togglePaymentInfo}>
+                  <Typography variant="caption" display="block">
+                    * Стоимость подписки: {SUBSCRIPTION_PRICE} Telegram Stars
+                  </Typography>
+                  <Button 
+                    variant="outlined" 
+                    size="small" 
+                    onClick={togglePaymentInfo} 
+                    sx={{ mt: 1 }}
+                  >
                     Закрыть
-                  </button>
-                </div>
+                  </Button>
+                </Box>
               )}
             </div>
           </div>
@@ -519,82 +436,64 @@ const SubscriptionWidget: React.FC<{
       )}
       
       {/* Блок для ручного обновления статуса */}
-      <div className="refresh-status">
-        <button
-          className="refresh-button"
+      <Box sx={{ mt: 3, textAlign: 'center' }}>
+        <Button
+          variant="outlined"
+          size="small"
           onClick={refreshSubscriptionStatus}
           disabled={isRefreshing}
+          startIcon={isRefreshing ? <CircularProgress size={16} /> : null}
         >
           {isRefreshing ? 'Обновление...' : 'Обновить статус'}
-        </button>
-        <small>Последнее обновление: {lastUpdateTime}</small>
-      </div>
+        </Button>
+        <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+          Последнее обновление: {lastUpdateTime}
+        </Typography>
+      </Box>
       
       {/* Отладочная информация о подписке */}
-      <div className="debug-info">
+      <Box sx={{ mt: 3 }}>
         <details>
-          <summary>Информация о подписке (для отладки)</summary>
-          <pre>
-{JSON.stringify({
-  userId: userId,
-  subscriptionStatus: subscriptionStatus ? {
-    has_subscription: subscriptionStatus.has_subscription,
-    is_active: subscriptionStatus.is_active,
-    subscription_end_date: subscriptionStatus.subscription_end_date
-  } : null,
-  calculatedIsActive: calculatedIsActive,
-  isEndDateValid: isEndDateValid,
-  lastUpdateTime: lastUpdateTime
-}, null, 2)}
-          </pre>
-          
-          <h5>Журнал обновлений:</h5>
-          <pre>
-{refreshLog.join('\n')}
-          </pre>
-        </details>
-      </div>
-      
-      {/* DEBUG-панель - показываем только в разработке */}
-      {window.location.hostname === 'localhost' && (
-        <Box sx={{ mt: 4, p: 2, bgcolor: '#FFFDE7', borderRadius: 1, fontSize: '0.75rem' }}>
-          <Typography variant="caption" display="block" sx={{ mb: 1, fontWeight: 'bold' }}>
-            userId: {userId}
-          </Typography>
-          <Typography variant="caption" display="block" sx={{ mb: 1 }}>
-            Статус подписки: {JSON.stringify(subscriptionStatus)}
-          </Typography>
-          <Typography variant="caption" display="block" sx={{ mb: 1 }}>
-            calculatedIsActive: {calculatedIsActive.toString()}
-          </Typography>
-          <Typography variant="caption" display="block" sx={{ mb: 1 }}>
-            isEndDateValid: {isEndDateValid.toString()}
-          </Typography>
-          <Typography variant="caption" display="block" sx={{ mb: 1 }}>
-            Последнее обновление: {lastUpdateTime}
-          </Typography>
-          <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
-            Обновить статус <Button size="small" onClick={refreshSubscriptionStatus} variant="outlined">DEBUG:</Button>
-          </Typography>
-          <Box 
-            sx={{ 
-              mt: 1, 
-              p: 1, 
-              bgcolor: '#ECEFF1', 
-              borderRadius: 1, 
-              maxHeight: '100px', 
-              overflow: 'auto',
-              fontSize: '0.7rem'
-            }}
-          >
-            {refreshLog.map((log, i) => (
-              <Typography key={i} variant="caption" display="block" sx={{ fontSize: '0.7rem' }}>
-                {log}
-              </Typography>
-            ))}
+          <summary style={{ cursor: 'pointer' }}>
+            <Typography variant="caption">Информация о подписке (для отладки)</Typography>
+          </summary>
+          <Box component="pre" sx={{ 
+            mt: 2, 
+            p: 1, 
+            fontSize: '0.7rem',
+            bgcolor: '#f5f5f5',
+            borderRadius: 1,
+            overflowX: 'auto'
+          }}>
+            {JSON.stringify({
+              userId,
+              subscriptionStatus: {
+                has_subscription: subscriptionStatus.has_subscription,
+                is_active: subscriptionStatus.is_active,
+                subscription_end_date: subscriptionStatus.subscription_end_date
+              },
+              calculatedIsActive,
+              validEndDate,
+              lastUpdateTime
+            }, null, 2)}
           </Box>
-        </Box>
-      )}
+          
+          <Typography variant="caption" sx={{ mt: 2, display: 'block' }}>
+            Журнал обновлений:
+          </Typography>
+          <Box component="pre" sx={{ 
+            mt: 1, 
+            p: 1, 
+            fontSize: '0.7rem',
+            bgcolor: '#f5f5f5',
+            borderRadius: 1,
+            maxHeight: '150px',
+            overflowY: 'auto'
+          }}>
+            {refreshLog.join('\n')}
+          </Box>
+        </details>
+      </Box>
     </Paper>
   );
 };
