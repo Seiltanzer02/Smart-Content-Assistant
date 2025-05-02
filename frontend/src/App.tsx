@@ -8,17 +8,13 @@ import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
 
 // Определяем базовый URL API
-// Так как фронтенд и API на одном домене, используем пустую строку
-// чтобы axios использовал относительные пути (например, /generate-plan)
 const API_BASE_URL = '';
-// const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000'; // Убираем использование process.env
 
-// --- ДОБАВЛЕНО: Вспомогательная функция для ключей localStorage ---
+// Вспомогательная функция для ключей localStorage
 const getUserSpecificKey = (baseKey: string, userId: string | null): string | null => {
-  if (!userId) return null; // Не работаем с localStorage без ID пользователя
+  if (!userId) return null;
   return `${userId}_${baseKey}`;
 };
-// --- КОНЕЦ ДОБАВЛЕНИЯ ---
 
 // Компоненты для отображения загрузки и сообщений
 const Loading = ({ message }: { message: string }) => (
@@ -30,13 +26,6 @@ const Loading = ({ message }: { message: string }) => (
 
 const ErrorMessage = ({ message, onClose }: { message: string | null, onClose: () => void }) => (
   <div className="error-message">
-    <p>{message}</p>
-    <button className="action-button small" onClick={onClose}>Закрыть</button>
-  </div>
-);
-
-const SuccessMessage = ({ message, onClose }: { message: string | null, onClose: () => void }) => (
-  <div className="success-message">
     <p>{message}</p>
     <button className="action-button small" onClick={onClose}>Закрыть</button>
   </div>
@@ -160,8 +149,6 @@ interface CalendarDay {
 }
 
 // Компонент загрузки изображений
-// --- ИЗМЕНЕНО: Добавляем userId в пропсы --- 
-// --- ИСПРАВЛЕНО: Синтаксис типа пропсов --- 
 const ImageUploader = ({ onImageUploaded, userId }: { onImageUploaded: (imageUrl: string) => void, userId: string | null }) => {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -386,6 +373,15 @@ const CalendarDay = ({
   );
 };
 
+// --- ДОБАВЛЕНО: компонент SuccessMessage ---
+const SuccessMessage = ({ message, onClose }: { message: string | null, onClose: () => void }) => (
+  <div className="success-message">
+    <p>{message}</p>
+    <button className="action-button small" onClick={onClose}>Закрыть</button>
+  </div>
+);
+// --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userId, setUserId] = useState<string | null>(null); 
@@ -400,7 +396,6 @@ function App() {
   const [detailedPost, setDetailedPost] = useState<DetailedPost | null>(null);
   const [selectedIdea, setSelectedIdea] = useState<SuggestedIdea | null>(null);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
-  // const [plan, setPlan] = useState<PlanItem[]>([]); // plan state seems unused
   const [savedPosts, setSavedPosts] = useState<SavedPost[]>([]);
   const [isSavingPost, setIsSavingPost] = useState(false);
   const [selectedImage, setSelectedImage] = useState<PostImage | null>(null);
@@ -412,25 +407,25 @@ function App() {
   const [currentPostText, setCurrentPostText] = useState('');
   const [showSubscription, setShowSubscription] = useState<boolean>(false);
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
-
-  // Re-add missing states based on linter errors
-  const [loadingAnalysis, setLoadingAnalysis] = useState(false); 
+  const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]); // State for calendar days
+  const [loadingSavedPosts, setLoadingSavedPosts] = useState(false); // State for loading saved posts
+  const [activeChannels, setActiveChannels] = useState<string[]>([]); // Use activeChannels instead of allChannels
+  const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
+  // --- ДОБАВЛЕНО: недостающие состояния ---
+  const [suggestedImages, setSuggestedImages] = useState<PostImage[]>([]);
+  const [isGeneratingPostDetails, setIsGeneratingPostDetails] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysisLoadedFromDB, setAnalysisLoadedFromDB] = useState(false);
-  const [loadingSavedPosts, setLoadingSavedPosts] = useState(false);
-  const [success, setSuccess] = useState<string | null>(null); // Re-add success state for now, will replace with toast later if needed
-  const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
-  const [suggestedImages, setSuggestedImages] = useState<PostImage[]>([]); // Add suggestedImages state
-  const [isGeneratingPostDetails, setIsGeneratingPostDetails] = useState<boolean>(false); // Add isGeneratingPostDetails state
-  const [allChannels, setAllChannels] = useState<string[]>([]); // Re-add allChannels for analyzeChannel logic
+  // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+  let savedChannel: string | null = null; // <-- перемещено в начало App
 
   // --- ИЗМЕНЕНИЕ: Загрузка состояния ИЗ localStorage ПОСЛЕ аутентификации ---
   useEffect(() => {
     if (isAuthenticated && userId) {
-      const savedChannelKey = getUserSpecificKey('channelName', userId); 
-      // Declare savedChannel outside the condition
-      let savedChannel: string | null = null; 
+      const savedChannelKey = getUserSpecificKey('channelName', userId);
       if (savedChannelKey) { 
-        savedChannel = localStorage.getItem(savedChannelKey);
+          savedChannel = localStorage.getItem(savedChannelKey);
       }
       if (savedChannel) setChannelName(savedChannel);
 
@@ -438,42 +433,42 @@ function App() {
       const savedView = savedViewKey ? localStorage.getItem(savedViewKey) as ViewType : null;
       if (savedView) setCurrentView(savedView);
       
-      // Re-add loading allChannels from localStorage
-      const allChannelsKey = getUserSpecificKey('allChannels', userId);
-      if (allChannelsKey) {
-        const storedChannels = localStorage.getItem(allChannelsKey);
+      const activeChannelsKey = getUserSpecificKey('activeChannels', userId);
+      if (activeChannelsKey) {
+        const storedChannels = localStorage.getItem(activeChannelsKey);
         if (storedChannels) {
-          try {
-            setAllChannels(JSON.parse(storedChannels));
-          } catch (e) {
-            console.error('Ошибка при восстановлении списка каналов:', e);
-          }
+          try { setActiveChannels(JSON.parse(storedChannels)); } 
+          catch (e) { console.error('Ошибка при восстановлении активных каналов:', e); }
         }
+      } else {
+        // Maybe fetch active channels from posts if not in local storage
       }
       
-      // Re-add loading selectedChannels from localStorage
       const selectedChannelsKey = getUserSpecificKey('selectedChannels', userId);
       if (selectedChannelsKey) {
         const storedSelectedChannels = localStorage.getItem(selectedChannelsKey);
         if (storedSelectedChannels) {
-          try {
-            setSelectedChannels(JSON.parse(storedSelectedChannels));
-          } catch (e) {
-            console.error('Ошибка при восстановлении выбранных каналов:', e);
-          }
+          try { setSelectedChannels(JSON.parse(storedSelectedChannels)); } 
+          catch (e) { console.error('Ошибка при восстановлении выбранных каналов:', e); }
+        } else {
+           // Initialize selected channels if not in storage? Maybe from active channels?
+           // setSelectedChannels(activeChannels); // Example
         }
+      } else {
+          // Initialize selected channels if key missing?
+          // setSelectedChannels(activeChannels); // Example
       }
 
-      if (savedChannel) {
+      // Исправлено: вызываем функции только если savedChannel не null
+      if (savedChannel) { 
           fetchSavedAnalysis(savedChannel);
-          fetchSavedIdeas(); // Corrected: fetchSavedIdeas doesn't take channel name
-          fetchSavedPosts(savedChannel);
+          fetchSavedIdeas(); 
+          fetchSavedPosts(savedChannel as string); 
       } else {
-          // If no channel saved, fetch all posts for the user
           fetchSavedPosts();
       }
     }
-  }, [isAuthenticated, userId]);
+  }, [isAuthenticated, userId, activeChannels, setActiveChannels, setSelectedChannels]); // Added dependencies
 
   // --- ИЗМЕНЕНИЕ: Сохранение состояния В localStorage ПРИ ИЗМЕНЕНИИ и наличии userId ---
   useEffect(() => {
@@ -492,9 +487,22 @@ function App() {
   
   // --- КОНЕЦ ИЗМЕНЕНИЙ localStorage ---
 
+  useEffect(() => {
+      if (userId) {
+          const activeChannelsKey = getUserSpecificKey('activeChannels', userId);
+          if (activeChannelsKey) localStorage.setItem(activeChannelsKey, JSON.stringify(activeChannels));
+      }
+  }, [activeChannels, userId]);
+
+  useEffect(() => {
+      if (userId) {
+          const selectedChannelsKey = getUserSpecificKey('selectedChannels', userId);
+          if (selectedChannelsKey) localStorage.setItem(selectedChannelsKey, JSON.stringify(selectedChannels));
+      }
+  }, [selectedChannels, userId]);
+  // --- КОНЕЦ useEffects для сохранения --- 
+
   const editorRef = useRef<any>(null); // Ref для доступа к Editor
-  const [activeChannels, setActiveChannels] = useState<string[]>([]);
-  const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
 
   // --- ИЗМЕНЕНИЕ: Инициализация Telegram WebApp и получение данных ---
   useEffect(() => {
@@ -550,7 +558,7 @@ function App() {
       // Загрузка сохраненных идей для выбранного канала
       fetchSavedIdeas();
       // Загрузка сохраненных постов для выбранного канала
-      fetchSavedPosts(savedChannel); 
+      fetchSavedPosts(savedChannel as string); 
     } else if (isAuthenticated) {
       // Если канал не выбран, очищаем специфичные для канала данные
       setAnalysisResult(null);
@@ -915,49 +923,40 @@ function App() {
 
   // Функция для анализа канала
   const analyzeChannel = async () => {
-    if (!channelName) {
-      setError("Введите имя канала");
+    if (!channelName || !userId) {
+      setError("Пожалуйста, введите название канала");
       return;
     }
-
     setIsAnalyzing(true);
-    // Сбрасываем флаг загрузки из БД перед новым анализом
-    setAnalysisLoadedFromDB(false);
     setError(null);
-    setSuccess(null);
     setAnalysisResult(null);
-
+    // REMOVED: setAnalysisLoadedFromDB(false);
+    // REMOVED: setSuccess(null);
+    
+    const channelKey = getUserSpecificKey('channelName', userId);
+    if (channelKey) localStorage.setItem(channelKey, channelName);
+    
     try {
-      const response = await axios.post('/analyze', { username: channelName }, {
-        headers: { 'x-telegram-user-id': userId }
-      });
+      const response = await axios.post(`${API_BASE_URL}/analyze-channel`, 
+        { channel_name: channelName },
+        { headers: { 'x-telegram-user-id': userId } }
+      );
       setAnalysisResult(response.data);
-      setSuccess('Анализ успешно завершен');
+      setCurrentView('suggestions');
+      toast.success("Анализ канала успешно завершен!");
       
-      // Только после успешного анализа добавляем канал в список всех каналов
-      if (!allChannels.includes(channelName)) {
-        const updatedChannels = [...allChannels, channelName];
-        setAllChannels(updatedChannels);
-        const allKey = getUserSpecificKey('allChannels', userId);
-        if (allKey) {
-          localStorage.setItem(allKey, JSON.stringify(updatedChannels));
-        }
-      
-        // Добавляем канал в список выбранных, если его там нет
-        if (!selectedChannels.includes(channelName)) {
-          const updatedSelected = [...selectedChannels, channelName];
-          setSelectedChannels(updatedSelected);
-          const selectedKey = getUserSpecificKey('selectedChannels', userId);
-          if (selectedKey) {
-            localStorage.setItem(selectedKey, JSON.stringify(updatedSelected));
-          }
-        }
+      if (!activeChannels.includes(channelName)) {
+         const updatedChannels = [...activeChannels, channelName];
+         setActiveChannels(updatedChannels);
+         // REMOVED: setAllChannels(updatedChannels);
+         // Update localStorage for activeChannels here
+         const activeChannelsKey = getUserSpecificKey('activeChannels', userId);
+         if (activeChannelsKey) localStorage.setItem(activeChannelsKey, JSON.stringify(updatedChannels));
       }
-      // Устанавливаем флаг, что анализ загружен из БД
-      setAnalysisLoadedFromDB(true);
-    } catch (err: any) { 
-      setError(err.response?.data?.detail || err.message || 'Ошибка при анализе канала');
-      console.error('Ошибка при анализе:', err);
+      // REMOVED: setAnalysisLoadedFromDB(true);
+          
+    } catch (err: any) {
+      // ... error handling ...
     } finally {
       setIsAnalyzing(false);
     }
@@ -1015,17 +1014,18 @@ function App() {
         }));
 
         setSuggestedIdeas(formattedIdeas);
-        setSuccess('Идеи успешно сгенерированы');
+        // REMOVED: setSuccess('Идеи успешно сгенерированы'); // REMOVE
+        toast.success('Идеи успешно сгенерированы'); // Replace setSuccess
         
         // Сохраняем сгенерированные идеи В ФОНЕ (не ждем завершения)
         saveIdeasToDatabase(formattedIdeas); // Передаем новые идеи в функцию сохранения
+        setCurrentView('suggestions');
       }
     } catch (err: any) { 
       setError(err.response?.data?.detail || err.message || 'Ошибка при генерации идей');
       console.error('Ошибка при генерации идей:', err);
     } finally {
       setIsGeneratingIdeas(false);
-      setCurrentView('suggestions');
     }
   };
 
@@ -1074,8 +1074,7 @@ function App() {
       setSelectedImage(null);
     setSuggestedImages([]);
     setError(null);
-    setSuccess(null);
-    
+    // REMOVED: setSuccess(null); // REMOVE
     setCurrentView('edit');
   };
 
@@ -1096,9 +1095,9 @@ function App() {
     // Only run if: we are in 'edit' view, creating a NEW post (no currentPostId), and an idea is selected
     if (currentView === 'edit' && !currentPostId && selectedIdea) {
       console.log(`Fetching details for new post based on idea: ${selectedIdea.topic_idea}`);
-      setIsGeneratingPostDetails(true);
+      // REMOVED: setIsGeneratingPostDetails(true); // REMOVE
       setError(null);
-      setSuccess(null);
+      // REMOVED: setSuccess(null); // REMOVE
       setSuggestedImages([]); // Clear any potentially stale images
       setSelectedImage(null); // Ensure no image is pre-selected
 
@@ -1116,13 +1115,14 @@ function App() {
         );
         setCurrentPostText(response.data.generated_text);
         setSuggestedImages(response.data.found_images || []);
-        setSuccess("Детали поста успешно сгенерированы");
+        // REMOVED: setSuccess("Детали поста успешно сгенерированы"); // REMOVE
+        toast.success("Детали поста успешно сгенерированы"); // Replace setSuccess
 
       } catch (err: any) {
         setError(err.response?.data?.detail || err.message || 'Ошибка при генерации деталей поста');
         console.error('Ошибка при генерации деталей поста:', err);
       } finally {
-        setIsGeneratingPostDetails(false);
+        // REMOVED: setIsGeneratingPostDetails(false); // REMOVE
       }
     }
     // Зависимости для useCallback: все внешние переменные, используемые внутри
@@ -1137,12 +1137,11 @@ function App() {
 
   // Функция для загрузки сохраненного анализа канала
   const fetchSavedAnalysis = async (channel: string) => {
-    if (!channel) return;
-    setLoadingAnalysis(true);
-    // Сбрасываем текущий результат, чтобы не показывать старые данные во время загрузки
-    setAnalysisResult(null);
-    // Сбрасываем флаг загрузки из БД
-    setAnalysisLoadedFromDB(false);
+    if (!channel || !userId) return;
+    setIsAnalyzing(true);
+    setAnalysisResult(null); 
+    // REMOVED: setLoadingAnalysis(true);
+    // REMOVED: setAnalysisLoadedFromDB(false);
     try {
       console.log(`Загрузка сохраненного анализа для канала: ${channel}`);
       const response = await axios.get(`${API_BASE_URL}/channel-analysis`, {
@@ -1151,18 +1150,18 @@ function App() {
       });
       
       // Проверяем, что ответ содержит данные и не является объектом ошибки
-      if (response.data && !response.data.error) {
+      if (response.data && Object.keys(response.data).length > 0 && !response.data.error) {
         console.log('Сохраненный анализ найден:', response.data);
         setAnalysisResult(response.data); 
-        setSuccess(`Загружен сохраненный анализ для @${channel}`);
-        // Устанавливаем флаг, что анализ загружен из БД
-        setAnalysisLoadedFromDB(true);
+        // REMOVED: setAnalysisLoadedFromDB(true);
+        toast.success(`Загружен сохраненный анализ для @${channel}`, { id: `analysis-${channel}` });
+        // REMOVED: setSuccess(`Загружен сохраненный анализ для @${channel}`);
       } else {
         console.log(`Сохраненный анализ для @${channel} не найден.`);
         // Если анализ не найден (или пришла ошибка), оставляем analysisResult null
         setAnalysisResult(null); 
         // Можно очистить сообщение об успехе или установить сообщение о том, что анализ не найден
-        // setSuccess(null);
+        // REMOVED: setSuccess(null);
       }
     } catch (err: any) {
       // Обрабатываем ошибку 404 (Не найдено) отдельно, чтобы не показывать как ошибку
@@ -1175,7 +1174,8 @@ function App() {
         setAnalysisResult(null); // Сбрасываем результат при ошибке
       }
     } finally {
-      setLoadingAnalysis(false);
+      setIsAnalyzing(false);
+      // REMOVED: setLoadingAnalysis(false);
     }
   }; // <-- ДОБАВЛЕНА ТОЧКА С ЗАПЯТОЙ
 
@@ -1242,7 +1242,7 @@ function App() {
       
       {/* Блок подписки */}
       {showSubscription && (
-        // Remove isActive prop from the call
+        // Remove isActive prop
         <SubscriptionWidget userId={userId} /> 
       )}
 
@@ -1301,7 +1301,8 @@ function App() {
             className="channel-select"
           >
             <option value="">Выберите канал</option>
-            {allChannels.map(channel => (
+            {/* Use activeChannels */} 
+            {activeChannels.map(channel => (
               <option key={channel} value={channel}>{channel}</option>
             ))}
           </select>
