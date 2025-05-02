@@ -17,12 +17,13 @@ const SubscriptionWidget: React.FC<{
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 1; // временно 1 Star для теста
   const [isSubscribing, setIsSubscribing] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdateTime, setLastUpdateTime] = useState<string | null>(null);
+  
   // Возвращаем refs
   const pollIntervalRef = useRef<number | null>(null);
   const pollTimeoutRef = useRef<number | null>(null);
-
-  // Получаем актуальный статус подписки из props
-  const hasActiveSubscription = subscriptionStatus?.is_active === true;
+  const mountedRef = useRef(true); // Для проверки монтирования/размонтирования
 
   // Возвращаем функцию stopPolling
   const stopPolling = () => {
@@ -37,6 +38,50 @@ const SubscriptionWidget: React.FC<{
       console.log('[SubscriptionWidget] Polling timeout cleared');
     }
   };
+  
+  // Функция для обновления статуса подписки с индикацией загрузки
+  const refreshSubscriptionStatus = async () => {
+    if (!userId || isRefreshing) return;
+    
+    try {
+      console.log('[SubscriptionWidget] Запускаем ручное обновление статуса подписки...');
+      setIsRefreshing(true);
+      
+      await onSubscriptionUpdate();
+      
+      // Сохраняем время последнего обновления
+      const now = new Date();
+      setLastUpdateTime(now.toLocaleTimeString());
+      console.log('[SubscriptionWidget] Статус подписки успешно обновлен');
+    } catch (error) {
+      console.error('[SubscriptionWidget] Ошибка при обновлении статуса:', error);
+      setError('Не удалось обновить статус подписки');
+    } finally {
+      if (mountedRef.current) {
+        setIsRefreshing(false);
+      }
+    }
+  };
+
+  // Принудительно обновляем статус подписки при монтировании
+  useEffect(() => {
+    console.log('[SubscriptionWidget] Инициализация компонента, обновляем статус подписки');
+    refreshSubscriptionStatus();
+    
+    // Устанавливаем интервал для регулярного опроса статуса подписки
+    const statusInterval = setInterval(() => {
+      if (mountedRef.current) {
+        console.log('[SubscriptionWidget] Плановая проверка статуса подписки (интервал)');
+        onSubscriptionUpdate();
+      }
+    }, 30000); // Проверка каждые 30 секунд
+    
+    return () => {
+      mountedRef.current = false;
+      clearInterval(statusInterval);
+      console.log('[SubscriptionWidget] Компонент размонтирован, очищаем интервалы');
+    };
+  }, [userId]);
 
   const handleSubscribeViaMainButton = () => {
     console.log('[SubscriptionWidget] Нажатие на MainButton для подписки');
@@ -162,25 +207,16 @@ const SubscriptionWidget: React.FC<{
   };
 
   useEffect(() => {
-    console.log('[SubscriptionWidget] useEffect инициализации Telegram WebApp. hasActiveSubscription:', hasActiveSubscription);
+    console.log('[SubscriptionWidget] useEffect инициализации Telegram WebApp. isActive:', isActive);
     if (window.Telegram?.WebApp) {
       window.Telegram.WebApp.ready();
       if (window.Telegram.WebApp.MainButton) {
         window.Telegram.WebApp.MainButton.setText('Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars');
         window.Telegram.WebApp.MainButton.color = '#2481cc';
         window.Telegram.WebApp.MainButton.textColor = '#ffffff';
-        
-        // Используем hasActiveSubscription вместо isActive для управления кнопкой
-        if (hasActiveSubscription) {
-          // Если подписка активна, скрываем кнопку подписки
+        if (isActive) {
           window.Telegram.WebApp.MainButton.hide();
-          console.log('[SubscriptionWidget] Подписка активна, MainButton скрыт');
-        } else {
-          // Если подписка не активна, показываем кнопку
-          window.Telegram.WebApp.MainButton.show();
-          console.log('[SubscriptionWidget] Подписка не активна, MainButton показан');
         }
-        
         window.Telegram.WebApp.MainButton.onClick(handleSubscribeViaMainButton);
         console.log('[SubscriptionWidget] MainButton настроен');
       }
@@ -195,14 +231,13 @@ const SubscriptionWidget: React.FC<{
         });
       }
     }
-  }, [hasActiveSubscription, onSubscriptionUpdate]); // Заменяем isActive на hasActiveSubscription
+  }, [isActive, onSubscriptionUpdate]);
 
   // Добавляем useEffect для остановки polling при подтверждении Premium статуса
   useEffect(() => {
     console.log('[SubscriptionWidget] useEffect: изменение subscriptionStatus:', subscriptionStatus);
-    // Проверяем именно is_active вместо has_subscription
-    if (subscriptionStatus?.is_active) {
-      console.log('[SubscriptionWidget] Premium status confirmed (is_active=true). Stopping polling.');
+    if (subscriptionStatus?.has_subscription) {
+      console.log('[SubscriptionWidget] Premium status confirmed. Stopping polling.');
       stopPolling();
     }
   }, [subscriptionStatus]); // Зависимость от статуса подписки
@@ -216,7 +251,7 @@ const SubscriptionWidget: React.FC<{
       }
       stopPolling(); // Очищаем таймеры при размонтировании
     };
-  }, [hasActiveSubscription, onSubscriptionUpdate]);
+  }, [isActive, onSubscriptionUpdate]);
 
   if (!userId) {
     console.error('[SubscriptionWidget] Нет userId!');
@@ -269,12 +304,17 @@ const SubscriptionWidget: React.FC<{
 
   // ======= ОБЕРТКА ДЛЯ onSubscriptionUpdate С ЛОГАМИ =======
   const onSubscriptionUpdateWithLog = () => {
-    try {
-      console.log('[SubscriptionWidget][onSubscriptionUpdate] Вызван onSubscriptionUpdate');
-      onSubscriptionUpdate();
-    } catch (e) {
-      console.error('[SubscriptionWidget][onSubscriptionUpdate] Ошибка:', e);
-    }
+    console.log('[SubscriptionWidget] Вызов onSubscriptionUpdateWithLog');
+    setIsRefreshing(true);
+    onSubscriptionUpdate();
+    
+    // Сбрасываем состояние загрузки через некоторое время
+    setTimeout(() => {
+      if (mountedRef.current) {
+        setIsRefreshing(false);
+        setLastUpdateTime(new Date().toLocaleTimeString());
+      }
+    }, 1500);
   };
 
   // ======= ЛОГИРУЕМ useEffect'ы =======
@@ -302,6 +342,18 @@ const SubscriptionWidget: React.FC<{
           <div className="status-badge premium">Premium</div>
           <p>У вас активная подписка{subscriptionStatus.subscription_end_date ? ` до ${new Date(subscriptionStatus.subscription_end_date).toLocaleDateString()}` : ''}</p>
           <p>Все функции доступны без ограничений</p>
+          
+          {/* Добавляем кнопку обновления статуса */}
+          <div className="refresh-status">
+            <button 
+              className="refresh-button"
+              onClick={refreshSubscriptionStatus}
+              disabled={isRefreshing}
+            >
+              {isRefreshing ? 'Обновление...' : 'Обновить статус'}
+            </button>
+            {lastUpdateTime && <small>Последнее обновление: {lastUpdateTime}</small>}
+          </div>
         </div>
       ) : (
         <div className="subscription-free">
@@ -347,10 +399,30 @@ const SubscriptionWidget: React.FC<{
               >
                 {isSubscribing ? 'Создание платежа...' : 'Подписаться за 70 Stars'}
               </button>
+              
+              {/* Добавляем кнопку ручного обновления */}
+              <div className="refresh-status">
+                <button 
+                  className="refresh-button"
+                  onClick={refreshSubscriptionStatus}
+                  disabled={isRefreshing}
+                >
+                  {isRefreshing ? 'Обновление...' : 'Обновить статус'}
+                </button>
+                {lastUpdateTime && <small>Последнее обновление: {lastUpdateTime}</small>}
+              </div>
             </div>
           )}
         </div>
       )}
+      
+      {/* Отладочная информация */}
+      <div className="debug-info" style={{fontSize: '10px', color: '#888', marginTop: '20px', textAlign: 'left'}}>
+        <details>
+          <summary>Debug info</summary>
+          <pre>{JSON.stringify({userId, subscriptionStatus, lastUpdateTime}, null, 2)}</pre>
+        </details>
+      </div>
     </div>
   );
 };

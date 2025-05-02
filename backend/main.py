@@ -3453,26 +3453,57 @@ async def get_subscription_status(request: Request):
             print(f"[subscription/status] Запись найдена: {sub}")
             logger.info(f"[subscription/status] Запись найдена: {sub}")
             
-            # МАКСИМАЛЬНО УПРОЩЕННАЯ ЛОГИКА:
-            # 1. Если в базе is_active = TRUE, считаем что подписка активна
-            # 2. Дополнительные проверки на дату и другие поля пока отключаем
-            
-            # Получаем значение is_active из записи
+            # Получаем поле is_active (теперь его значение не так критично)
             is_active_field = sub.get("is_active")
             debug["is_active_field"] = is_active_field
             
-            # Приводим к bool, чтобы избежать проблем с типами
-            is_active = bool(is_active_field)
-            
-            # Если активна, то считаем что подписка есть
-            has_subscription = is_active
-            
-            # Получаем дату окончания только для отображения
+            # Проверка даты истечения
+            has_valid_end_date = False
             end_date_str = sub.get("end_date")
             debug["end_date_str"] = end_date_str
             
-            # Возвращаем как есть, без дополнительных проверок
-            subscription_end_date = end_date_str if is_active else None
+            if end_date_str:
+                try:
+                    # Парсим строку даты в datetime объект
+                    if "T" in end_date_str:
+                        # Формат ISO с T: 2099-12-31T00:00:00+00:00
+                        end_date = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                    else:
+                        # Простой формат: 2099-12-31
+                        end_date = datetime.fromisoformat(f"{end_date_str}T00:00:00+00:00")
+                        
+                    debug["parsed_end_date"] = end_date.isoformat()
+                    debug["now"] = now.isoformat()
+                    
+                    # Сравниваем даты
+                    if end_date > now:
+                        has_valid_end_date = True
+                        debug["date_comparison"] = "end_date > now (подписка активна!)"
+                    else:
+                        debug["date_comparison"] = "end_date <= now (подписка истекла)"
+                except Exception as e:
+                    debug["end_date_parse_error"] = str(e)
+            
+            # ВАЖНОЕ ИЗМЕНЕНИЕ: Теперь подписка считается активной, если end_date в будущем
+            # Пользователь с подпиской должен иметь end_date в будущем (is_active игнорируем)
+            is_active = has_valid_end_date
+            has_subscription = has_valid_end_date
+            subscription_end_date = end_date_str if has_valid_end_date else None
+            
+            # Если is_active в базе FALSE, но end_date валидна - принудительно обновляем запись в базе
+            if has_valid_end_date and is_active_field is False:
+                try:
+                    print(f"[subscription/status] Исправляем is_active=False на TRUE для user_id={user_id} (т.к. end_date в будущем)")
+                    logger.info(f"[subscription/status] Исправляем is_active=False на TRUE для user_id={user_id} (т.к. end_date в будущем)")
+                    
+                    # Обновляем запись в базе
+                    supabase.table("user_subscription").update({
+                        "is_active": True
+                    }).eq("id", sub.get("id")).execute()
+                    
+                    debug["fixed_is_active"] = True
+                except Exception as e:
+                    debug["fix_is_active_error"] = str(e)
             
             # Записываем финальный результат проверки
             debug["final_is_active"] = is_active

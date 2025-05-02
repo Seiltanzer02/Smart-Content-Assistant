@@ -26,7 +26,8 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
     // Добавляем случайный параметр для предотвращения кэширования
     const timestamp = Date.now();
     const randomParam = Math.random().toString(36).substring(2, 10);
-    const url = `/subscription/status?user_id=${userId}&t=${timestamp}&nocache=${randomParam}`;
+    // Дополнительный параметр skipCache для форсирования обновления
+    const url = `/subscription/status?user_id=${userId}&t=${timestamp}&nocache=${randomParam}&skipCache=true&_=${Math.random()}`;
     
     console.log(`%c[getUserSubscriptionStatus] 📡 GET ${url}`, 'color:purple');
     console.log(`%c[getUserSubscriptionStatus] ⏱️ Время запроса: ${new Date().toISOString()}`, 'color:gray');
@@ -38,6 +39,10 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
         'Pragma': 'no-cache',
         'Expires': '0',
         'X-Requested-With': 'XMLHttpRequest'
+      },
+      // Принудительно игнорируем кэш браузера
+      params: {
+        _: new Date().getTime() // Дополнительное предотвращение кэширования
       }
     });
     
@@ -56,8 +61,16 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
       console.error(`%c[getUserSubscriptionStatus] 🛑 Ошибка API: ${response.data.error}`, 'color:red');
     }
     
-    // Деструктурируем нужные поля из ответа с проверкой
-    const { has_subscription = false, is_active = false, subscription_end_date = null } = response.data;
+    // Деструктурируем нужные поля из ответа с проверкой и принудительным приведением к нужным типам
+    const has_subscription = typeof response.data.has_subscription === 'boolean' 
+      ? response.data.has_subscription 
+      : false;
+      
+    const is_active = typeof response.data.is_active === 'boolean' 
+      ? response.data.is_active 
+      : false;
+      
+    const subscription_end_date = response.data.subscription_end_date || null;
     
     // Подробно логируем извлеченные поля
     console.log(`%c[getUserSubscriptionStatus] 📊 ДАННЫЕ ПОДПИСКИ:`, 'color:blue');
@@ -65,15 +78,37 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
     console.log(`  • is_active: ${is_active} (${typeof is_active})`);
     console.log(`  • subscription_end_date: ${subscription_end_date}`);
     
+    // Радикальное решение: если end_date в будущем, то подписка активна независимо от is_active
+    let computedIsActive = is_active;
+    if (subscription_end_date) {
+      const endDate = new Date(subscription_end_date);
+      const now = new Date();
+      if (endDate > now) {
+        computedIsActive = true;
+        console.log(`%c[getUserSubscriptionStatus] 🔄 Обнаружена активная подписка: end_date в будущем`, 'color:green;font-weight:bold');
+      }
+    }
+    
     // Возвращаем объект с проверенными полями
     const result = { 
-      has_subscription: !!has_subscription, // Приводим к boolean
-      is_active: !!is_active, // Приводим к boolean
+      has_subscription: !!computedIsActive, // Приводим к boolean и используем вычисленное значение
+      is_active: !!computedIsActive, // Приводим к boolean и используем вычисленное значение
       subscription_end_date 
     };
     
     console.log(`%c[getUserSubscriptionStatus] ↩️ Возвращаемый результат:`, 'color:blue;font-weight:bold');
     console.log(result);
+    
+    // Альтернативное решение - сохраняем результат в localStorage
+    try {
+      localStorage.setItem('subscription_status', JSON.stringify({
+        ...result,
+        timestamp: Date.now()
+      }));
+      console.log(`%c[getUserSubscriptionStatus] 💾 Статус подписки сохранен в localStorage`, 'color:gray');
+    } catch (e) {
+      console.warn(`%c[getUserSubscriptionStatus] ⚠️ Не удалось сохранить статус в localStorage:`, 'color:orange', e);
+    }
     
     return result;
   } catch (error) {
@@ -87,6 +122,26 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
     } else {
       console.error(`%c[getUserSubscriptionStatus] ⚠️ Неизвестная ошибка:`, 'color:red');
       console.error(error);
+    }
+    
+    // Попытка восстановить данные из localStorage в случае ошибки сети
+    try {
+      const savedStatus = localStorage.getItem('subscription_status');
+      if (savedStatus) {
+        const parsed = JSON.parse(savedStatus);
+        const savedTimestamp = parsed.timestamp || 0;
+        // Используем кэшированные данные только если они не старше 1 часа
+        if (Date.now() - savedTimestamp < 3600000) {
+          console.log(`%c[getUserSubscriptionStatus] 🔄 Используем сохраненный статус подписки из localStorage`, 'color:orange;font-weight:bold');
+          return {
+            has_subscription: !!parsed.has_subscription,
+            is_active: !!parsed.is_active,
+            subscription_end_date: parsed.subscription_end_date
+          };
+        }
+      }
+    } catch (e) {
+      console.warn(`%c[getUserSubscriptionStatus] ⚠️ Не удалось восстановить статус из localStorage:`, 'color:orange', e);
     }
     
     // Выбрасываем исходную ошибку для обработки выше

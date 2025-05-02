@@ -397,6 +397,7 @@ function App() {
   const [debugInfo, setDebugInfo] = useState<any>(null); // Оставляем debug
   const [lastRefreshTime, setLastRefreshTime] = useState<string>(new Date().toISOString());
   const previousStatusRef = useRef<SubscriptionStatus | null>(null);
+  const [error, setError] = useState<string | null>(null); // Убедимся что это состояние существует
 
   // --- УДАЛЕНЫ: Константы для localStorage ---
   // const PREMIUM_TIMESTAMP_KEY = 'lastPremiumConfirmedAt';
@@ -407,6 +408,7 @@ function App() {
     if (!userId) return;
     console.log('[refetchSubscriptionStatus] Запрос статуса с API...');
     try {
+      // Добавляем флаг форсированного обновления для борьбы с кэшированием
       const fetchedStatus = await getUserSubscriptionStatus(userId);
       console.log('[refetchSubscriptionStatus] Получен статус:', fetchedStatus);
       
@@ -419,6 +421,33 @@ function App() {
         if (previousStatusRef.current.has_subscription !== fetchedStatus.has_subscription ||
             previousStatusRef.current.is_active !== fetchedStatus.is_active) {
           console.log('[refetchSubscriptionStatus] ВНИМАНИЕ! Статус изменился!');
+          
+          // Если новый статус показывает активную подписку, запускаем серию дополнительных проверок
+          if (fetchedStatus.has_subscription && fetchedStatus.is_active) {
+            console.log('[refetchSubscriptionStatus] Обнаружена активная подписка! Запускаем дополнительные проверки...');
+            
+            // Запускаем серию повторных запросов с разными интервалами для гарантии
+            const verificationIntervals = [1000, 2000, 3000, 5000];
+            
+            for (const interval of verificationIntervals) {
+              setTimeout(async () => {
+                console.log(`[refetchSubscriptionStatus] Дополнительная проверка через ${interval}ms...`);
+                try {
+                  const verificationStatus = await getUserSubscriptionStatus(userId);
+                  console.log(`[refetchSubscriptionStatus] Результат дополнительной проверки:`, verificationStatus);
+                  
+                  // Обновляем состояние только если подписка все еще активна
+                  if (verificationStatus.has_subscription && verificationStatus.is_active) {
+                    setSubscriptionStatus(verificationStatus);
+                    previousStatusRef.current = verificationStatus;
+                    console.log('[refetchSubscriptionStatus] Подтверждено: подписка активна!');
+                  }
+                } catch (e) {
+                  console.error(`[refetchSubscriptionStatus] Ошибка при дополнительной проверке:`, e);
+                }
+              }, interval);
+            }
+          }
         }
       }
       
@@ -441,14 +470,15 @@ function App() {
         is_active: fetchedStatus.is_active,
         subscription_end_date: fetchedStatus.subscription_end_date
       });
-       console.log('[refetchSubscriptionStatus] Статус обновлен в стейте.');
-    } catch (error) {
-      console.error('[refetchSubscriptionStatus] Ошибка при получении статуса:', error);
-      setDebugInfo({ error: String(error) }); // Показываем ошибку в debug
-      // НЕ сбрасываем статус при ошибке, чтобы сохранить предыдущий статус
-      // setSubscriptionStatus(null);
+      
+      // Возвращаем полученный статус для использования в Promise chain
+      return fetchedStatus;
+    } catch (err) {
+      console.error('[refetchSubscriptionStatus] Ошибка запроса статуса:', err);
+      setError('Не удалось получить статус подписки'); // Используем существующий setError вместо setFetchError
+      return null;
     }
-  }, [userId]); // Зависит только от userId
+  }, [userId]);
   // --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
   // --- КАРДИНАЛЬНО ИЗМЕНЕНО: useEffect для ПЕРВОНАЧАЛЬНОЙ загрузки ---
@@ -510,7 +540,6 @@ function App() {
   const [selectedIdea, setSelectedIdea] = useState<SuggestedIdea | null>(null);
   const [isGeneratingPostDetails, setIsGeneratingPostDetails] = useState<boolean>(false);
   const [suggestedImages, setSuggestedImages] = useState<PostImage[]>([]);
-  const [error, setError] = useState<string | null>(null); 
   const [success, setSuccess] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<PostImage | null>(null);
 
@@ -1339,47 +1368,6 @@ function App() {
     }
   }; // <-- ДОБАВЛЕНА ТОЧКА С ЗАПЯТОЙ
 
-  // Добавляем компонент для отображения статуса подписки и отладочной информации
-  const SubscriptionStatusDisplay = ({ status, lastRefreshTime, debugInfo, onRefresh }: { 
-    status: SubscriptionStatus | null, 
-    lastRefreshTime: string,
-    debugInfo: any,
-    onRefresh: () => void
-  }) => {
-    // Определяем отображаемый статус подписки на основе поля is_active
-    const displayStatus = status ? 
-      (status.is_active ? "Премиум" : "Бесплатный план") : 
-      "Загрузка...";
-    
-    // Форматируем время для отображения
-    const formattedTime = new Date(lastRefreshTime).toLocaleTimeString();
-    
-    return (
-      <div style={{ padding: '10px', backgroundColor: '#f8f9fa', borderRadius: '5px', marginBottom: '10px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <strong>Статус подписки:</strong> {displayStatus}
-            <div style={{ fontSize: '12px', color: '#6c757d' }}>
-              Последнее обновление: {formattedTime}
-            </div>
-          </div>
-          <button onClick={onRefresh} style={{ padding: '5px 10px', backgroundColor: '#2481cc', color: 'white', border: 'none', borderRadius: '3px', cursor: 'pointer' }}>
-            Обновить статус
-          </button>
-        </div>
-        
-        {debugInfo && (
-          <div style={{ marginTop: '10px', fontSize: '12px', color: '#6c757d' }}>
-            <strong>DEBUG:</strong> 
-            <pre style={{ whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: '100px' }}>
-              {JSON.stringify(debugInfo, null, 2)}
-            </pre>
-          </div>
-        )}
-      </div>
-    );
-  };
-  
   // Компонент загрузки
   if (loading) {
     return (
@@ -1398,691 +1386,667 @@ function App() {
   // Основной интерфейс
   return (
     <SimpleErrorBoundary>
+      <div style={{ background: '#ffe', color: '#333', padding: 8, marginBottom: 8, fontSize: 12 }}>
+        <b>userId:</b> {String(userId)}<br/>
+        <b>Статус подписки:</b> {JSON.stringify(subscriptionStatus)}<br/>
+        <b>Последнее обновление:</b> {new Date(lastRefreshTime).toLocaleTimeString()}<br/>
+        <button 
+          onClick={() => refetchSubscriptionStatus()} 
+          style={{ padding: '2px 5px', marginTop: '4px', cursor: 'pointer' }}
+        >
+          Обновить статус
+        </button>
+        <b>DEBUG:</b> <pre style={{whiteSpace:'pre-wrap'}}>{JSON.stringify(debugInfo, null, 2)}</pre>
+      </div>
       <div className="app-container">
-        {loading ? (
-          <div className="loading-container">
-            <Loading message="Загрузка приложения..." />
+        <header className="app-header">
+          <div className="logo">Smart Content Assistant</div>
+          <div className="header-icons">
+            {/* Кнопка для управления подпиской */}
+            <button
+              className="icon-button"
+              onClick={() => setShowSubscription(!showSubscription)}
+              title="Управление подпиской"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+              </svg>
+            </button>
+            <button
+              className={`icon-button ${currentView === 'analyze' ? 'active' : ''}`}
+              onClick={() => {setCurrentView('analyze'); setShowSubscription(false);}}
+              title="Анализ канала"
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M10 20H14V4H10V20ZM4 20H8V12H4V20ZM16 9V20H20V9H16Z" fill="currentColor"/>
+              </svg>
+            </button>
+            <button
+              className={`icon-button ${currentView === 'suggestions' ? 'active' : ''}`}
+              onClick={() => {setCurrentView('suggestions'); setShowSubscription(false);}}
+              title="Идеи для постов"
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 22C6.477 22 2 17.523 2 12C2 6.477 6.477 2 12 2C17.523 2 22 6.477 22 12C22 17.523 17.523 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 7H13V9H11V7ZM11 11H13V17H11V11Z" fill="currentColor"/>
+              </svg>
+            </button>
+            <button
+              className={`icon-button ${currentView === 'calendar' ? 'active' : ''}`}
+              onClick={() => {setCurrentView('calendar'); setShowSubscription(false);}}
+              title="Календарь"
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M17 3H21C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H7V1H9V3H15V1H17V3ZM4 9V19H20V9H4ZM4 5V7H20V5H4ZM6 11H8V13H6V11ZM10 11H12V13H10V11ZM14 11H16V13H14V11Z" fill="currentColor"/>
+              </svg>
+            </button>
           </div>
-        ) : !isAuthenticated ? (
-          <div className="auth-container">
-            <div className="auth-content">
-              <h1>Content Helper Bot</h1>
-              <p>Для использования приложения необходимо авторизоваться.</p>
-              <button onClick={() => {
-                if (window.Telegram?.WebApp) {
-                  const initData = window.Telegram.WebApp.initData;
-                  if (initData) {
-                    // Try to extract user ID from initData
-                    fetch('/resolve-user-id', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ initData })
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                      if (data.user_id) {
-                        console.log('Получен user_id:', data.user_id);
-                        handleAuthSuccess(data.user_id);
-                      } else {
-                        console.error('Ошибка извлечения user_id:', data.error);
-                        setError(`Не удалось авторизоваться: ${data.error || 'неизвестная ошибка'}`);
-                      }
-                    })
-                    .catch(err => {
-                      console.error('Ошибка запроса для извлечения user_id:', err);
-                      setError(`Ошибка авторизации: ${err.message}`);
-                    });
-                  } else {
-                    setError('Ошибка авторизации: initData не найден');
-                  }
-                } else {
-                  // Для тестирования без Telegram WebApp
-                  const testUserId = window.prompt('Введите тестовый User ID для разработки:');
-                  if (testUserId) {
-                    handleAuthSuccess(testUserId);
-                  }
+        </header>
+        
+        {/* Блок подписки */}
+        {showSubscription && (
+          <SubscriptionWidget 
+            userId={userId}
+            subscriptionStatus={subscriptionStatus}
+            onSubscriptionUpdate={refetchSubscriptionStatus}
+            isActive={!!(subscriptionStatus?.is_active && subscriptionStatus?.has_subscription)}
+          />
+        )}
+
+        <main className="app-main">
+          {/* Сообщения об ошибках и успешном выполнении */}
+          {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
+          {success && <SuccessMessage message={success} onClose={() => setSuccess(null)} />}
+
+          {/* Навигация */}
+      <div className="navigation-buttons">
+            <button 
+              onClick={() => setCurrentView('analyze')} 
+              className={`action-button ${currentView === 'analyze' ? 'active' : ''}`}
+            >
+              Анализ
+            </button>
+            <button 
+              onClick={() => {
+                setCurrentView('suggestions');
+                if (suggestedIdeas.length === 0) {
+                  fetchSavedIdeas();
                 }
-              }}>Авторизоваться</button>
-            </div>
-          </div>
-        ) : (
-          <div className="content-container">
-            <div className="header">
-              <h1>Smart Content Assistant</h1>
-              
-              {/* Добавляем компонент отображения статуса подписки */}
-              <SubscriptionStatusDisplay 
-                status={subscriptionStatus} 
-                lastRefreshTime={lastRefreshTime}
-                debugInfo={debugInfo}
-                onRefresh={refetchSubscriptionStatus}
-              />
-              
-              <div className="tabs">
-                <button
-                  className={currentView === 'analyze' ? 'active' : ''}
-                  onClick={() => setCurrentView('analyze')}
-                >
-                  <span className="icon">★</span>
-                </button>
-                <button
-                  className={currentView === 'suggestions' ? 'active' : ''}
-                  onClick={() => setCurrentView('suggestions')}
-                  disabled={!analysisResult}
-                >
-                  <span className="icon">📊</span>
-                </button>
-                <button
-                  className={currentView === 'details' ? 'active' : ''}
-                  onClick={() => setCurrentView('details')}
-                  disabled={!selectedIdea}
-                >
-                  <span className="icon">ℹ️</span>
-                </button>
-                <button
-                  className={currentView === 'calendar' ? 'active' : ''}
-                  onClick={() => {
-                    setCurrentView('calendar');
-                    generateCalendarDays(); // Обновляем календарь при переключении
-                  }}
-                >
-                  <span className="icon">📅</span>
-                </button>
-              </div>
-            </div>
-            
-            {/* Компонент для подписки */}
-            <SubscriptionWidget 
-              userId={userId} 
-              subscriptionStatus={subscriptionStatus} 
-              onSubscriptionUpdate={refetchSubscriptionStatus}
-              isActive={subscriptionStatus?.is_active === true} // Используем поле is_active
-            />
-  
-            <main className="app-main">
-              {/* Сообщения об ошибках и успешном выполнении */}
-              {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
-              {success && <SuccessMessage message={success} onClose={() => setSuccess(null)} />}
+              }} 
+              className={`action-button ${currentView === 'suggestions' ? 'active' : ''}`}
+              disabled={!channelName}
+            >
+              Идеи
+            </button>
+            <button 
+              onClick={() => {
+                setCurrentView('calendar');
+                fetchSavedPosts();
+              }} 
+              className={`action-button ${currentView === 'calendar' ? 'active' : ''}`}
+            >
+              Календарь
+            </button>
+            <button 
+              onClick={() => {
+                setCurrentView('posts');
+                fetchSavedPosts();
+              }} 
+              className={`action-button ${currentView === 'posts' ? 'active' : ''}`}
+            >
+              Посты
+            </button>
+      </div>
 
-              {/* Навигация */}
-          <div className="navigation-buttons">
-                <button 
-                  onClick={() => setCurrentView('analyze')} 
-                  className={`action-button ${currentView === 'analyze' ? 'active' : ''}`}
-                >
-                  Анализ
-                </button>
-                <button 
-                  onClick={() => {
-                    setCurrentView('suggestions');
-                    if (suggestedIdeas.length === 0) {
-                      fetchSavedIdeas();
-                    }
-                  }} 
-                  className={`action-button ${currentView === 'suggestions' ? 'active' : ''}`}
-                  disabled={!channelName}
-                >
-                  Идеи
-                </button>
-                <button 
-                  onClick={() => {
-                    setCurrentView('calendar');
-                    fetchSavedPosts();
-                  }} 
-                  className={`action-button ${currentView === 'calendar' ? 'active' : ''}`}
-                >
-                  Календарь
-                </button>
-                <button 
-                  onClick={() => {
-                    setCurrentView('posts');
-                    fetchSavedPosts();
-                  }} 
-                  className={`action-button ${currentView === 'posts' ? 'active' : ''}`}
-                >
-                  Посты
-                </button>
+          {/* Выбор канала */}
+          <div className="channel-selector">
+            <label>Каналы: </label>
+            <select 
+              value={channelName} 
+              onChange={(e) => setChannelName(e.target.value)}
+              className="channel-select"
+            >
+              <option value="">Выберите канал</option>
+              {allChannels.map(channel => (
+                <option key={channel} value={channel}>{channel}</option>
+              ))}
+            </select>
           </div>
 
-              {/* Выбор канала */}
-              <div className="channel-selector">
-                <label>Каналы: </label>
-                <select 
-                  value={channelName} 
-                  onChange={(e) => setChannelName(e.target.value)}
-                  className="channel-select"
-                >
-                  <option value="">Выберите канал</option>
-                  {allChannels.map(channel => (
-                    <option key={channel} value={channel}>{channel}</option>
-                  ))}
-                </select>
-              </div>
+          {/* Контент */}
+          <div className="view-container">
+            {/* Вид анализа */}
+            {currentView === 'analyze' && ( 
+              <div className="view analyze-view">
+        <h2>Анализ Telegram-канала</h2>
+        <div className="input-container">
+          <input
+            type="text"
+            className="channel-input"
+            value={channelName}
+            onChange={(e) => setChannelName(e.target.value.replace(/^@/, ''))}
+            placeholder="Введите username канала (без @)"
+                    disabled={isAnalyzing}
+                  />
+                  <button 
+                    onClick={analyzeChannel} 
+                    className="action-button"
+                    disabled={isAnalyzing || !channelName}
+                  >
+                    {isAnalyzing ? 'Анализ...' : 'Анализировать'}
+          </button>
+        </div>
 
-              {/* Контент */}
-              <div className="view-container">
-                {/* Вид анализа */}
-                {currentView === 'analyze' && ( 
-                  <div className="view analyze-view">
-            <h2>Анализ Telegram-канала</h2>
-            <div className="input-container">
-              <input
-                type="text"
-                className="channel-input"
-                value={channelName}
-                onChange={(e) => setChannelName(e.target.value.replace(/^@/, ''))}
-                placeholder="Введите username канала (без @)"
-                        disabled={isAnalyzing}
-                      />
-                      <button 
-                        onClick={analyzeChannel} 
-                        className="action-button"
-                        disabled={isAnalyzing || !channelName}
-                      >
-                        {isAnalyzing ? 'Анализ...' : 'Анализировать'}
-              </button>
-            </div>
-
-                    {/* Добавляем индикатор загрузки сохраненного анализа */}
-                    {loadingAnalysis && (
-                        <div className="loading-indicator small">
-                            <div className="loading-spinner small"></div>
-                            <p>Загрузка сохраненного анализа...</p>
-                        </div>
-                    )}
-
-                    {isAnalyzing && (
-                      <div className="loading-indicator">
-                        <div className="loading-spinner"></div>
-                        <p>Анализируем канал...</p>
-                      </div>
-                    )}
-
-            {analysisResult && (
-                <div className="results-container">
-                    <h3>Результаты анализа:</h3>
-                    {/* Показываем сообщение, если анализ был загружен из БД */}
-                    {analysisLoadedFromDB && !isAnalyzing && (
-                      <p className="info-message small"><em>Результаты загружены из сохраненных данных.</em></p>
-                    )}
-                    <p><strong>Темы:</strong> {analysisResult.themes.join(', ')}</p>
-                    <p><strong>Стили:</strong> {analysisResult.styles.join(', ')}</p>
-                        <p><strong>Лучшее время для постинга:</strong> {analysisResult.best_posting_time}</p>
-                        <p><strong>Проанализировано постов:</strong> {analysisResult.analyzed_posts_count}</p>
-                        
-                    <button 
-                          onClick={generateIdeas} 
-                          className="action-button generate-button"
-                          disabled={isGeneratingIdeas || !analysisResult} 
-                        >
-                          {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать идеи'}
-                    </button>
-                </div>
-            )}
-
-                    {!analysisResult && !isAnalyzing && (
-                      <p>Введите имя канала для начала анализа. Например: durov</p>
-            )}
-          </div>
+                {/* Добавляем индикатор загрузки сохраненного анализа */}
+                {loadingAnalysis && (
+                    <div className="loading-indicator small">
+                        <div className="loading-spinner small"></div>
+                        <p>Загрузка сохраненного анализа...</p>
+                    </div>
                 )}
 
-                {/* Вид идей */}
-                {currentView === 'suggestions' && channelName && (
-                  <div className="view suggestions-view">
-                    <h2>Идеи контента для @{channelName}</h2>
-                    
-                    {isGeneratingIdeas && (
-                      <div className="loading-indicator">
-                        <div className="loading-spinner"></div>
-                        <p>Загрузка идей...</p>
-                    </div>
-                    )}
-
-                    {suggestedIdeas.length > 0 ? (
-                      <div className="ideas-list">
-                        {suggestedIdeas.map((idea) => (
-                          <div key={idea.id} className="idea-item">
-                            <div className="idea-content">
-                              <div className="idea-header">
-                                <span className="idea-title">{idea.topic_idea}</span>
-                                <span className="idea-style">({idea.format_style})</span>
+                {isAnalyzing && (
+                  <div className="loading-indicator">
+                    <div className="loading-spinner"></div>
+                    <p>Анализируем канал...</p>
                   </div>
-                              {idea.day && <div className="idea-day">День {idea.day}</div>}
-                                      </div>
-                                  <button 
-                              className="action-button small"
-                              onClick={() => handleDetailIdea(idea)}
-                            >
-                              Детализировать
-                                  </button>
-                                  </div>
-                            ))}
-                            </div>
-                    ) : !isGeneratingIdeas ? (
-                      <p>
-                        {analysisResult 
-                          ? 'Нажмите "Сгенерировать идеи" на вкладке Анализ, чтобы создать новые идеи для контента.' 
-                          : loadingAnalysis 
-                              ? 'Загрузка сохраненного анализа...' 
-                              : 'Сначала выполните анализ канала на вкладке "Анализ" или выберите канал с сохраненным анализом.'
-                        }
-                      </p>
-                    ) : null}
-              <button 
-                          onClick={generateIdeas} 
-                          className="action-button generate-button"
-                          disabled={isGeneratingIdeas || !analysisResult} 
-                          style={{marginTop: '20px'}} // Добавим отступ
-                        >
-                          {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать новые идеи'}
-              </button>
-                   </div>
-                    )}
-                  {/* Сообщение, если канал не выбран для идей */} 
-                  {currentView === 'suggestions' && !channelName && (
-                      <p>Пожалуйста, выберите канал для просмотра или генерации идей.</p>
-                  )}
+                )}
 
-                {/* Календарь и Посты показываем всегда, но данные фильтруются по channelName/selectedChannels */} 
-                {currentView === 'calendar' && (
-                  <div className="view calendar-view">
-                    <h2>Календарь публикаций</h2>
+        {analysisResult && (
+            <div className="results-container">
+                <h3>Результаты анализа:</h3>
+                {/* Показываем сообщение, если анализ был загружен из БД */}
+                {analysisLoadedFromDB && !isAnalyzing && (
+                  <p className="info-message small"><em>Результаты загружены из сохраненных данных.</em></p>
+                )}
+                <p><strong>Темы:</strong> {analysisResult.themes.join(', ')}</p>
+                <p><strong>Стили:</strong> {analysisResult.styles.join(', ')}</p>
+                    <p><strong>Лучшее время для постинга:</strong> {analysisResult.best_posting_time}</p>
+                    <p><strong>Проанализировано постов:</strong> {analysisResult.analyzed_posts_count}</p>
                     
-                    {/* Фильтр по каналам (оставляем) */}
-                    <div className="channels-filter">
-                      <h3>Фильтр по каналам:</h3>
-                      
-                      {/* Компактная кнопка добавления/удаления канала в фильтр */}
-                      <div className="channels-actions">
-                      <button 
-                          className="action-button"
+                <button 
+                      onClick={generateIdeas} 
+                      className="action-button generate-button"
+                      disabled={isGeneratingIdeas || !analysisResult} 
+                    >
+                      {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать идеи'}
+                </button>
+            </div>
+        )}
+
+                {!analysisResult && !isAnalyzing && (
+                  <p>Введите имя канала для начала анализа. Например: durov</p>
+        )}
+      </div>
+            )}
+
+            {/* Вид идей */}
+            {currentView === 'suggestions' && channelName && (
+              <div className="view suggestions-view">
+                <h2>Идеи контента для @{channelName}</h2>
+                
+                {isGeneratingIdeas && (
+                  <div className="loading-indicator">
+                    <div className="loading-spinner"></div>
+                    <p>Загрузка идей...</p>
+                </div>
+                )}
+
+                {suggestedIdeas.length > 0 ? (
+                  <div className="ideas-list">
+                    {suggestedIdeas.map((idea) => (
+                      <div key={idea.id} className="idea-item">
+                        <div className="idea-content">
+                          <div className="idea-header">
+                            <span className="idea-title">{idea.topic_idea}</span>
+                            <span className="idea-style">({idea.format_style})</span>
+              </div>
+                          {idea.day && <div className="idea-day">День {idea.day}</div>}
+                                  </div>
+                              <button 
+                          className="action-button small"
+                          onClick={() => handleDetailIdea(idea)}
+                        >
+                          Детализировать
+                              </button>
+                          </div>
+                    ))}
+                      </div>
+                ) : !isGeneratingIdeas ? (
+                  <p>
+                    {analysisResult 
+                      ? 'Нажмите "Сгенерировать идеи" на вкладке Анализ, чтобы создать новые идеи для контента.' 
+                      : loadingAnalysis 
+                          ? 'Загрузка сохраненного анализа...' 
+                          : 'Сначала выполните анализ канала на вкладке "Анализ" или выберите канал с сохраненным анализом.'
+                    }
+                  </p>
+                ) : null}
+          <button 
+                      onClick={generateIdeas} 
+                      className="action-button generate-button"
+                      disabled={isGeneratingIdeas || !analysisResult} 
+                      style={{marginTop: '20px'}} // Добавим отступ
+                    >
+                      {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать новые идеи'}
+          </button>
+               </div>
+                )}
+              {/* Сообщение, если канал не выбран для идей */} 
+              {currentView === 'suggestions' && !channelName && (
+                  <p>Пожалуйста, выберите канал для просмотра или генерации идей.</p>
+              )}
+
+            {/* Календарь и Посты показываем всегда, но данные фильтруются по channelName/selectedChannels */} 
+            {currentView === 'calendar' && (
+              <div className="view calendar-view">
+                <h2>Календарь публикаций</h2>
+                
+                {/* Фильтр по каналам (оставляем) */}
+                <div className="channels-filter">
+                  <h3>Фильтр по каналам:</h3>
+                  
+                  {/* Компактная кнопка добавления/удаления канала в фильтр */}
+                  <div className="channels-actions">
+                  <button 
+                      className="action-button"
+                      onClick={() => {
+                        // Добавить текущий канал в фильтр, если его еще нет
+                        if (channelName && !selectedChannels.includes(channelName)) {
+                          const updatedSelected = [...selectedChannels, channelName];
+                          setSelectedChannels(updatedSelected);
+                          // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
+                          const key = `${userId}_selectedChannels`;
+                          if (key) {
+                            localStorage.setItem(key, JSON.stringify(updatedSelected));
+                          }
+                          // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+                        }
+                      }}
+                    >
+                      + Добавить текущий канал
+                  </button>
+                    
+                    <button
+                      className="action-button"
+                      onClick={filterPostsByChannels}
+                    >
+                      Применить фильтр
+                  </button>
+            </div>
+                  
+                  {/* Отображение выбранных каналов */}
+                  <div className="selected-channels">
+                    {selectedChannels.map((channel) => (
+                      <div key={channel} className="selected-channel">
+                        <span className="channel-name">@{channel}</span>
+                        <button 
+                          className="remove-channel"
                           onClick={() => {
-                            // Добавить текущий канал в фильтр, если его еще нет
-                            if (channelName && !selectedChannels.includes(channelName)) {
-                              const updatedSelected = [...selectedChannels, channelName];
-                              setSelectedChannels(updatedSelected);
-                              // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
-                              const key = `${userId}_selectedChannels`;
-                              if (key) {
-                                localStorage.setItem(key, JSON.stringify(updatedSelected));
-                              }
-                              // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+                            const updatedSelected = selectedChannels.filter(c => c !== channel);
+                            setSelectedChannels(updatedSelected);
+                            // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
+                            const key = `${userId}_selectedChannels`;
+                            if (key) {
+                               localStorage.setItem(key, JSON.stringify(updatedSelected));
                             }
+                            // --- КОНЕЦ ИЗМЕНЕНИЯ ---
                           }}
                         >
-                          + Добавить текущий канал
-                      </button>
-                        
-                        <button
-                          className="action-button"
-                          onClick={filterPostsByChannels}
-                        >
-                          Применить фильтр
-                      </button>
+                          ✕
+                        </button>
+          </div>
+                    ))}
+          </div>
                 </div>
-                      
-                      {/* Отображение выбранных каналов */}
-                      <div className="selected-channels">
-                        {selectedChannels.map((channel) => (
-                          <div key={channel} className="selected-channel">
-                            <span className="channel-name">@{channel}</span>
-                            <button 
-                              className="remove-channel"
-                              onClick={() => {
-                                const updatedSelected = selectedChannels.filter(c => c !== channel);
+                
+                {/* Календарь - ВОССТАНОВЛЕННЫЙ КОД */}
+                <div className="calendar-container">
+                  {/* Заголовок с названием месяца и навигацией */}
+                  <div className="calendar-header">
+                    <button 
+                      className="nav-button"
+                      onClick={goToPrevMonth} // Используем восстановленную функцию
+                    >
+                      &lt;
+                    </button>
+                    
+                    <h3>{currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}</h3>
+                    
+                    <button 
+                      className="nav-button"
+                      onClick={goToNextMonth} // Используем восстановленную функцию
+                    >
+                      &gt;
+                    </button>
+                  </div>
+                  
+                  {/* Дни недели */}
+                  <div className="weekdays">
+                    {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day) => (
+                      <div key={day} className="weekday">{day}</div>
+                    ))}
+                  </div>
+                  
+                  {/* Дни календаря */}
+                  <div className="calendar-grid">
+                    {calendarDays.map((day, index) => (
+                      <CalendarDay 
+                        key={index} 
+                        day={day} 
+                        onEditPost={startEditingPost}
+                        onDeletePost={(postId) => {
+                          if (window.confirm('Вы уверены, что хотите удалить этот пост?')) {
+                            deletePost(postId);
+                          }
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+                {/* КОНЕЦ ВОССТАНОВЛЕННОГО КОДА */}
+              </div>
+            )}
+            {/* --- КОНЕЦ ИЗМЕНЕНИЯ --- */}
+            
+            {/* --- НАЧАЛО: НОВЫЙ Вид "Посты" с таблицей --- */}
+            {currentView === 'posts' && (
+              <div className="view posts-view"> {/* Добавляем класс posts-view для возможных специфичных стилей */} 
+                <h2>
+                  Список сохраненных постов 
+                  {selectedChannels.length > 0 
+                    ? `(Каналы: ${selectedChannels.join(', ')})` 
+                    : channelName 
+                      ? `(Канал: @${channelName})` 
+                      : '(Все каналы)'}
+                </h2>
+                
+                {/* Фильтр по каналам (копируем из календаря) */}
+                <div className="channels-filter">
+                   <h3>Фильтр по каналам:</h3>
+                    <div className="channels-actions">
+                       <button 
+                          className="action-button"
+                          onClick={() => {
+                             if (channelName && !selectedChannels.includes(channelName)) {
+                                const updatedSelected = [...selectedChannels, channelName];
                                 setSelectedChannels(updatedSelected);
                                 // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
                                 const key = `${userId}_selectedChannels`;
                                 if (key) {
-                                   localStorage.setItem(key, JSON.stringify(updatedSelected));
+                                  localStorage.setItem(key, JSON.stringify(updatedSelected));
                                 }
                                 // --- КОНЕЦ ИЗМЕНЕНИЯ ---
-                              }}
-                            >
-                              ✕
-                            </button>
-              </div>
-                        ))}
-              </div>
+                             }
+                          }}
+                       >
+                          + Добавить текущий канал
+              </button>
+                       <button
+                          className="action-button"
+                          onClick={filterPostsByChannels}
+                       >
+                          Применить фильтр
+                       </button>
                     </div>
-                    
-                    {/* Календарь - ВОССТАНОВЛЕННЫЙ КОД */}
-                    <div className="calendar-container">
-                      {/* Заголовок с названием месяца и навигацией */}
-                      <div className="calendar-header">
-                        <button 
-                          className="nav-button"
-                          onClick={goToPrevMonth} // Используем восстановленную функцию
-                        >
-                          &lt;
-                        </button>
-                        
-                        <h3>{currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}</h3>
-                        
-                        <button 
-                          className="nav-button"
-                          onClick={goToNextMonth} // Используем восстановленную функцию
-                        >
-                          &gt;
-                        </button>
-                      </div>
-                      
-                      {/* Дни недели */}
-                      <div className="weekdays">
-                        {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day) => (
-                          <div key={day} className="weekday">{day}</div>
-                        ))}
-                      </div>
-                      
-                      {/* Дни календаря */}
-                      <div className="calendar-grid">
-                        {calendarDays.map((day, index) => (
-                          <CalendarDay 
-                            key={index} 
-                            day={day} 
-                            onEditPost={startEditingPost}
-                            onDeletePost={(postId) => {
-                              if (window.confirm('Вы уверены, что хотите удалить этот пост?')) {
-                                deletePost(postId);
-                              }
-                            }}
-                          />
-                        ))}
-                      </div>
+                    <div className="selected-channels">
+                       {selectedChannels.map((channel) => (
+                          <div key={channel} className="selected-channel">
+                             <span className="channel-name">@{channel}</span>
+                             <button 
+                                className="remove-channel"
+                                onClick={() => {
+                                   const updatedSelected = selectedChannels.filter(c => c !== channel);
+                                   setSelectedChannels(updatedSelected);
+                                   // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
+                                   const key = `${userId}_selectedChannels`;
+                                   if (key) {
+                                      localStorage.setItem(key, JSON.stringify(updatedSelected));
+                                   }
+                                   // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+                                }}
+                             >
+                                ✕
+                             </button>
+                          </div>
+                       ))}
                     </div>
-                    {/* КОНЕЦ ВОССТАНОВЛЕННОГО КОДА */}
+                </div>
+                
+                {/* Таблица постов (перемещенный код) */}
+                <div className="posts-table-container">
+                   {loadingSavedPosts ? (
+                       <Loading message="Загрузка постов..." />
+                   ) : savedPosts.length > 0 ? (
+                      <table className="posts-table">
+                        <thead>
+                          <tr>
+                            <th>Дата</th>
+                            <th>Канал</th>
+                            <th>Тема/Идея</th>
+                            <th>Действия</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...savedPosts]
+                            .sort((a, b) => new Date(b.target_date).getTime() - new Date(a.target_date).getTime()) 
+                            .map((post) => (
+                              <tr key={post.id}>
+                                <td>{new Date(post.target_date).toLocaleDateString()}</td>
+                                <td>{post.channel_name || 'N/A'}</td>
+                                <td>{post.topic_idea}</td>
+                                <td>
+                                  <button 
+                                    className="action-button edit-button small"
+                                    onClick={() => startEditingPost(post)}
+                                    title="Редактировать"
+                                  >
+                                    <span>📝</span>
+                                  </button>
+                                  <button 
+                                    className="action-button delete-button small"
+                                    onClick={() => {
+                                      if (window.confirm('Вы уверены, что хотите удалить этот пост?')) {
+                                        deletePost(post.id);
+                                      }
+                                    }}
+                                    title="Удалить"
+                                  >
+                                    <span>🗑️</span>
+                                  </button>
+                                </td>
+                              </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                   ) : (
+                      <p>Нет сохраненных постов для выбранных каналов.</p>
+                   )}
+                </div>
+              </div>
+             )}
+            {/* --- КОНЕЦ НОВОГО ВИДА "Посты" --- */}
+
+            {/* Вид редактирования/детализации поста */}
+            {(currentView === 'edit' || currentView === 'details') && (
+              <div className="view edit-view">
+                <h2>{currentPostId ? 'Редактирование поста' : 'Создание нового поста'}</h2>
+
+                {/* Индикатор загрузки деталей */}
+                {isGeneratingPostDetails && (
+                   <div className="loading-indicator small">
+                      <div className="loading-spinner small"></div>
+                      <p>Генерация деталей поста...</p>
                   </div>
                 )}
-                {/* --- КОНЕЦ ИЗМЕНЕНИЯ --- */}
-                
-                {/* --- НАЧАЛО: НОВЫЙ Вид "Посты" с таблицей --- */}
-                {currentView === 'posts' && (
-                  <div className="view posts-view"> {/* Добавляем класс posts-view для возможных специфичных стилей */} 
-                    <h2>
-                      Список сохраненных постов 
-                      {selectedChannels.length > 0 
-                        ? `(Каналы: ${selectedChannels.join(', ')})` 
-                        : channelName 
-                          ? `(Канал: @${channelName})` 
-                          : '(Все каналы)'}
-                    </h2>
-                    
-                    {/* Фильтр по каналам (копируем из календаря) */}
-                    <div className="channels-filter">
-                       <h3>Фильтр по каналам:</h3>
-                        <div className="channels-actions">
-                           <button 
-                              className="action-button"
-                              onClick={() => {
-                                 if (channelName && !selectedChannels.includes(channelName)) {
-                                    const updatedSelected = [...selectedChannels, channelName];
-                                    setSelectedChannels(updatedSelected);
-                                    // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
-                                    const key = `${userId}_selectedChannels`;
-                                    if (key) {
-                                      localStorage.setItem(key, JSON.stringify(updatedSelected));
-                                    }
-                                    // --- КОНЕЦ ИЗМЕНЕНИЯ ---
-                                 }
-                              }}
-                           >
-                              + Добавить текущий канал
-              </button>
-                           <button
-                              className="action-button"
-                              onClick={filterPostsByChannels}
-                           >
-                              Применить фильтр
-                           </button>
-                        </div>
-                        <div className="selected-channels">
-                           {selectedChannels.map((channel) => (
-                              <div key={channel} className="selected-channel">
-                                 <span className="channel-name">@{channel}</span>
-                                 <button 
-                                    className="remove-channel"
-                                    onClick={() => {
-                                       const updatedSelected = selectedChannels.filter(c => c !== channel);
-                                       setSelectedChannels(updatedSelected);
-                                       // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
-                                       const key = `${userId}_selectedChannels`;
-                                       if (key) {
-                                          localStorage.setItem(key, JSON.stringify(updatedSelected));
-                                       }
-                                       // --- КОНЕЦ ИЗМЕНЕНИЯ ---
-                                    }}
-                                 >
-                                    ✕
-                                 </button>
-                              </div>
-                           ))}
-                        </div>
-                    </div>
-                    
-                    {/* Таблица постов (перемещенный код) */}
-                    <div className="posts-table-container">
-                       {loadingSavedPosts ? (
-                           <Loading message="Загрузка постов..." />
-                       ) : savedPosts.length > 0 ? (
-                          <table className="posts-table">
-                            <thead>
-                              <tr>
-                                <th>Дата</th>
-                                <th>Канал</th>
-                                <th>Тема/Идея</th>
-                                <th>Действия</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {[...savedPosts]
-                                .sort((a, b) => new Date(b.target_date).getTime() - new Date(a.target_date).getTime()) 
-                                .map((post) => (
-                                  <tr key={post.id}>
-                                    <td>{new Date(post.target_date).toLocaleDateString()}</td>
-                                    <td>{post.channel_name || 'N/A'}</td>
-                                    <td>{post.topic_idea}</td>
-                                    <td>
-                                      <button 
-                                        className="action-button edit-button small"
-                                        onClick={() => startEditingPost(post)}
-                                        title="Редактировать"
-                                      >
-                                        <span>📝</span>
-                                      </button>
-                                      <button 
-                                        className="action-button delete-button small"
-                                        onClick={() => {
-                                          if (window.confirm('Вы уверены, что хотите удалить этот пост?')) {
-                                            deletePost(post.id);
-                                          }
-                                        }}
-                                        title="Удалить"
-                                      >
-                                        <span>🗑️</span>
-                                      </button>
-                                    </td>
-                                  </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                       ) : (
-                          <p>Нет сохраненных постов для выбранных каналов.</p>
-                       )}
-                    </div>
+
+                {/* --- Основные поля поста --- */}
+                <div className="post-fields">
+                  <div className="form-group">
+                    <label htmlFor="channelName">Канал:</label>
+                    <input 
+                      type="text" 
+                      id="channelName"
+                      value={channelName || ''}
+                      onChange={(e) => setChannelName(e.target.value)} 
+                      disabled 
+                    />
                   </div>
-                 )}
-                {/* --- КОНЕЦ НОВОГО ВИДА "Посты" --- */}
-
-                {/* Вид редактирования/детализации поста */}
-                {(currentView === 'edit' || currentView === 'details') && (
-                  <div className="view edit-view">
-                    <h2>{currentPostId ? 'Редактирование поста' : 'Создание нового поста'}</h2>
-
-                    {/* Индикатор загрузки деталей */}
-                    {isGeneratingPostDetails && (
-                       <div className="loading-indicator small">
-                          <div className="loading-spinner small"></div>
-                          <p>Генерация деталей поста...</p>
+                  <div className="form-group">
+                    <label htmlFor="postDate">Дата публикации:</label>
+                    <input 
+                      type="date" 
+                      id="postDate"
+                      value={currentPostDate}
+                      onChange={(e) => setCurrentPostDate(e.target.value)} 
+                      disabled={isSavingPost}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="postTopic">Тема/Идея:</label>
+                    <input 
+                      type="text" 
+                      id="postTopic"
+                      value={currentPostTopic}
+                      onChange={(e) => setCurrentPostTopic(e.target.value)}
+                      disabled
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="postFormat">Формат/Стиль:</label>
+                    <input 
+                      type="text" 
+                      id="postFormat"
+                      value={currentPostFormat}
+                      onChange={(e) => setCurrentPostFormat(e.target.value)}
+                      disabled
+                    />
+                  </div>
+                </div>
+                
+                {/* --- Редактор текста поста --- */}
+                <div className="form-group post-text-editor">
+                  <label htmlFor="postText">Текст поста:</label>
+                    <textarea 
+                    id="postText"
+                    value={currentPostText}
+                    onChange={(e) => setCurrentPostText(e.target.value)}
+                    rows={10}
+                    placeholder="Введите или сгенерируйте текст поста..."
+                    disabled={isSavingPost || isGeneratingPostDetails}
+                    />
+                  </div>
+                  
+                {/* --- НАЧАЛО: Секция управления изображениями --- */}
+                <div className="image-management-section">
+                    
+                    {/* --- Предложенные изображения (если есть) --- */}
+                    {suggestedImages.length > 0 && (
+                        <div className="suggested-images-section">
+                            <h3>Предложенные изображения:</h3>
+                            <div className="image-gallery suggested">
+                                {suggestedImages.map((image, index) => (
+                                    <div 
+                                        key={image.id || `suggested-${index}`} 
+                                        className={`image-item ${selectedImage?.id === image.id || selectedImage?.url === image.url ? 'selected' : ''}`}
+                                        onClick={() => handleImageSelection(image)}
+                                    >
+                                    <img 
+                                        src={image.preview_url || image.url} 
+                                        alt={image.alt || 'Suggested image'} 
+                            onError={(e) => {
+                                            const target = e.target as HTMLImageElement;
+                                            target.src = 'https://via.placeholder.com/100?text=Ошибка'; 
+                                            console.error('Image load error:', image.preview_url || image.url);
+                                        }}
+                                    />
+                                    {(selectedImage?.id === image.id || selectedImage?.url === image.url) && (
+                                        <div className="checkmark">✔</div> 
+                                    )}
+                                    </div>
+                                ))}
+                        </div>
                       </div>
                     )}
-
-                    {/* --- Основные поля поста --- */}
-                    <div className="post-fields">
-                      <div className="form-group">
-                        <label htmlFor="channelName">Канал:</label>
-                        <input 
-                          type="text" 
-                          id="channelName"
-                          value={channelName || ''}
-                          onChange={(e) => setChannelName(e.target.value)} 
-                          disabled 
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label htmlFor="postDate">Дата публикации:</label>
-                        <input 
-                          type="date" 
-                          id="postDate"
-                          value={currentPostDate}
-                          onChange={(e) => setCurrentPostDate(e.target.value)} 
-                          disabled={isSavingPost}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label htmlFor="postTopic">Тема/Идея:</label>
-                        <input 
-                          type="text" 
-                          id="postTopic"
-                          value={currentPostTopic}
-                          onChange={(e) => setCurrentPostTopic(e.target.value)}
-                          disabled
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label htmlFor="postFormat">Формат/Стиль:</label>
-                        <input 
-                          type="text" 
-                          id="postFormat"
-                          value={currentPostFormat}
-                          onChange={(e) => setCurrentPostFormat(e.target.value)}
-                          disabled
-                        />
-                      </div>
-                    </div>
                     
-                    {/* --- Редактор текста поста --- */}
-                    <div className="form-group post-text-editor">
-                      <label htmlFor="postText">Текст поста:</label>
-                        <textarea 
-                        id="postText"
-                        value={currentPostText}
-                        onChange={(e) => setCurrentPostText(e.target.value)}
-                        rows={10}
-                        placeholder="Введите или сгенерируйте текст поста..."
-                        disabled={isSavingPost || isGeneratingPostDetails}
-                        />
-                      </div>
-                      
-                    {/* --- НАЧАЛО: Секция управления изображениями --- */}
-                    <div className="image-management-section">
+                    {/* --- Блок для своего изображения: Загрузчик и Превью --- */}
+                    <div className="custom-image-section">
+                       <h4>Свое изображение:</h4>
+                        {/* Показываем загрузчик */} 
+                        {/* --- ИЗМЕНЕНО: Передаем userId --- */}
+                        <ImageUploader onImageUploaded={handleCustomImageUpload} userId={userId} />
                         
-                        {/* --- Предложенные изображения (если есть) --- */}
-                        {suggestedImages.length > 0 && (
-                            <div className="suggested-images-section">
-                                <h3>Предложенные изображения:</h3>
-                                <div className="image-gallery suggested">
-                                    {suggestedImages.map((image, index) => (
-                                        <div 
-                                            key={image.id || `suggested-${index}`} 
-                                            className={`image-item ${selectedImage?.id === image.id || selectedImage?.url === image.url ? 'selected' : ''}`}
-                                            onClick={() => handleImageSelection(image)}
-                                        >
-                                        <img 
-                                            src={image.preview_url || image.url} 
-                                            alt={image.alt || 'Suggested image'} 
-                                onError={(e) => {
-                                                const target = e.target as HTMLImageElement;
-                                                target.src = 'https://via.placeholder.com/100?text=Ошибка'; 
-                                                console.error('Image load error:', image.preview_url || image.url);
-                                            }}
-                                        />
-                                        {(selectedImage?.id === image.id || selectedImage?.url === image.url) && (
-                                            <div className="checkmark">✔</div> 
-                                        )}
-                                        </div>
-                                    ))}
-                            </div>
-                          </div>
-                        )}
-                        
-                        {/* --- Блок для своего изображения: Загрузчик и Превью --- */}
-                        <div className="custom-image-section">
-                           <h4>Свое изображение:</h4>
-                            {/* Показываем загрузчик */} 
-                            {/* --- ИЗМЕНЕНО: Передаем userId --- */}
-                            <ImageUploader onImageUploaded={handleCustomImageUpload} userId={userId} />
-                            
-                            {/* Показываем превью ВЫБРАННОГО изображения (любого) и кнопку удаления */} 
-                            {selectedImage && (
-                                <div className="selected-image-preview">
-                                    <h5>Выбранное изображение:</h5>
-                                    <div className="preview-container">
-                                       <img src={selectedImage.preview_url || selectedImage.url} alt={selectedImage.alt || 'Выбрано'} />
-                                       <button 
-                                            className="action-button delete-button small remove-image-btn"
-                                            onClick={() => setSelectedImage(null)} // Сброс выбранного изображения
-                                            title="Удалить выбранное изображение"
-                                        >
-                                            <span>🗑️ Удалить</span>
-                                        </button>
-                          </div>
-                        </div>
-                            )}
+                        {/* Показываем превью ВЫБРАННОГО изображения (любого) и кнопку удаления */} 
+                        {selectedImage && (
+                            <div className="selected-image-preview">
+                                <h5>Выбранное изображение:</h5>
+                                <div className="preview-container">
+                                   <img src={selectedImage.preview_url || selectedImage.url} alt={selectedImage.alt || 'Выбрано'} />
+                                   <button 
+                                        className="action-button delete-button small remove-image-btn"
+                                        onClick={() => setSelectedImage(null)} // Сброс выбранного изображения
+                                        title="Удалить выбранное изображение"
+                                    >
+                                        <span>🗑️ Удалить</span>
+                                    </button>
                       </div>
                     </div>
-                    {/* --- КОНЕЦ: Секция управления изображениями --- */} {/* <-- ИСПРАВЛЕНО: Убран лишний символ */} 
-                      
-                    {/* Кнопки действий */}
-                    <div className="form-actions">
-                        <button 
-                          onClick={handleSaveOrUpdatePost} 
-                          className="action-button save-button"
-                          disabled={isSavingPost || isGeneratingPostDetails || !currentPostText}
-                        >
-                          {isSavingPost ? 'Сохранение...' : (currentPostId ? 'Обновить пост' : 'Сохранить пост')}
-                        </button>
-                       {/* Добавляем кнопку Отмена */}
-                        <button 
-                          onClick={() => {
-                              setCurrentView('calendar'); // Возвращаемся в календарь
-                              // Сбрасываем состояние редактирования
-                              setCurrentPostId(null);
-                              setCurrentPostDate(new Date().toISOString().split('T')[0]);
-                              setCurrentPostTopic('');
-                              setCurrentPostFormat('');
-                              setCurrentPostText('');
-                              setSelectedImage(null);
-                              setSuggestedImages([]);
-                          }}
-                          className="action-button cancel-button"
-                          disabled={isSavingPost}
-                        >
-                          Отмена
-                        </button>
-                      </div>
-
+                        )}
                   </div>
-                )}
-              </div>
-            </main> {/* <-- ИСПРАВЛЕНО: Добавлен закрывающий тег */} 
+                </div>
+                {/* --- КОНЕЦ: Секция управления изображениями --- */} {/* <-- ИСПРАВЛЕНО: Убран лишний символ */} 
+                  
+                {/* Кнопки действий */}
+                <div className="form-actions">
+                    <button 
+                      onClick={handleSaveOrUpdatePost} 
+                      className="action-button save-button"
+                      disabled={isSavingPost || isGeneratingPostDetails || !currentPostText}
+                    >
+                      {isSavingPost ? 'Сохранение...' : (currentPostId ? 'Обновить пост' : 'Сохранить пост')}
+                    </button>
+                   {/* Добавляем кнопку Отмена */}
+                    <button 
+                      onClick={() => {
+                          setCurrentView('calendar'); // Возвращаемся в календарь
+                          // Сбрасываем состояние редактирования
+                          setCurrentPostId(null);
+                          setCurrentPostDate(new Date().toISOString().split('T')[0]);
+                          setCurrentPostTopic('');
+                          setCurrentPostFormat('');
+                          setCurrentPostText('');
+                          setSelectedImage(null);
+                          setSuggestedImages([]);
+                      }}
+                      className="action-button cancel-button"
+                      disabled={isSavingPost}
+                    >
+                      Отмена
+                    </button>
+                  </div>
 
-            <footer className="app-footer">
-              <a href="https://t.me/SmartContentHelperBot" target="_blank" rel="noopener noreferrer">
-                @SmartContentHelperBot
-              </a>
-            </footer>
+              </div>
+            )}
           </div>
-        </div>
+        </main> {/* <-- ИСПРАВЛЕНО: Добавлен закрывающий тег */} 
+
+        <footer className="app-footer">
+          <p>© 2024 Smart Content Assistant</p>
+        </footer>
+      </div>
+      <div className="debug-info">
+        <p>userId: {userId || 'null'}</p>
+        <p>Статус подписки: {subscriptionStatus ? JSON.stringify(subscriptionStatus) : 'null'}</p>
+        <p>DEBUG: </p>
+        <pre>{
+          (() => {
+            try {
+              return debugInfo ? JSON.stringify(debugInfo, null, 2) : 'null';
+            } catch (e) {
+              console.error("Ошибка при сериализации debugInfo:", e);
+              return "Ошибка сериализации debugInfo";
+            }
+          })()
+        }</pre>
       </div>
     </SimpleErrorBoundary>
   );
