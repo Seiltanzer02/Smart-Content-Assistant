@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import '../styles/SubscriptionWidget.css';
 import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice } from '../api/subscription';
 import axios from 'axios';
@@ -16,6 +16,20 @@ const SubscriptionWidget: React.FC<{
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 1; // временно 1 Star для теста
   const [isSubscribing, setIsSubscribing] = useState(false);
+  const pollIntervalRef = useRef<number | null>(null);
+  const pollTimeoutRef = useRef<number | null>(null);
+
+  const stopPolling = () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+      console.log('Polling stopped');
+    }
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
+  };
 
   const handleSubscribeViaMainButton = () => {
     if (window.Telegram?.WebApp?.showConfirm) {
@@ -46,18 +60,32 @@ const SubscriptionWidget: React.FC<{
           window.Telegram.WebApp.openInvoice(data.invoice_link, async (status) => {
             setIsSubscribing(false);
             if (status === 'paid') {
+              console.log('Payment status: paid. Starting polling...');
               if (window?.Telegram?.WebApp?.showPopup) {
                 window.Telegram.WebApp.showPopup({
                   title: 'Успешная оплата',
-                  message: 'Ваша подписка Premium активирована! Обновляем статус...',
+                  message: 'Подписка активирована! Обновляем статус...',
                   buttons: [{ type: 'ok' }]
                 });
               }
               await onSubscriptionUpdate();
+
+              stopPolling();
+              pollIntervalRef.current = window.setInterval(() => {
+                console.log('Polling for subscription status...');
+                onSubscriptionUpdate();
+              }, 2000);
+
+              pollTimeoutRef.current = window.setTimeout(() => {
+                console.log('Polling timeout reached. Stopping polling.');
+                stopPolling();
+              }, 15000);
+
             } else if (status === 'failed') {
+              console.log('Payment status: failed');
               setError('Оплата не удалась. Пожалуйста, попробуйте позже.');
             } else if (status === 'cancelled') {
-              // Ничего не делаем при отмене, просто закрыли окно
+              console.log('Payment status: cancelled');
             }
           });
         } else {
@@ -71,6 +99,7 @@ const SubscriptionWidget: React.FC<{
     } catch (error) {
       setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
       setIsSubscribing(false);
+      stopPolling();
     }
   };
 
@@ -107,8 +136,16 @@ const SubscriptionWidget: React.FC<{
       if (window.Telegram?.WebApp?.MainButton) {
         window.Telegram.WebApp.MainButton.offClick(handleSubscribeViaMainButton);
       }
+      stopPolling();
     };
   }, [isActive, onSubscriptionUpdate]);
+
+  useEffect(() => {
+    if (subscriptionStatus?.has_subscription) {
+      console.log('Subscription is active, stopping polling.');
+      stopPolling();
+    }
+  }, [subscriptionStatus]);
 
   if (!userId) {
     return (
