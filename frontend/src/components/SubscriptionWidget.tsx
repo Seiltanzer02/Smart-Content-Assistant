@@ -428,7 +428,7 @@ const SubscriptionWidget: React.FC<{
           {isActive ? 'Премиум активен' : 'Бесплатный план'}
         </Typography>
         
-        {isActive && subscriptionStatus.subscription_end_date && (
+        {isActive && subscriptionStatus?.subscription_end_date && (
           <Typography variant="body2" align="center" color="text.secondary">
             Активен до: {moment(subscriptionStatus.subscription_end_date).format('DD.MM.YYYY')}
           </Typography>
@@ -458,7 +458,7 @@ const SubscriptionWidget: React.FC<{
               <li>Планирование и автоматизация публикаций</li>
             </ul>
             
-            {subscriptionStatus.subscription_end_date && (
+            {subscriptionStatus?.subscription_end_date && (
               <p>
                 <strong>Действует до:</strong> {new Date(subscriptionStatus.subscription_end_date).toLocaleDateString()}
               </p>
@@ -537,11 +537,11 @@ const SubscriptionWidget: React.FC<{
           <pre>
 {JSON.stringify({
   userId: userId,
-  subscriptionStatus: {
+  subscriptionStatus: subscriptionStatus ? {
     has_subscription: subscriptionStatus.has_subscription,
     is_active: subscriptionStatus.is_active,
     subscription_end_date: subscriptionStatus.subscription_end_date
-  },
+  } : null,
   calculatedIsActive: calculatedIsActive,
   isEndDateValid: isEndDateValid,
   lastUpdateTime: lastUpdateTime

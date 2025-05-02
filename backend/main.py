@@ -445,7 +445,7 @@ async def telegram_webhook(request: Request):
                             # РЕЗЕРВНОЕ ОБНОВЛЕНИЕ через стандартное API Supabase
                             backup_result = supabase.table("user_subscription") \
                                 .update({
-                                    "is_active": True, 
+                                    "is_active": True,
                                     "end_date": iso_date,
                                     "payment_id": payment.get('telegram_payment_charge_id'),
                                     "updated_at": datetime.now(timezone.utc).isoformat()
@@ -3743,7 +3743,7 @@ async def get_subscription_status(request: Request):
         # Формируем итоговый ответ
         response = {
             "has_subscription": has_subscription,
-            "is_active": is_active,
+                "is_active": is_active,
             "subscription_end_date": subscription_end_date,
             "debug": debug
         }
