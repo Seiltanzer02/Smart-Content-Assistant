@@ -70,35 +70,17 @@ const SubscriptionWidget: React.FC<{
             setIsSubscribing(false);
             console.log('[SubscriptionWidget] openInvoice callback статус:', status);
             if (status === 'paid') {
-              console.log('[SubscriptionWidget] Payment status: paid. Optimistically updating UI...');
-              if (userId) {
-                  const timestampKey = `premiumConfirmed_${userId}`;
-                  localStorage.setItem(timestampKey, Date.now().toString());
-                  console.log(`[SubscriptionWidget] Saved premium confirmation timestamp to localStorage: ${timestampKey}`);
-              }
+              console.log('[SubscriptionWidget] Payment status: paid. Updating status from server...');
               if (window?.Telegram?.WebApp?.showPopup) {
                 window.Telegram.WebApp.showPopup({
                   title: 'Успешная оплата',
-                  message: 'Подписка активирована!',
+                  message: 'Подписка активирована! Обновляем статус...',
                   buttons: [{ type: 'ok' }]
                 });
               }
-              const optimisticStatus: SubscriptionStatus = {
-                has_subscription: true,
-                is_active: true,
-                subscription_end_date: undefined
-              };
-              setSubscriptionStatus(optimisticStatus);
               stopPolling();
-              console.log('[SubscriptionWidget] Starting aggressive polling for status confirmation...');
-              pollIntervalRef.current = window.setInterval(() => {
-                console.log('[SubscriptionWidget] Polling for subscription status...');
-                onSubscriptionUpdate();
-              }, 2000);
-              pollTimeoutRef.current = window.setTimeout(() => {
-                console.warn('[SubscriptionWidget] Polling timeout reached. Stopping polling. Status might not be up-to-date.');
-                stopPolling();
-              }, 15000);
+              console.log('[SubscriptionWidget] Вызываем onSubscriptionUpdate для получения реального статуса...');
+              onSubscriptionUpdate();
             } else if (status === 'failed') {
               console.log('[SubscriptionWidget] Payment status: failed');
               setError('Оплата не удалась. Пожалуйста, попробуйте позже.');

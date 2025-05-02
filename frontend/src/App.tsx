@@ -14,12 +14,12 @@ import { getUserSubscriptionStatus, SubscriptionStatus } from './api/subscriptio
 const API_BASE_URL = '';
 // const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000'; // Убираем использование process.env
 
-// --- ДОБАВЛЕНО: Вспомогательная функция для ключей localStorage ---
-const getUserSpecificKey = (baseKey: string, userId: string | null): string | null => {
-  if (!userId) return null; // Не работаем с localStorage без ID пользователя
-  return `${userId}_${baseKey}`;
-};
-// --- КОНЕЦ ДОБАВЛЕНИЯ ---
+// --- УДАЛЕНО: Вспомогательная функция для ключей localStorage ---
+// const getUserSpecificKey = (baseKey: string, userId: string | null): string | null => {
+//   if (!userId) return null; // Не работаем с localStorage без ID пользователя
+//   return `${userId}_${baseKey}`;
+// };
+// --- КОНЕЦ УДАЛЕНИЯ ---
 
 // Компоненты для отображения загрузки и сообщений
 const Loading = ({ message }: { message: string }) => (
@@ -394,107 +394,52 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus | null>(null);
-  
-  const PREMIUM_TIMESTAMP_KEY = 'lastPremiumConfirmedAt';
-  const PREMIUM_TIMESTAMP_LIFETIME_MS = 60 * 60 * 1000; // 1 час (для теста)
+  const [debugInfo, setDebugInfo] = useState<any>(null); // Оставляем debug
 
-  // В стейте добавляю debugInfo
-  const [debugInfo, setDebugInfo] = useState<any>(null);
+  // --- УДАЛЕНЫ: Константы для localStorage ---
+  // const PREMIUM_TIMESTAMP_KEY = 'lastPremiumConfirmedAt';
+  // const PREMIUM_TIMESTAMP_LIFETIME_MS = 60 * 60 * 1000;
 
-  // refetchSubscriptionStatus остается как есть (с проверкой localStorage)
-  const refetchSubscriptionStatus = useCallback(async (): Promise<SubscriptionStatus | null> => {
-    if (!userId) return null;
-    console.log('[refetchSubscriptionStatus] Fetching status from API...');
-    const userTimestampKey = getUserSpecificKey(PREMIUM_TIMESTAMP_KEY, userId);
-    
+  // --- ИЗМЕНЕНО: Упрощенная функция refetchSubscriptionStatus ---
+  const refetchSubscriptionStatus = useCallback(async () => {
+    if (!userId) return;
+    console.log('[refetchSubscriptionStatus] Запрос статуса с API...');
     try {
       const fetchedStatus = await getUserSubscriptionStatus(userId);
-      console.log('[refetchSubscriptionStatus] Fetched status:', fetchedStatus);
+      console.log('[refetchSubscriptionStatus] Получен статус:', fetchedStatus);
       if ((fetchedStatus as any).debug) {
-        setDebugInfo((fetchedStatus as any).debug);
+        setDebugInfo((fetchedStatus as any).debug); // Обновляем debug info
         console.log('[refetchSubscriptionStatus][DEBUG]:', (fetchedStatus as any).debug);
       } else {
         setDebugInfo(null);
       }
+      // Просто обновляем статус на основе ответа API
       setSubscriptionStatus({
         has_subscription: fetchedStatus.has_subscription,
         is_active: fetchedStatus.is_active,
         subscription_end_date: fetchedStatus.subscription_end_date
       });
-      return fetchedStatus;
-    } catch (e) {
-      setDebugInfo({ error: String(e) });
-      setSubscriptionStatus(null);
-      return null;
+       console.log('[refetchSubscriptionStatus] Статус обновлен в стейте.');
+    } catch (error) {
+      console.error('[refetchSubscriptionStatus] Ошибка при получении статуса:', error);
+      setDebugInfo({ error: String(error) }); // Показываем ошибку в debug
+      setSubscriptionStatus(null); // Сбрасываем статус при ошибке
     }
-  }, [userId]);
+  }, [userId]); // Зависит только от userId
+  // --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
-  // --- КАРДИНАЛЬНОЕ ИЗМЕНЕНИЕ: useEffect для ПЕРВОНАЧАЛЬНОЙ загрузки --- 
+  // --- КАРДИНАЛЬНО ИЗМЕНЕНО: useEffect для ПЕРВОНАЧАЛЬНОЙ загрузки ---
   useEffect(() => {
-    // Логируем установку userId
-    console.log(`[Initial Load Effect] Running. Current userId: ${userId}`);
-    if (!userId) {
-        console.log('[Initial Load Effect] userId is null, exiting.');
-        return;
+    console.log(`[Initial Load Effect] Запуск. Текущий userId: ${userId}`);
+    if (userId) {
+      console.log(`[Initial Load Effect] userId установлен: ${userId}. Вызов refetchSubscriptionStatus...`);
+      // Просто вызываем загрузку статуса ОДИН раз при наличии userId
+      refetchSubscriptionStatus();
+    } else {
+      console.log('[Initial Load Effect] userId пока null, статус не запрашиваем.');
     }
-    console.log(`[Initial Load Effect] userId is set: ${userId}. Proceeding with status check.`);
-
-    let isMounted = true; 
-    const initialApiCallDelay = 500; // Задержка перед первым вызовом API
-    const userTimestampKey = getUserSpecificKey(PREMIUM_TIMESTAMP_KEY, userId);
-
-    // 1. Синхронная проверка localStorage ПЕРЕД ЛЮБЫМИ ЗАПРОСАМИ
-    let premiumForcedByLocalStorage = false;
-    if (userTimestampKey) {
-        const storedTimestampStr = localStorage.getItem(userTimestampKey);
-        if (storedTimestampStr) {
-            const storedTimestamp = parseInt(storedTimestampStr, 10);
-            const now = Date.now();
-            if (!isNaN(storedTimestamp) && (now - storedTimestamp < PREMIUM_TIMESTAMP_LIFETIME_MS)) {
-                console.warn(`[Initial Load Effect] Found RECENT timestamp in localStorage. Forcing Premium status immediately.`);
-                // Немедленно устанавливаем статус Premium
-                setSubscriptionStatus({
-                    has_subscription: true,
-                    is_active: true,
-                    subscription_end_date: undefined 
-                });
-                premiumForcedByLocalStorage = true;
-            }
-        }
-    }
-
-    // 2. Запускаем первый вызов API с задержкой
-    const initialFetchTimer = setTimeout(async () => {
-        if (!isMounted) return; // Проверка перед вызовом
-        console.log(`[Initial Load Effect] Delay (${initialApiCallDelay}ms) ended. Calling refetchSubscriptionStatus for the first time...`);
-        await refetchSubscriptionStatus(); // Этот вызов сам обработает ответ и localStorage
-    }, initialApiCallDelay);
-
-    // 3. Логика повторного запроса (если нужно, но теперь менее критично)
-    // Можно оставить для дополнительной надежности, но с учетом localStorage
-    const secondFetchTimeout = 3000; // Таймаут перед второй попыткой (после первой)
-    const retryTimer = setTimeout(async () => {
-        if (!isMounted) return;
-        // Проверяем текущий статус ПОСЛЕ первой попытки refetch
-        setSubscriptionStatus(currentStatus => {
-            if (!currentStatus?.has_subscription) {
-                console.warn(`[Initial Load Effect] Status is still not Premium after first fetch + delay. Attempting second fetch...`);
-                refetchSubscriptionStatus(); // Повторный вызов
-            }
-            return currentStatus; // Не меняем статус здесь, только читаем
-        });
-    }, initialApiCallDelay + secondFetchTimeout); // Запускаем через 3.5с после начала
-
-    // Функция очистки
-    return () => {
-      isMounted = false; 
-      clearTimeout(initialFetchTimer); // Очищаем таймеры
-      clearTimeout(retryTimer);
-      console.log('[Initial Load Effect] Cleanup: component unmounted.');
-    };
-    // Перезапускаем эффект ТОЛЬКО при изменении userId
-  }, [userId]); 
-  // Убрали refetchSubscriptionStatus из зависимостей, чтобы избежать лишних перезапусков
+    // Этот эффект должен зависеть ТОЛЬКО от userId
+  }, [userId, refetchSubscriptionStatus]); // Добавляем refetchSubscriptionStatus в зависимости, так как он используется внутри
   // --- КОНЕЦ КАРДИНАЛЬНОГО ИЗМЕНЕНИЯ ---
 
   // useEffect для обновления при изменении видимости (остается без изменений)
@@ -547,80 +492,57 @@ function App() {
   // --- ВОССТАНОВЛЕНО: Состояние для текущего месяца календаря --- 
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
 
-  // --- ИЗМЕНЕНИЕ: Загрузка состояния ИЗ localStorage ПОСЛЕ аутентификации ---
+  // --- ИЗМЕНЕНО: Удалена логика сохранения/восстановления из localStorage ---
   useEffect(() => {
     if (isAuthenticated && userId) {
-      // Восстанавливаем состояние из localStorage, используя user-specific ключи
-      const channelKey = getUserSpecificKey('channelName', userId);
-      if (channelKey) {
-        const storedChannel = localStorage.getItem(channelKey);
-    if (storedChannel) {
-      setChannelName(storedChannel);
-        }
-    }
-    
-      const selectedChannelsKey = getUserSpecificKey('selectedChannels', userId);
-      if (selectedChannelsKey) {
-        const storedSelectedChannels = localStorage.getItem(selectedChannelsKey);
-    if (storedSelectedChannels) {
-      try {
-        setSelectedChannels(JSON.parse(storedSelectedChannels));
-    } catch (e) {
-        console.error('Ошибка при восстановлении выбранных каналов:', e);
-      }
-    }
-      }
+      // Загружаем только НЕ связанные со статусом подписки данные
+      // (канал, выбранные каналы и т.д.)
+       const channelKey = `${userId}_channelName`; // Простой ключ
+       const storedChannel = localStorage.getItem(channelKey);
+       if (storedChannel) setChannelName(storedChannel);
 
-      const allChannelsKey = getUserSpecificKey('allChannels', userId);
-      if (allChannelsKey) {
-        const storedChannels = localStorage.getItem(allChannelsKey);
-      if (storedChannels) {
-        try {
-          setAllChannels(JSON.parse(storedChannels));
-        } catch (e) {
-          console.error('Ошибка при восстановлении списка каналов:', e);
-        }
-        }
-      } else {
-          // Если список каналов не найден, загружаем его из постов
-          // (Это произойдет ниже в другом useEffect, зависящем от isAuthenticated)
-      }
-      
-      // Загружаем сохраненные посты (перенесено сюда для ясности, т.к. зависит от userId для заголовка)
-      fetchSavedPosts();
-
-      // Загрузка сохраненного анализа для ТЕКУЩЕГО выбранного канала
-      if (channelName) { // channelName будет установлен выше, если есть в localStorage
-        fetchSavedAnalysis(channelName);
-    }
-    }
-
-    // Устанавливаем флаг загрузки после попытки аутентификации/загрузки
-    // (Перенесено из старого useEffect)
-    setTimeout(() => {
-      setLoading(false);
-    }, 500);
-  }, [isAuthenticated, userId]); // Запускаем при изменении статуса аутентификации и userId
-
-  // --- ИЗМЕНЕНИЕ: Сохраняем канал в localStorage при изменении (ИСПОЛЬЗУЯ user-specific ключ) ---
-  useEffect(() => {
-    const key = getUserSpecificKey('channelName', userId);
-    if (key && channelName) {
-      localStorage.setItem(key, channelName);
-    }
-  }, [channelName, userId]); // Запускаем при изменении канала ИЛИ userId
-
-  // Загружаем список всех каналов при авторизации (этот useEffect можно упростить или объединить)
-  useEffect(() => {
-    if (isAuthenticated && userId) {
-       // Если allChannels пуст после попытки загрузки из localStorage, пробуем собрать из постов
-       if (allChannels.length === 0) {
-         console.log("Список каналов пуст, пытаемся обновить из постов...");
-         updateChannelsFromPosts(savedPosts); // Используем уже загруженные посты
+       const selectedChannelsKey = `${userId}_selectedChannels`;
+       const storedSelectedChannels = localStorage.getItem(selectedChannelsKey);
+       if (storedSelectedChannels) {
+         try { setSelectedChannels(JSON.parse(storedSelectedChannels)); } catch (e) {}
        }
+
+       const allChannelsKey = `${userId}_allChannels`;
+       const storedChannels = localStorage.getItem(allChannelsKey);
+       if (storedChannels) {
+         try { setAllChannels(JSON.parse(storedChannels)); } catch (e) {}
+       } else {
+         // Логика обновления каналов из постов остается
+       }
+      
+      // Загружаем сохраненные посты и анализ (это остается)
+      fetchSavedPosts();
+      if (channelName) {
+        fetchSavedAnalysis(channelName);
+      }
     }
-  }, [isAuthenticated, userId, allChannels.length, savedPosts]); // Добавили allChannels.length и savedPosts
+     setTimeout(() => setLoading(false), 500);
+  }, [isAuthenticated, userId]); // Зависимости не меняются
+
+  // --- ИЗМЕНЕНО: Сохранение в localStorage без user-specific ключей (если нужно) ---
+   useEffect(() => {
+     if (userId && channelName) { // Проверяем userId
+       localStorage.setItem(`${userId}_channelName`, channelName);
+     }
+   }, [channelName, userId]); // Зависимость от userId
   
+   useEffect(() => {
+     if (userId) { // Проверяем userId
+       localStorage.setItem(`${userId}_selectedChannels`, JSON.stringify(selectedChannels));
+     }
+   }, [selectedChannels, userId]); // Зависимость от userId
+  
+   useEffect(() => {
+     if (userId) { // Проверяем userId
+       localStorage.setItem(`${userId}_allChannels`, JSON.stringify(allChannels));
+     }
+   }, [allChannels, userId]); // Зависимость от userId
+
   // --- ВОССТАНОВЛЕНО: useEffect для генерации дней календаря --- 
   useEffect(() => {
     if (currentMonth && currentView === 'calendar') { // Добавляем проверку currentView
@@ -814,7 +736,7 @@ function App() {
       setAllChannels(prevChannels => {
         const updatedChannels = [...new Set([...prevChannels, ...newChannels])];
         // Сохраняем обновленный список в localStorage
-        const key = getUserSpecificKey('allChannels', userId);
+        const key = `${userId}_allChannels`;
         if (key) {
           localStorage.setItem(key, JSON.stringify(updatedChannels));
         }
@@ -1132,7 +1054,7 @@ function App() {
       if (!allChannels.includes(channelName)) {
         const updatedChannels = [...allChannels, channelName];
         setAllChannels(updatedChannels);
-        const allKey = getUserSpecificKey('allChannels', userId);
+        const allKey = `${userId}_allChannels`;
         if (allKey) {
           localStorage.setItem(allKey, JSON.stringify(updatedChannels));
         }
@@ -1141,7 +1063,7 @@ function App() {
         if (!selectedChannels.includes(channelName)) {
           const updatedSelected = [...selectedChannels, channelName];
           setSelectedChannels(updatedSelected);
-          const selectedKey = getUserSpecificKey('selectedChannels', userId);
+          const selectedKey = `${userId}_selectedChannels`;
           if (selectedKey) {
             localStorage.setItem(selectedKey, JSON.stringify(updatedSelected));
           }
@@ -1654,7 +1576,7 @@ function App() {
                           const updatedSelected = [...selectedChannels, channelName];
                           setSelectedChannels(updatedSelected);
                           // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
-                          const key = getUserSpecificKey('selectedChannels', userId);
+                          const key = `${userId}_selectedChannels`;
                           if (key) {
                             localStorage.setItem(key, JSON.stringify(updatedSelected));
                           }
@@ -1684,7 +1606,7 @@ function App() {
                             const updatedSelected = selectedChannels.filter(c => c !== channel);
                             setSelectedChannels(updatedSelected);
                             // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
-                            const key = getUserSpecificKey('selectedChannels', userId);
+                            const key = `${userId}_selectedChannels`;
                             if (key) {
                                localStorage.setItem(key, JSON.stringify(updatedSelected));
                             }
@@ -1770,7 +1692,7 @@ function App() {
                                 const updatedSelected = [...selectedChannels, channelName];
                                 setSelectedChannels(updatedSelected);
                                 // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
-                                const key = getUserSpecificKey('selectedChannels', userId);
+                                const key = `${userId}_selectedChannels`;
                                 if (key) {
                                   localStorage.setItem(key, JSON.stringify(updatedSelected));
                                 }
@@ -1797,7 +1719,7 @@ function App() {
                                    const updatedSelected = selectedChannels.filter(c => c !== channel);
                                    setSelectedChannels(updatedSelected);
                                    // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
-                                   const key = getUserSpecificKey('selectedChannels', userId);
+                                   const key = `${userId}_selectedChannels`;
                                    if (key) {
                                       localStorage.setItem(key, JSON.stringify(updatedSelected));
                                    }
