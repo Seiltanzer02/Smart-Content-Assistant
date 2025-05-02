@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Request, Form, Depends, Body
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Request, Form, Depends, Body, Response as FastAPIResponse
 import uvicorn
 import os
 from pydantic import BaseModel, Field, Json
@@ -3386,8 +3386,23 @@ async def resolve_user_id(request: Request):
 async def get_subscription_status(request: Request):
     user_id = request.query_params.get("user_id")
     logger.info(f'Запрос /subscription/status для user_id: {user_id}')
+    
+    # --- ДОБАВЛЕНО: Заголовки для запрета кэширования --- 
+    cache_headers = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+    # --- КОНЕЦ ДОБАВЛЕНИЯ --- 
+    
     if not user_id:
-        return {"error": "user_id обязателен", "user_id": user_id}
+        # Возвращаем JSONResponse с заголовками
+        return FastAPIResponse(
+            content=json.dumps({"error": "user_id обязателен", "user_id": user_id}),
+            media_type="application/json",
+            headers=cache_headers
+        )
+        
     try:
         # Получаем все подписки пользователя, сортируем по end_date DESC
         result = supabase.table("user_subscription").select("*").eq("user_id", int(user_id)).order("end_date", desc=True).execute()
@@ -3432,9 +3447,13 @@ async def get_subscription_status(request: Request):
                 "post_generation_count": active_sub.get("post_generation_count", 0)
             }
             logger.info(f'Возвращаем статус для user_id {user_id}: {response_data}')
-            return response_data
+            # Возвращаем JSONResponse с данными и заголовками
+            return FastAPIResponse(
+                content=json.dumps(response_data),
+                media_type="application/json",
+                headers=cache_headers
+            )
         else:
-            # Если цикл завершился и активная подписка не найдена
             response_data = {
                 "user_id": user_id,
                 "has_subscription": False,
@@ -3442,9 +3461,20 @@ async def get_subscription_status(request: Request):
                 "post_generation_count": 0
             }
             logger.info(f'Подписка не найдена или истекла для user_id {user_id}, возвращаем: {response_data}')
-            return response_data
-    # Основной except для ошибок запроса к БД или других внешних ошибок
+            # Возвращаем JSONResponse с данными и заголовками
+            return FastAPIResponse(
+                content=json.dumps(response_data),
+                media_type="application/json",
+                headers=cache_headers
+            )
+            
     except Exception as e:
         logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True)
-        return {"error": str(e), "user_id": user_id}
+        # Возвращаем JSONResponse с ошибкой и заголовками
+        return FastAPIResponse(
+            content=json.dumps({"error": str(e), "user_id": user_id}),
+            status_code=500,
+            media_type="application/json",
+            headers=cache_headers
+        )
 

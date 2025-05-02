@@ -393,42 +393,72 @@ function App() {
   const [userId, setUserId] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus | null>(null);
   // Переименовываем для ясности
-  const refetchSubscriptionStatus = useCallback(async () => {
-    if (!userId) return;
+  const refetchSubscriptionStatus = useCallback(async (): Promise<SubscriptionStatus | null> => {
+    if (!userId) return null;
     console.log('[refetchSubscriptionStatus] Fetching status from API...');
     try {
       const fetchedStatus = await getUserSubscriptionStatus(userId);
       console.log('[refetchSubscriptionStatus] Fetched status:', fetchedStatus);
-      // --- НОВАЯ ЛОГИКА: Защита от перезаписи Premium статуса старыми данными --- 
+      // Логика обновления состояния с защитой от отката
       setSubscriptionStatus(currentStatus => {
-        // Если текущий статус уже Premium (из оптимистичного обновления),
-        // а новый статус Free, ИГНОРИРУЕМ новый статус.
         if (currentStatus?.has_subscription && !fetchedStatus.has_subscription) {
           console.warn('[refetchSubscriptionStatus] Ignoring fetched free status because current status is premium.');
-          return currentStatus; // Возвращаем текущий (Premium) статус
+          return currentStatus;
         }
-        // Во всех остальных случаях обновляем на полученный с бэкенда статус
         console.log('[refetchSubscriptionStatus] Updating state with fetched status.');
         return fetchedStatus;
       });
-      // --- КОНЕЦ НОВОЙ ЛОГИКИ ---
+      return fetchedStatus; // Возвращаем полученный статус
     } catch (e) {
       console.error('[refetchSubscriptionStatus] Error fetching status:', e);
       setSubscriptionStatus(null); // Сбрасываем при ошибке
+      return null; // Возвращаем null при ошибке
     }
-  }, [userId]); // Зависимость только userId, т.к. setSubscriptionStatus стабилен
+  }, [userId]);
+
+  // --- ИЗМЕНЕНО: useEffect для ПЕРВОНАЧАЛЬНОЙ загрузки статуса с повторной попыткой --- 
   useEffect(() => {
-    refetchSubscriptionStatus(); // Используем новое имя
-  }, [userId, refetchSubscriptionStatus]); // Обновляем зависимость
-  useEffect(() => {
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        refetchSubscriptionStatus(); // Используем новое имя
+    // Добавляем проверку !userId в начало useEffect
+    if (!userId) return;
+
+    let isMounted = true; // Флаг для предотвращения обновления состояния после размонтирования
+    const initialFetchTimeout = 2000; // Задержка перед повторной попыткой
+
+    const performInitialFetch = async () => {
+      console.log('[Initial Fetch] Attempting first fetch...');
+      // Используем refetchSubscriptionStatus, который уже объявлен ВНЕ этого useEffect
+      const firstStatus = await refetchSubscriptionStatus();
+
+      // Если компонент размонтирован или первый статус уже Premium, выходим
+      if (!isMounted || firstStatus?.has_subscription) {
+         console.log('[Initial Fetch] Exiting: component unmounted or first fetch returned premium.');
+         return;
+      }
+
+      // Если первый статус НЕ Premium (или null), ждем и пробуем еще раз
+      console.log(`[Initial Fetch] First fetch was not premium. Waiting ${initialFetchTimeout}ms for retry...`);
+      await new Promise(resolve => setTimeout(resolve, initialFetchTimeout));
+
+      // Если компонент все еще смонтирован, делаем вторую попытку
+      if (isMounted) {
+        console.log('[Initial Fetch] Attempting second fetch...');
+        // Используем refetchSubscriptionStatus снова
+        await refetchSubscriptionStatus(); // Вызываем еще раз, он сам обновит состояние
+        console.log('[Initial Fetch] Second fetch complete.');
+      } else {
+        console.log('[Initial Fetch] Exiting retry: component unmounted during wait.');
       }
     };
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, [refetchSubscriptionStatus]); // Обновляем зависимость
+
+    performInitialFetch();
+
+    // Функция очистки для useEffect
+    return () => {
+      isMounted = false; // Помечаем компонент как размонтированный
+      console.log('[Initial Fetch] Cleanup: component unmounted.');
+    };
+  }, [userId, refetchSubscriptionStatus]); // Зависимости: userId и сама функция refetch
+  // --- КОНЕЦ ИЗМЕНЕНИЯ ---\n\n  // useEffect для обновления при изменении видимости (остается без изменений)\n  useEffect(() => {\n    const onVisibility = () => {\n      if (document.visibilityState === 'visible') {\n        refetchSubscriptionStatus(); // Используем новое имя\n      }\n    };\n    document.addEventListener('visibilitychange', onVisibility);\n    return () => document.removeEventListener('visibilitychange', onVisibility);\n  }, [refetchSubscriptionStatus]); // Обновляем зависимость
   const [currentView, setCurrentView] = useState<ViewType>('analyze');
   const [channelName, setChannelName] = useState<string>('');
   
