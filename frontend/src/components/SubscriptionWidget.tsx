@@ -63,8 +63,11 @@ const SubscriptionWidget: React.FC<{
               };
               setSubscriptionStatus(optimisticStatus);
 
-              console.log('Refetching actual status in background...');
-              onSubscriptionUpdate();
+              console.log('Scheduling refetch of actual status in 3 seconds...');
+              setTimeout(() => {
+                console.log('Refetching actual status now...');
+                onSubscriptionUpdate();
+              }, 3000);
 
             } else if (status === 'failed') {
               console.log('Payment status: failed');
