@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/SubscriptionWidget.css';
-import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice } from '../api/subscription';
+import { getUserSubscriptionStatus, SubscriptionStatus } from '../api/subscription';
 
 interface SubscriptionWidgetProps {
   userId: string | null;
@@ -15,7 +15,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
-  const SUBSCRIPTION_PRICE = 70; // в Stars
+  const SUBSCRIPTION_PRICE = 1;
   const [isSubscribing, setIsSubscribing] = useState(false);
   
   // Инициализация и настройка Telegram WebApp
@@ -31,7 +31,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       
       // Настраиваем главную кнопку
       if (window.Telegram.WebApp.MainButton) {
-        window.Telegram.WebApp.MainButton.setText('Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars');
+        window.Telegram.WebApp.MainButton.setText('Подписаться за ' + SUBSCRIPTION_PRICE + ' Star');
         window.Telegram.WebApp.MainButton.color = '#2481cc';
         window.Telegram.WebApp.MainButton.textColor = '#ffffff';
         if (isActive) {
@@ -110,7 +110,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     // Показываем подтверждение через Telegram WebApp
     if (window.Telegram?.WebApp?.showConfirm) {
       window.Telegram.WebApp.showConfirm(
-        'Вы хотите оформить подписку за ' + SUBSCRIPTION_PRICE + ' Stars?',
+        'Вы хотите оформить подписку за ' + SUBSCRIPTION_PRICE + ' Star?',
         (confirmed) => {
           if (confirmed) {
             handleSubscribe();
@@ -123,20 +123,18 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     }
   };
   
-  const handleInvoiceGeneration = async (userId: number) => {
+  const handleInvoiceGeneration = async () => {
+    if (!userId) {
+      setError("Не удалось определить ID пользователя");
+      return;
+    }
     try {
       setIsSubscribing(true);
-      // Получаем invoice_url с backend
-      const response = await fetch('/generate-stars-invoice-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, amount: 70 })
-      });
-      const data = await response.json();
-      if (data.success && data.invoice_link) {
-        if (window?.Telegram?.WebApp && typeof window?.Telegram?.WebApp.openInvoice === 'function') {
-          window.Telegram.WebApp.openInvoice(data.invoice_link, (status) => {
-            if (status === 'paid') {
+      if (window?.Telegram?.WebApp && typeof window?.Telegram?.WebApp.openInvoice === 'function') {
+        window.Telegram.WebApp.openInvoice(
+          { slug: 'stars', amount: SUBSCRIPTION_PRICE },
+          (paymentStatus) => {
+            if (paymentStatus === 'paid') {
               fetchSubscriptionStatus();
               if (window?.Telegram?.WebApp?.showPopup) {
                 window.Telegram.WebApp.showPopup({
@@ -145,29 +143,24 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
                   buttons: [{ type: 'ok' }]
                 });
               }
-              setTimeout(() => {
-                if (window?.Telegram?.WebApp?.close) {
-                  window.Telegram.WebApp.close();
-                }
-              }, 300);
-            } else if (status === 'failed') {
-              setError('Оплата не удалась. Пожалуйста, попробуйте позже.');
-            } else if (status === 'cancelled') {
-              setError('Платеж был отменен.');
+            } else if (paymentStatus === 'failed' || paymentStatus === 'cancelled') {
+              if (window?.Telegram?.WebApp?.showPopup) {
+                window.Telegram.WebApp.showPopup({
+                  title: 'Ошибка оплаты',
+                  message: 'Не удалось завершить оплату. Пожалуйста, попробуйте снова.',
+                  buttons: [{ type: 'ok' }]
+                });
+              }
             }
-            setIsSubscribing(false);
           });
-        } else {
-          setError('Оплата через Stars недоступна в этом окружении.');
-          setIsSubscribing(false);
-        }
       } else {
-        setError(data.error || 'Ошибка генерации инвойса');
-        setIsSubscribing(false);
+        console.error('Telegram WebApp или openInvoice недоступен.');
+        setError('Не удалось инициировать оплату через Telegram.');
       }
-    } catch (error) {
-      console.error('Ошибка при генерации Stars invoice link:', error);
-      setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
+    } catch (err: any) {
+      console.error('Ошибка при генерации инвойса:', err);
+      setError(err.message || 'Не удалось начать процесс оплаты.');
+    } finally {
       setIsSubscribing(false);
     }
   };
@@ -183,7 +176,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       }
       
       // Генерируем инвойс для оплаты
-      await handleInvoiceGeneration(userId);
+      await handleInvoiceGeneration();
     } catch (error) {
       console.error('Ошибка при подписке:', error);
       setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
@@ -216,8 +209,8 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       ) : (
         <div className="subscription-free">
           <div className="status-badge free">Бесплатный план</div>
-          <p>Использовано анализов: {status?.analysis_count || 0}/2</p>
-          <p>Использовано генераций постов: {status?.post_generation_count || 0}/2</p>
+          <p>Доступно бесплатных анализов: {status?.analysis_count === null ? 'Неограниченно' : (2 - (status?.analysis_count || 0))}</p>
+          <p>Доступно бесплатных генераций постов: {status?.post_generation_count === null ? 'Неограниченно' : (2 - (status?.post_generation_count || 0))}</p>
           
           {showPaymentInfo ? (
             <div className="payment-info">
@@ -226,7 +219,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
               <ol>
                 <li>Нажмите кнопку "Оплатить" выше</li>
                 <li>Откроется чат с нашим ботом</li>
-                <li>Нажмите кнопку "Оплатить {SUBSCRIPTION_PRICE} Stars" в боте</li>
+                <li>Нажмите кнопку "Оплатить {SUBSCRIPTION_PRICE} Star" в боте</li>
                 <li>Подтвердите платеж</li>
                 <li>Вернитесь в это приложение</li>
               </ol>
@@ -240,18 +233,14 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
             </div>
           ) : (
             <div className="subscription-offer">
-              <h4>Получите безлимитный доступ</h4>
-              <ul>
-                <li>Неограниченный анализ каналов</li>
-                <li>Неограниченная генерация постов</li>
-                <li>Сохранение данных в облаке</li>
-              </ul>
-              <button 
+              <h4>Получите Premium</h4>
+              <p>Снимите все ограничения и получите полный доступ ко всем функциям.</p>
+              <button
                 className="subscribe-button"
-                onClick={handleSubscribe}
+                onClick={handleInvoiceGeneration}
                 disabled={isSubscribing}
               >
-                {isSubscribing ? 'Создание платежа...' : 'Подписаться за 70 Stars'}
+                {isSubscribing ? 'Обработка...' : `Подписаться за ${SUBSCRIPTION_PRICE} Star`}
               </button>
             </div>
           )}
