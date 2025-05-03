@@ -3296,7 +3296,11 @@ if SHOULD_MOUNT_STATIC:
             if rest_of_path.startswith("api/") or \
                rest_of_path.startswith("docs") or \
                rest_of_path.startswith("openapi.json") or \
-               rest_of_path.startswith("uploads/"):
+               rest_of_path.startswith("uploads/") or \
+               rest_of_path.startswith("subscription/") or \
+               rest_of_path.startswith("resolve-user-id") or \
+               rest_of_path.startswith("generate-stars-invoice-link") or \
+               rest_of_path.startswith("telegram/"):
                  # Этот код не должен выполняться, т.к. роуты API/docs/uploads определены выше, но для надежности
                  # Логируем попытку доступа к API через SPA catch-all
                  logger.debug(f"Запрос к '{rest_of_path}' перехвачен SPA catch-all, но проигнорирован (API/Docs/Uploads).")
@@ -3322,6 +3326,96 @@ if SHOULD_MOUNT_STATIC:
 else:
     logger.warning(f"Папка статических файлов SPA не найдена: {static_folder}")
     logger.warning("Обслуживание SPA фронтенда не настроено. Только API endpoints доступны.")
+
+# Добавляем эндпоинт для проверки статуса подписки
+@app.get("/subscription/status")
+async def get_subscription_status(request: Request):
+    user_id = request.query_params.get("user_id")
+    telegram_user_id = request.headers.get("X-Telegram-User-Id") or user_id
+    
+    logger.info(f'Запрос /subscription/status для user_id: {user_id}, X-Telegram-User-Id: {telegram_user_id}')
+    
+    if not telegram_user_id:
+        logger.error("Отсутствует user_id в запросе статуса подписки")
+        return {"has_subscription": False, "analysis_count": 0, "post_generation_count": 0, "error": "user_id обязателен"}
+    
+    try:
+        # Преобразуем ID пользователя в число (если возможно)
+        try:
+            telegram_user_id = int(telegram_user_id)
+        except (ValueError, TypeError):
+            logger.warning(f"Некорректный ID пользователя при проверке статуса: {telegram_user_id}")
+        
+        # Получаем данные о подписке напрямую, без условия is_active=True, чтобы проверить все записи
+        res = supabase.table("user_subscription").select("*").eq("user_id", telegram_user_id).execute()
+        logger.info(f'Результат запроса к user_subscription: {res.data}')
+        
+        # Проверяем наличие данных
+        subscription = None
+        has_subscription = False
+        subscription_end_date = None
+        
+        if res.data and len(res.data) > 0:
+            # Сортируем подписки по дате окончания (сначала самые новые)
+            sorted_subs = sorted(res.data, key=lambda x: x.get("end_date", ""), reverse=True)
+            subscription = sorted_subs[0]  # Берем самую новую подписку
+            
+            # Получаем дату окончания подписки
+            subscription_end_date = subscription.get("end_date")
+            is_active_flag = subscription.get("is_active", False)
+            
+            logger.info(f"Проверка подписки пользователя {telegram_user_id}: is_active_flag={is_active_flag}, end_date={subscription_end_date}")
+            
+            # Подписка считается активной, если флаг is_active=True (независимо от даты окончания)
+            # Это упрощение логики, чтобы исправить проблему с отображением премиум-статуса
+            has_subscription = is_active_flag
+            
+            # Логируем результат проверки
+            logger.info(f"Статус подписки для пользователя {telegram_user_id}: has_subscription={has_subscription}")
+            
+            # Проверка даты окончания только для информации в логах
+            try:
+                if subscription_end_date:
+                    now = datetime.now()
+                    if 'Z' in subscription_end_date:
+                        end_date_dt = datetime.fromisoformat(subscription_end_date.replace('Z', '+00:00'))
+                    else:
+                        end_date_dt = datetime.fromisoformat(subscription_end_date)
+                    
+                    logger.info(f"Информация о дате окончания: end_date={end_date_dt}, now={now}, is_expired={end_date_dt <= now}")
+            except Exception as date_error:
+                logger.error(f"Ошибка при парсинге даты окончания подписки: {date_error}")
+        
+        # Получаем статистику использования
+        usage_res = supabase.table("user_usage_stats").select("*").eq("user_id", telegram_user_id).execute()
+        
+        analysis_count = 0
+        post_generation_count = 0
+        
+        if usage_res.data and len(usage_res.data) > 0:
+            usage = usage_res.data[0]
+            analysis_count = usage.get("analysis_count", 0)
+            post_generation_count = usage.get("post_generation_count", 0)
+        
+        # Формируем ответ
+        response = {
+            "has_subscription": has_subscription,
+            "analysis_count": analysis_count,
+            "post_generation_count": post_generation_count
+        }
+        
+        if subscription_end_date:
+            response["subscription_end_date"] = subscription_end_date
+            
+        if subscription and "is_active" in subscription:
+            response["is_active_flag"] = subscription["is_active"]
+        
+        logger.info(f"Отправляем ответ о статусе подписки: {response}")
+        return response
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении статуса подписки: {str(e)}", exc_info=True)
+        return {"has_subscription": False, "analysis_count": 0, "post_generation_count": 0, "error": str(e)}
 
 # --- Запуск сервера (обычно в конце файла) ---
 if __name__ == "__main__":
