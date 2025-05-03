@@ -3343,64 +3343,6 @@ static_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fronte
 # ФЛАГ для монтирования статики в конце файла
 SHOULD_MOUNT_STATIC = os.path.exists(static_folder) and os.path.isdir(static_folder)
 
-if SHOULD_MOUNT_STATIC:
-    logger.info(f"Статические файлы SPA будут обслуживаться из папки: {static_folder}")
-    try: # ИСПРАВЛЕНО: Добавлен блок try...except
-        app.mount("/", StaticFiles(directory=static_folder, html=True), name="static-spa") # ИСПРАВЛЕНО: Убраны лишние `\`
-        logger.info(f"Статические файлы SPA успешно смонтированы в корневом пути '/'")
-
-        # Явно добавим обработчик для корневого пути, если StaticFiles не справляется
-        @app.get("/") # ИСПРАВЛЕНО: Убраны лишние `\`
-        async def serve_index():
-            index_path = os.path.join(static_folder, "index.html")
-            if os.path.exists(index_path):
-                 return FileResponse(index_path)
-            else:
-                 logger.error(f"Файл index.html не найден в {static_folder}")
-                 raise HTTPException(status_code=404, detail="Index file not found")
-
-        # Обработчик для всех остальных путей SPA (если StaticFiles(html=True) недостаточно)
-        # Этот обработчик ПЕРЕХВАТИТ все, что не было перехвачено ранее (/api, /uploads, etc.)
-        @app.get("/{rest_of_path:path}") # ИСПРАВЛЕНО: Убраны лишние `\`
-        async def serve_spa_catch_all(request: Request, rest_of_path: str):
-            # Исключаем API пути, чтобы избежать конфликтов (на всякий случай)
-            # Проверяем, не начинается ли путь с /api/, /docs, /openapi.json или /uploads/
-            if rest_of_path.startswith("api/") or \
-               rest_of_path.startswith("docs") or \
-               rest_of_path.startswith("openapi.json") or \
-               rest_of_path.startswith("uploads/"):
-                 # Этот код не должен выполняться, т.к. роуты API/docs/uploads определены выше, но для надежности
-                 # Логируем попытку доступа к API через SPA catch-all
-                 logger.debug(f"Запрос к '{rest_of_path}' перехвачен SPA catch-all, но проигнорирован (API/Docs/Uploads).")
-                 # Важно вернуть 404, чтобы FastAPI мог найти правильный обработчик, если он есть
-                 raise HTTPException(status_code=404, detail="Not Found (SPA Catch-all exclusion)")
-
-
-            index_path = os.path.join(static_folder, "index.html")
-            if os.path.exists(index_path):
-                # Логируем возврат index.html для SPA пути
-                logger.debug(f"Возвращаем index.html для SPA пути: '{rest_of_path}'")
-                return FileResponse(index_path)
-            else:
-                logger.error(f"Файл index.html не найден в {static_folder} для пути {rest_of_path}")
-                raise HTTPException(status_code=404, detail="Index file not found")
-
-        logger.info("Обработчики для SPA настроены.")
-
-    except RuntimeError as mount_error: # ИСПРАВЛЕНО: Добавлен блок except
-        logger.error(f"Ошибка при монтировании статических файлов SPA: {mount_error}. Возможно, имя 'static-spa' уже используется или путь '/' занят.")
-    except Exception as e: # ИСПРАВЛЕНО: Добавлен блок except
-        logger.error(f"Непредвиденная ошибка при монтировании статических файлов SPA: {e}")
-else:
-    logger.warning(f"Папка статических файлов SPA не найдена: {static_folder}")
-    logger.warning("Обслуживание SPA фронтенда не настроено. Только API endpoints доступны.")
-
-# --- Запуск сервера (обычно в конце файла) ---
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
-    logger.info(f"Запуск сервера на порту {port}")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
-
 # Добавляем эндпоинт для получения статуса подписки
 @app.get("/subscription/status")
 async def get_subscription_status(request: Request):
@@ -3523,4 +3465,65 @@ async def get_subscription_status(request: Request):
         logger.error(f'--- Returning CRITICAL error response for /subscription/status: {error_response} ---')
         # Use JSONResponse to send body with 500 status
         return JSONResponse(status_code=500, content=error_response)
+
+# --- ТЕПЕРЬ НАСТРАИВАЕМ ОБСЛУЖИВАНИЕ СТАТИКИ SPA ПОСЛЕ ВСЕХ API-ЭНДПОИНТОВ ---
+if SHOULD_MOUNT_STATIC:
+    logger.info(f"Статические файлы SPA будут обслуживаться из папки: {static_folder}")
+    try: # ИСПРАВЛЕНО: Добавлен блок try...except
+        app.mount("/", StaticFiles(directory=static_folder, html=True), name="static-spa") # ИСПРАВЛЕНО: Убраны лишние `\`
+        logger.info(f"Статические файлы SPA успешно смонтированы в корневом пути '/'")
+
+        # Явно добавим обработчик для корневого пути, если StaticFiles не справляется
+        @app.get("/") # ИСПРАВЛЕНО: Убраны лишние `\`
+        async def serve_index():
+            index_path = os.path.join(static_folder, "index.html")
+            if os.path.exists(index_path):
+                 return FileResponse(index_path)
+            else:
+                 logger.error(f"Файл index.html не найден в {static_folder}")
+                 raise HTTPException(status_code=404, detail="Index file not found")
+
+        # Обработчик для всех остальных путей SPA (если StaticFiles(html=True) недостаточно)
+        # Этот обработчик ПЕРЕХВАТИТ все, что не было перехвачено ранее (/api, /uploads, etc.)
+        @app.get("/{rest_of_path:path}") # ИСПРАВЛЕНО: Убраны лишние `\`
+        async def serve_spa_catch_all(request: Request, rest_of_path: str):
+            # Исключаем API пути, чтобы избежать конфликтов (на всякий случай)
+            # Проверяем, не начинается ли путь с /api/, /docs, /openapi.json или /uploads/
+            # Явно исключаем /subscription/status
+            if rest_of_path.startswith("api/") or \
+               rest_of_path.startswith("docs") or \
+               rest_of_path.startswith("openapi.json") or \
+               rest_of_path.startswith("uploads/") or \
+               rest_of_path == "subscription/status":
+                 # Этот код не должен выполняться, т.к. роуты API/docs/uploads определены выше, но для надежности
+                 # Логируем попытку доступа к API через SPA catch-all
+                 logger.debug(f"Запрос к '{rest_of_path}' перехвачен SPA catch-all, но проигнорирован (API/Docs/Uploads).")
+                 # Важно вернуть 404, чтобы FastAPI мог найти правильный обработчик, если он есть
+                 raise HTTPException(status_code=404, detail="Not Found (SPA Catch-all exclusion)")
+
+
+            index_path = os.path.join(static_folder, "index.html")
+            if os.path.exists(index_path):
+                # Логируем возврат index.html для SPA пути
+                logger.debug(f"Возвращаем index.html для SPA пути: '{rest_of_path}'")
+                return FileResponse(index_path)
+            else:
+                logger.error(f"Файл index.html не найден в {static_folder} для пути {rest_of_path}")
+                raise HTTPException(status_code=404, detail="Index file not found")
+
+        logger.info("Обработчики для SPA настроены.")
+
+    except RuntimeError as mount_error: # ИСПРАВЛЕНО: Добавлен блок except
+        logger.error(f"Ошибка при монтировании статических файлов SPA: {mount_error}. Возможно, имя 'static-spa' уже используется или путь '/' занят.")
+    except Exception as e: # ИСПРАВЛЕНО: Добавлен блок except
+        logger.error(f"Непредвиденная ошибка при монтировании статических файлов SPA: {e}")
+else:
+    logger.warning(f"Папка статических файлов SPA не найдена: {static_folder}")
+    logger.warning("Обслуживание SPA фронтенда не настроено. Только API endpoints доступны.")
+
+# --- Запуск сервера (обычно в конце файла) ---
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))
+    logger.info(f"Запуск сервера на порту {port}")
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
 
