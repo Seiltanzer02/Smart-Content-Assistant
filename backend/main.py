@@ -3424,38 +3424,56 @@ async def get_subscription_status(request: Request):
         logger.error(f"Invalid User ID format: {user_id}")
         raise HTTPException(status_code=400, detail="Некорректный user_id")
 
+    has_active_subscription = False # Инициализируем как False
+    end_date = None
+    usage_stats = {"analysis_count": 0, "post_generation_count": 0}
+
     try:
         now_utc = datetime.utcnow()
-        now_iso = now_utc.isoformat() # Текущее время в UTC для сравнения
+        now_iso = now_utc.isoformat()
         logger.debug(f"Current UTC time for comparison: {now_iso}")
 
-        # Запрашиваем активную подписку, которая еще не истекла
-        logger.info(f"Querying active subscription for user_id={user_id_int}")
-        result = supabase.table("user_subscription")\
-            .select("is_active, end_date, id")\
+        # --- УПРОЩЕННЫЙ ЗАПРОС ---
+        # Просто проверяем, есть ли ХОТЯ БЫ ОДНА активная запись
+        logger.info(f"Checking for *any* active subscription for user_id={user_id_int}")
+        count_result = supabase.table("user_subscription")\
+            .select("id", count="exact")\
             .eq("user_id", user_id_int)\
             .eq("is_active", True)\
             .gt("end_date", now_iso)\
-            .order("end_date", desc=True)\
             .limit(1)\
-            .maybe_single()\
             .execute()
 
-        logger.info(f'[Status] Raw Supabase response for active subscription query for user {user_id_int}: {result}')
+        logger.info(f'[Status] Raw Supabase response for active subscription count query: {count_result}')
 
-        # Явная проверка данных перед использованием
-        subscription_record = result.data if hasattr(result, 'data') and isinstance(result.data, dict) else None
-        logger.info(f'[Status] Extracted subscription_record: {subscription_record}')
+        # Проверяем результат count_result
+        if hasattr(count_result, 'count') and count_result.count is not None and count_result.count > 0:
+            has_active_subscription = True
+            logger.info(f"[Status] Active subscription record found for user {user_id_int} (count > 0).")
+            # Если подписка есть, можем дополнительно запросить дату окончания, если она нужна
+            try:
+                 date_result = supabase.table("user_subscription")\
+                    .select("end_date")\
+                    .eq("user_id", user_id_int)\
+                    .eq("is_active", True)\
+                    .gt("end_date", now_iso)\
+                    .order("end_date", desc=True)\
+                    .limit(1)\
+                    .maybe_single()\
+                    .execute()
+                 if date_result.data:
+                     end_date = date_result.data.get("end_date")
+                 logger.info(f"[Status] Fetched end_date for active subscription: {end_date}")
+            except Exception as date_e:
+                 logger.error(f"[Status] Error fetching end_date for active subscription: {date_e}")
+                 end_date = None # Оставляем None при ошибке
+        else:
+            has_active_subscription = False
+            logger.info(f"[Status] No active subscription record found for user {user_id_int} (count is 0 or null).")
 
-        # Определяем статус на основе ИЗВЛЕЧЕННЫХ данных
-        has_active_subscription = bool(subscription_record)
-        end_date = subscription_record.get("end_date") if subscription_record else None
-        logger.info(f'[Status] Calculated has_active_subscription: {has_active_subscription} (Type: {type(has_active_subscription)})')
-
-        # Запросим статистику использования (если подписки нет)
-        usage_stats = {"analysis_count": 0, "post_generation_count": 0}
+        # Запросим статистику использования ТОЛЬКО если подписки нет
         if not has_active_subscription:
-            logger.info(f"No active subscription found for user {user_id_int}. Querying usage stats.")
+            logger.info(f"Querying usage stats for user {user_id_int}.")
             try:
                 stats_result = supabase.table("user_usage_stats")\
                     .select("analysis_count, post_generation_count")\
@@ -3469,28 +3487,40 @@ async def get_subscription_status(request: Request):
             except Exception as stats_e:
                 logger.error(f'Ошибка при получении статистики использования для user {user_id_int}: {stats_e}')
         else:
-             logger.info(f"Active subscription found for user {user_id_int}. Skipping usage stats query.")
+             logger.info(f"Active subscription found. Skipping usage stats query.")
 
-        # Формирование ответа
+        # --- ФОРМИРОВАНИЕ ОТВЕТА ---
         response_data = {
-            "has_subscription": has_active_subscription, # Используем явно вычисленное значение
+            "has_subscription": has_active_subscription, # Это уже точно bool
             "subscription_end_date": end_date,
             "analysis_count": usage_stats["analysis_count"],
             "post_generation_count": usage_stats["post_generation_count"]
         }
 
-        # Финальное логирование перед возвратом
+        # --- ФИНАЛЬНОЕ ЛОГИРОВАНИЕ ---
         logger.info(f'--- Preparing final response for /subscription/status for user {user_id_int} ---')
-        logger.info(f'Value from DB check (bool(subscription_record)): {has_active_subscription}')
+        logger.info(f'Value based on subscription count check: {has_active_subscription}')
         logger.info(f'Final response_data dict being returned: {response_data}')
         logger.info(f'Type of has_subscription in response_data: {type(response_data.get("has_subscription"))}')
         logger.info(f'--- Returning final response for /subscription/status ---')
         return response_data
 
     except Exception as e:
-        # ... (обработка исключения с логированием) ...
         logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True)
-        # Добавляем логирование ошибки перед HTTPException
         logger.error(f'--- Error occurred in /subscription/status for user {user_id} ---')
+        # В случае ЛЮБОЙ ошибки возвращаем статус "нет подписки", но с 500 кодом
+        # Фронтенд должен обработать ошибку и не полагаться на тело ответа
+        # Но если он все же прочитает тело, там будет has_subscription: false
+        error_response_data = {
+            "has_subscription": False,
+            "subscription_end_date": None,
+            "analysis_count": 0,
+            "post_generation_count": 0,
+            "error_details": f"Internal server error: {str(e)}" # Добавляем детали ошибки
+        }
+        logger.info(f'--- Returning error response for /subscription/status: {error_response_data} ---')
+        # Возвращаем 500 ошибку, но с телом, указывающим на отсутствие подписки
+        # return JSONResponse(status_code=500, content=error_response_data)
+        # ИЛИ лучше стандартный HTTPException, как было:
         raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера: {str(e)}")
 
