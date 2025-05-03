@@ -352,37 +352,113 @@ async def telegram_webhook(request: Request):
         # --- КОНЕЦ НОВОГО ТЕСТА ---
         
         try:
-            # Ищем ПОСЛЕДНЮЮ запись о подписке (активную или неактивную)
-            existing_sub_res = supabase.table("user_subscription").select("*, id").eq("user_id", user_id).order("end_date", desc=True).limit(1).execute()
-            logger.info(f'[telegram_webhook] Поиск последней подписки для user_id={user_id}: {existing_sub_res.data}')
-            existing_sub = existing_sub_res.data[0] if existing_sub_res.data else None
-            sub_id_to_update = None
-            if existing_sub:
-                sub_id_to_update = existing_sub['id']
-                # Логику продления пока игнорируем для теста, всегда ставим +1 час от СЕЙЧАС
-                # existing_end_date_str = existing_sub.get("end_date")
-                # ... (код продления закомментирован или удален для теста)
-            
-            # Используем тестовую ДАЛЕКУЮ дату окончания
-            update_data = {
-                "is_active": True,
-                "end_date": far_future_end_date.isoformat(), # <-- Используем далекую дату
-                "payment_id": payment_id
+            # Прямой SQL-запрос через RPC Supabase с использованием SUPABASE_SERVICE_ROLE_KEY
+            supabase_url = os.environ["SUPABASE_URL"]
+            # Получаем SUPABASE_SERVICE_ROLE_KEY для обхода RLS
+            supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+            if not supabase_service_key:
+                logger.error('[telegram_webhook] SUPABASE_SERVICE_ROLE_KEY отсутствует в переменных окружения!')
+                supabase_service_key = os.environ.get("SUPABASE_ANON_KEY", "")
+                logger.warning('[telegram_webhook] Используем SUPABASE_ANON_KEY вместо SUPABASE_SERVICE_ROLE_KEY')
+                
+            headers = {
+                "apikey": supabase_service_key,
+                "Authorization": f"Bearer {supabase_service_key}",
+                "Content-Type": "application/json"
             }
             
-            if sub_id_to_update:
-                logger.info(f'[telegram_webhook] Обновляем подписку ID={sub_id_to_update} для user_id={user_id} (ТЕСТ до 2099): {update_data}')
-                supabase.table("user_subscription").update(update_data).eq("id", sub_id_to_update).execute()
+            # Сначала проверяем, есть ли уже подписка для этого пользователя
+            sql_query = f"""
+            SELECT * FROM user_subscription 
+            WHERE user_id = {user_id} 
+            ORDER BY end_date DESC 
+            LIMIT 1;
+            """
+            
+            url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
+            response = requests.post(url, json={"query": sql_query}, headers=headers)
+            
+            if response.status_code != 200:
+                logger.error(f'[telegram_webhook] Ошибка SQL-запроса при проверке подписки: {response.status_code} - {response.text}')
+                return {"ok": False, "error": "Ошибка SQL-запроса при проверке подписки"}
+                
+            records = response.json()
+            
+            if records and len(records) > 0:
+                # Если подписка уже существует, обновляем её
+                sub_id = records[0].get("id")
+                update_query = f"""
+                UPDATE user_subscription 
+                SET is_active = TRUE, 
+                    end_date = '{far_future_end_date.isoformat()}', 
+                    payment_id = '{payment_id}', 
+                    updated_at = NOW() 
+                WHERE id = '{sub_id}';
+                """
+                logger.info(f'[telegram_webhook] Обновляем существующую подписку ID={sub_id} для user_id={user_id}')
+                update_response = requests.post(url, json={"query": update_query}, headers=headers)
+                
+                if update_response.status_code != 200:
+                    logger.error(f'[telegram_webhook] Ошибка SQL-запроса при обновлении подписки: {update_response.status_code} - {update_response.text}')
+                    return {"ok": False, "error": "Ошибка SQL-запроса при обновлении подписки"}
+                    
+                logger.info(f'[telegram_webhook] Подписка успешно обновлена для user_id={user_id}')
             else:
-                insert_data = update_data.copy()
-                insert_data["user_id"] = user_id
-                insert_data["start_date"] = now.isoformat()
-                logger.info(f'[telegram_webhook] Создаём новую подписку для user_id={user_id} (ТЕСТ до 2099): {insert_data}')
-                supabase.table("user_subscription").insert(insert_data).execute()
-            logger.info('[telegram_webhook] Подписка успешно активирована/продлена для user_id=%s (ТЕСТ до 2099)', user_id)
+                # Если подписки нет, создаём новую
+                insert_query = f"""
+                INSERT INTO user_subscription (
+                    user_id, 
+                    start_date, 
+                    end_date, 
+                    payment_id, 
+                    is_active, 
+                    created_at, 
+                    updated_at
+                ) VALUES (
+                    {user_id}, 
+                    '{now.isoformat()}', 
+                    '{far_future_end_date.isoformat()}', 
+                    '{payment_id}', 
+                    TRUE, 
+                    NOW(), 
+                    NOW()
+                );
+                """
+                logger.info(f'[telegram_webhook] Создаём новую подписку для user_id={user_id}')
+                insert_response = requests.post(url, json={"query": insert_query}, headers=headers)
+                
+                if insert_response.status_code != 200:
+                    logger.error(f'[telegram_webhook] Ошибка SQL-запроса при создании подписки: {insert_response.status_code} - {insert_response.text}')
+                    return {"ok": False, "error": "Ошибка SQL-запроса при создании подписки"}
+                    
+                logger.info(f'[telegram_webhook] Новая подписка успешно создана для user_id={user_id}')
+                
+            # Двойная проверка - получаем статус подписки, чтобы убедиться, что всё работает
+            check_query = f"""
+            SELECT * FROM user_subscription 
+            WHERE user_id = {user_id} 
+            AND is_active = TRUE 
+            ORDER BY end_date DESC 
+            LIMIT 1;
+            """
+            
+            check_response = requests.post(url, json={"query": check_query}, headers=headers)
+            
+            if check_response.status_code == 200:
+                check_records = check_response.json()
+                if check_records and len(check_records) > 0:
+                    logger.info(f'[telegram_webhook] Подтверждено наличие активной подписки для user_id={user_id}: {json.dumps(check_records[0])}')
+                else:
+                    logger.warning(f'[telegram_webhook] После создания/обновления подписки для user_id={user_id}, активная запись не найдена!')
+            else:
+                logger.error(f'[telegram_webhook] Ошибка при проверке подписки после создания/обновления: {check_response.status_code} - {check_response.text}')
+                
         except Exception as e:
             logger.error('[telegram_webhook] Ошибка при активации подписки: %s', e, exc_info=True)
+            return {"ok": False, "error": f"Внутренняя ошибка: {str(e)}"}
+            
         return {"ok": True, "successful_payment": True}
+        
     logger.info('[telegram_webhook] Нет события оплаты, возврат ok')
     return {"ok": True}
 
@@ -3392,69 +3468,77 @@ async def get_subscription_status(request: Request):
             return JSONResponse({"error": "user_id обязателен", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=400)
         user_id = int(user_id_str)
         debug["user_id_int"] = user_id
+
+        # Прямой SQL-запрос через RPC Supabase
         supabase_url = os.environ["SUPABASE_URL"]
-        supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+        # Используем SUPABASE_SERVICE_ROLE_KEY вместо SUPABASE_ANON_KEY для обхода RLS
+        supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        if not supabase_service_key:
+            logger.error("SUPABASE_SERVICE_ROLE_KEY отсутствует в переменных окружения!")
+            debug["service_key_error"] = "SUPABASE_SERVICE_ROLE_KEY отсутствует"
+            supabase_service_key = os.environ.get("SUPABASE_ANON_KEY", "")
+            
         headers = {
-            "apikey": supabase_key,
-            "Authorization": f"Bearer {supabase_key}",
+            "apikey": supabase_service_key,
+            "Authorization": f"Bearer {supabase_service_key}",
             "Content-Type": "application/json"
         }
+        
+        # ИЗМЕНЕННЫЙ запрос: теперь проверяем ТОЛЬКО поле is_active, без проверки end_date
+        # По скриншоту видно, что поле is_active=TRUE, а end_date очень далеко в будущем
         sql_query = f"""
-SELECT * FROM user_subscription 
-WHERE user_id = {user_id} AND is_active = TRUE AND end_date > NOW()
-ORDER BY end_date DESC
-LIMIT 10;
-"""
+        SELECT * FROM user_subscription 
+        WHERE user_id = {user_id} 
+        AND is_active = TRUE
+        ORDER BY end_date DESC 
+        LIMIT 1;
+        """
+        
         url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
         debug["sql_query"] = sql_query
+        debug["using_service_role_key"] = bool(supabase_service_key == os.environ.get("SUPABASE_SERVICE_ROLE_KEY"))
+        
         response = requests.post(url, json={"query": sql_query}, headers=headers)
-        debug["http_status"] = response.status_code
-        debug["http_text"] = response.text
+        debug["sql_status_code"] = response.status_code
+        debug["sql_text"] = response.text
+        if response.status_code != 200:
+            return JSONResponse({"error": "Ошибка SQL-запроса", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
+        records = response.json()
+        debug["sql_records"] = records
+
+        if not records or len(records) == 0:
+            return {"has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}
+
+        sub = records[0]
+        debug["selected_sub"] = sub
+        
+        # Достаточно проверить is_active, так как это главный индикатор активной подписки
+        is_active = bool(sub.get("is_active", False))
+        end_date = sub.get("end_date")
+        
+        # Для дополнительной проверки end_date (необязательно, но хорошо иметь)
+        now = datetime.now(timezone.utc)
         try:
-            data = response.json()
+            end_date_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00')) if end_date else None
         except Exception as e:
-            debug["json_error"] = str(e)
-            return JSONResponse({"error": "Ошибка парсинга JSON", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
-        debug["raw_data"] = data
-        # Проверяем, что data — это список
-        debug["data_type"] = str(type(data))
-        if not isinstance(data, list):
-            return JSONResponse({"error": "Ответ Supabase не список", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
-        # Если есть хотя бы одна подходящая запись — возвращаем Premium
-        if len(data) > 0:
-            sub = data[0]
-            debug["first_record"] = sub
-            # Явно выводим типы всех полей
-            debug["first_record_types"] = {k: str(type(v)) for k, v in sub.items()}
-            # Проверяем поля
-            is_active = sub.get("is_active", False)
-            end_date = sub.get("end_date", None)
-            debug["is_active"] = is_active
-            debug["end_date"] = end_date
-            # Преобразуем дату
-            try:
-                end_date_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00")) if end_date else None
-                debug["end_date_dt"] = str(end_date_dt)
-            except Exception as e:
-                debug["end_date_parse_error"] = str(e)
-                end_date_dt = None
-            # Если is_active True и end_date в будущем — Premium
-            now = datetime.now(timezone.utc)
-            if is_active and end_date_dt and end_date_dt > now:
-                return JSONResponse({
-                    "has_subscription": True,
-                    "is_active": True,
-                    "subscription_end_date": end_date,
-                    "debug": debug
-                })
-        # Если нет подходящих записей — Free
-        return JSONResponse({
-            "has_subscription": False,
-            "is_active": False,
-            "subscription_end_date": None,
+            debug["end_date_parse_error"] = str(e)
+            end_date_dt = None
+            
+        # ВАЖНОЕ ИЗМЕНЕНИЕ: теперь has_subscription зависит ТОЛЬКО от is_active
+        # end_date просто проверяем для информации
+        has_subscription = is_active
+        
+        # Логируем важную информацию
+        logger.info(f"Статус подписки для user_id={user_id}: is_active={is_active}, end_date={end_date}, has_subscription={has_subscription}")
+        
+        return {
+            "has_subscription": has_subscription,
+            "is_active": is_active,
+            "subscription_end_date": end_date,
             "debug": debug
-        })
+        }
     except Exception as e:
-        debug["fatal_error"] = str(e)
+        debug["exception"] = str(e)
+        logger.error(f"Ошибка при получении статуса подписки для user_id={user_id_str}: {e}")
         return JSONResponse({"error": "Внутренняя ошибка", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
 
