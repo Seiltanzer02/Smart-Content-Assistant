@@ -3831,3 +3831,55 @@ async def check_user_subscription_table():
             logger.error(f"Ошибка при проверке тестовой записи: {test_response.status_code} - {test_response.text}")
             return
         
+        test_records = test_response.json()
+        
+        if test_records and len(test_records) > 0:
+            logger.info(f"Найдена тестовая запись для пользователя {test_user_id}: {json.dumps(test_records[0])}")
+            
+            # Проверяем, активна ли подписка
+            test_record = test_records[0]
+            is_active = test_record.get("is_active", False)
+            
+            if not is_active:
+                logger.warning(f"Запись для пользователя {test_user_id} неактивна! Активируем её...")
+                
+                update_query = f"""
+                UPDATE user_subscription 
+                SET is_active = TRUE 
+                WHERE id = '{test_record.get("id")}';
+                """
+                
+                update_response = requests.post(url, json={"query": update_query}, headers=headers)
+                
+                if update_response.status_code != 200:
+                    logger.error(f"Ошибка при активации записи: {update_response.status_code} - {update_response.text}")
+                else:
+                    logger.info(f"Запись для пользователя {test_user_id} успешно активирована!")
+        else:
+            logger.warning(f"Тестовая запись для пользователя {test_user_id} не найдена.")
+        
+        # Проверяем доступ с использованием REST API и ANON_KEY (как делает фронтенд)
+        anon_headers = {
+            "apikey": anon_key,
+            "Authorization": f"Bearer {anon_key}",
+            "Content-Type": "application/json"
+        }
+        
+        rest_url = f"{supabase_url}/rest/v1/user_subscription?user_id=eq.{test_user_id}&is_active=eq.true"
+        rest_response = requests.get(rest_url, headers=anon_headers)
+        
+        if rest_response.status_code == 200:
+            rest_records = rest_response.json()
+            logger.info(f"REST API доступ с ANON_KEY: найдено {len(rest_records)} записей.")
+            
+            if rest_records and len(rest_records) > 0:
+                logger.info(f"REST API пример записи: {json.dumps(rest_records[0])}")
+            else:
+                logger.warning("REST API: записи не найдены! Возможна проблема с RLS или с преобразованием типа BIGINT.")
+        else:
+            logger.error(f"Ошибка при доступе через REST API: {rest_response.status_code} - {rest_response.text}")
+            
+        logger.info("Проверка таблицы user_subscription завершена.")
+    
+    except Exception as e:
+        logger.error(f"Ошибка при проверке таблицы user_subscription: {str(e)}", exc_info=True)
