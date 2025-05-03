@@ -55,6 +55,10 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 logger = logging.getLogger(__name__)
 # --- КОНЕЦ ПЕРЕМЕЩЕНИЯ --- 
 
+# --- Определение директории загрузок ---
+UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+# --- Конец определения директории загрузок ---
+
 # --- Загрузка переменных окружения (оставляем для других ключей) --- 
 # Убираем отладочные print для load_dotenv
 dotenv_loaded = load_dotenv(override=True)
@@ -135,6 +139,9 @@ subscription_service = None
 if supabase:
     try:
         # Импортируем и создаем сервис подписок
+        # Измененный импорт с использованием текущего пути
+        import sys
+        sys.path.append(os.path.dirname(__file__))
         from services.supabase_subscription_service import SupabaseSubscriptionService, FREE_ANALYSIS_LIMIT, FREE_POST_LIMIT
         subscription_service = SupabaseSubscriptionService(supabase)
         logger.info("Сервис подписок успешно инициализирован")

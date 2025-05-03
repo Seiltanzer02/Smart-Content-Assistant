@@ -34,10 +34,26 @@ echo "Подготовка каталогов Python..."
 [ -d backend/migrations ] || mkdir -p backend/migrations
 [ -f backend/migrations/__init__.py ] || echo "# Python package" > backend/migrations/__init__.py
 
+# Создаем директорию services и __init__.py если их нет
+[ -d backend/services ] || mkdir -p backend/services
+[ -f backend/services/__init__.py ] || echo '"""Services package for Smart Content Assistant"""' > backend/services/__init__.py
+
+# Создаем директорию uploads для загрузки файлов
+[ -d backend/uploads ] || mkdir -p backend/uploads
+
 # Проверяем наличие telegram_utils.py
 if [ ! -f backend/telegram_utils.py ]; then
     echo "ОШИБКА: Файл telegram_utils.py отсутствует!"
     exit 1
+fi
+
+# Копируем файл сервиса подписок, если он есть
+if [ -f services/supabase_subscription_service.py ]; then
+    echo "Копирование файла сервиса подписок..."
+    cp services/supabase_subscription_service.py backend/services/
+else
+    echo "ВНИМАНИЕ: Файл supabase_subscription_service.py отсутствует в директории services!"
+    # Файл будет создан автоматически в backend/services
 fi
 
 # Устанавливаем зависимости npm для фронтенда
