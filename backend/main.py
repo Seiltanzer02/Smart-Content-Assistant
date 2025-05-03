@@ -3446,6 +3446,9 @@ async def get_subscription_status(request: Request):
         }
         logger.info(f'--- Preparing final response for /subscription/status for user {user_id_int} ---')
         logger.info(f'Final response_data dict: {response_data}')
+        # <<< ДОБАВЛЕНО: ЛОГ ПЕРЕД ВОЗВРАТОМ >>>
+        logger.info(f"[RETURN] Attempting to return JSON for /subscription/status for user {user_id_int}. Data type: {type(response_data)}, Content: {response_data}")
+        # <<< КОНЕЦ ДОБАВЛЕНИЯ >>>
         return response_data # Return directly
 
     except HTTPException as http_exc:
