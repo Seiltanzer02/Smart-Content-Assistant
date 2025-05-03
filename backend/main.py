@@ -3406,13 +3406,8 @@ async def get_subscription_status(request: Request):
         error_message = "user_id обязателен"
         logger.error(f"[ReqID: {request_id}] {error_message}")
         response_data = {"error": error_message}
-        # УБРАНО ПОЛЕ DEBUG
-        return FastAPIResponse(
-            content=json.dumps(response_data),
-            status_code=400, 
-            media_type="application/json",
-            headers=cache_headers
-        )
+        # ИЗМЕНЕНО: Возвращаем словарь напрямую, FastAPI сам установит статус 400 по HTTPException
+        raise HTTPException(status_code=400, detail=error_message)
 
     try:
         # Пытаемся преобразовать user_id в int
@@ -3422,13 +3417,8 @@ async def get_subscription_status(request: Request):
         error_message = "user_id должен быть числом"
         logger.error(f"[ReqID: {request_id}] {error_message} (получено: '{user_id_str}')")
         response_data = {"error": error_message}
-        # УБРАНО ПОЛЕ DEBUG
-        return FastAPIResponse(
-            content=json.dumps(response_data),
-            status_code=400,
-            media_type="application/json",
-            headers=cache_headers
-        )
+        # ИЗМЕНЕНО: Возвращаем словарь напрямую, FastAPI сам установит статус 400 по HTTPException
+        raise HTTPException(status_code=400, detail=error_message)
 
     now = datetime.now(timezone.utc)
     logger.info(f"[ReqID: {request_id}] Current UTC time: {now}")
