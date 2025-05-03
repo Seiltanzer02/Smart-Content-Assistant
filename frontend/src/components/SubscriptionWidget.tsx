@@ -1,10 +1,18 @@
-import React, { useState, useEffect, useRef, SetStateAction, Dispatch } from 'react';
+import React, { useState, useEffect, useCallback, useRef, SetStateAction, Dispatch } from 'react';
 import '../styles/SubscriptionWidget.css';
-import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice } from '../api/subscription';
+import { getUserSubscriptionStatus, generateInvoice } from '../api/subscription';
 import axios from 'axios';
 
 // API_URL для относительных путей
 const API_URL = '';
+
+// Тип для статуса подписки
+type SubscriptionStatus = {
+  has_subscription: boolean;
+  is_active: boolean;
+  subscription_end_date?: string;
+  debug?: any; // Добавляем поле debug
+};
 
 const SubscriptionWidget: React.FC<{
   userId: string | null,
@@ -163,11 +171,19 @@ const SubscriptionWidget: React.FC<{
   // Добавляем useEffect для остановки polling при подтверждении Premium статуса
   useEffect(() => {
     console.log('[SubscriptionWidget] useEffect: изменение subscriptionStatus:', subscriptionStatus);
-    if (subscriptionStatus?.is_active) {
-      console.log('[SubscriptionWidget] Premium status confirmed. Stopping polling.');
+    if (subscriptionStatus && subscriptionStatus.is_active) {
+      console.log('[SubscriptionWidget] Premium статус подтвержден, останавливаем polling');
       stopPolling();
     }
-  }, [subscriptionStatus]); // Зависимость от статуса подписки
+    
+    if (subscriptionStatus && subscriptionStatus.debug && subscriptionStatus.debug.selected_sub) {
+      const debugSub = subscriptionStatus.debug.selected_sub;
+      if (debugSub.is_active) {
+        console.log('[SubscriptionWidget] ВАЖНО! В debug данных найдена активная подписка, останавливаем polling');
+        stopPolling();
+      }
+    }
+  }, [subscriptionStatus, stopPolling]);
 
   // Возвращаем очистку таймеров при размонтировании
   useEffect(() => {
@@ -211,14 +227,27 @@ const SubscriptionWidget: React.FC<{
     return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
   }
 
-  // ИЗМЕНЕНО: теперь проверяем ТОЛЬКО is_active, а не оба флага
-  const isPremium = subscriptionStatus.is_active;
+  // ИЗМЕНЕНО: теперь проверяем ТОЛЬКО is_active, а не оба флага (has_subscription и is_active)
+  // Так как в базе у нас может быть запись с is_active = true, даже если старые проверки не сработали
+  let isPremium = subscriptionStatus.is_active;
+  
+  // НОВОЕ: Принудительная проверка из debug данных, если они есть
+  if (!isPremium && subscriptionStatus.debug && subscriptionStatus.debug.selected_sub) {
+    const debugSub = subscriptionStatus.debug.selected_sub;
+    if (debugSub.is_active) {
+      console.log('[SubscriptionWidget] ВАЖНО! В debug данных найдена активная подписка, устанавливаем isPremium = true');
+      isPremium = true;
+    }
+  }
+  
   console.log('[SubscriptionWidget] Рендеринг. isPremium:', isPremium, 'subscriptionStatus:', subscriptionStatus);
 
   // ======= ПОДРОБНОЕ ЛОГИРОВАНИЕ В РЕНДЕРЕ =======
   console.log('[SubscriptionWidget][RENDER] userId:', userId);
   console.log('[SubscriptionWidget][RENDER] subscriptionStatus:', subscriptionStatus);
-  console.log('[SubscriptionWidget][RENDER] isPremium:', subscriptionStatus?.is_active);
+  console.log('[SubscriptionWidget][RENDER] is_active:', subscriptionStatus.is_active);
+  console.log('[SubscriptionWidget][RENDER] has_subscription:', subscriptionStatus.has_subscription);
+  console.log('[SubscriptionWidget][RENDER] Определен premium статус:', isPremium);
   console.log('[SubscriptionWidget][RENDER] error:', error);
   console.log('[SubscriptionWidget][RENDER] isSubscribing:', isSubscribing);
   console.log('[SubscriptionWidget][RENDER] showPaymentInfo:', showPaymentInfo);

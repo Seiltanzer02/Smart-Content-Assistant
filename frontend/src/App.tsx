@@ -1300,6 +1300,37 @@ function App() {
     }
   }; // <-- ДОБАВЛЕНА ТОЧКА С ЗАПЯТОЙ
 
+  // Функция для проверки статуса подписки
+  const checkSubscriptionStatus = useCallback(async () => {
+    if (!userId) return;
+    
+    console.log('[App] Checking subscription status for userId:', userId);
+    try {
+      const timestamp = Date.now(); // Добавляем временную метку для предотвращения кэширования
+      const response = await fetch(`/subscription/status?user_id=${userId}&t=${timestamp}`);
+      const data = await response.json();
+      console.log('[App] Subscription status response:', data);
+      
+      // ИЗМЕНЕНО: добавлено логирование для отладки
+      console.log('[App] Подписка статус:', data);
+      console.log('[App] is_active:', data.is_active);
+      console.log('[App] has_subscription:', data.has_subscription);
+      console.log('[App] debug:', data.debug);
+      
+      // Явно устанавливаем is_active = true, если оно вдруг не стало таковым (для отладки)
+      if (data.debug && data.debug.selected_sub && data.debug.selected_sub.is_active) {
+        console.log('[App] ВАЖНО! В БД найдена подписка с is_active=true, устанавливаем принудительно!');
+        data.is_active = true;
+      }
+      
+      setSubscriptionStatus(data);
+      setDebugInfo(prev => ({...prev, subscriptionStatus: data}));
+    } catch (error) {
+      console.error('[App] Error checking subscription status:', error);
+      setDebugInfo(prev => ({...prev, subscriptionError: String(error)}));
+    }
+  }, [userId]);
+
   // Компонент загрузки
   if (loading) {
     return (
