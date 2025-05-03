@@ -3393,37 +3393,32 @@ async def get_subscription_status(request: Request):
         user_id = int(user_id_str)
         debug["user_id_int"] = user_id
 
-        # Прямой запрос к REST API Supabase
+        # Прямой SQL-запрос через RPC Supabase
         supabase_url = os.environ["SUPABASE_URL"]
         supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
         headers = {
             "apikey": supabase_key,
-            "Authorization": f"Bearer {supabase_key}"
+            "Authorization": f"Bearer {supabase_key}",
+            "Content-Type": "application/json"
         }
-        params = {
-            "user_id": f"eq.{user_id}",
-            "order": "end_date.desc",
-            "select": "*"
-        }
-        r = requests.get(f"{supabase_url}/rest/v1/user_subscription", headers=headers, params=params)
-        debug["supabase_status_code"] = r.status_code
-        debug["supabase_url"] = r.url
-        try:
-            data = r.json()
-        except Exception as e:
-            debug["json_error"] = str(e)
-            return JSONResponse({"error": "Ошибка парсинга JSON", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
-        debug["raw_data"] = data
+        sql_query = f"SELECT * FROM user_subscription WHERE user_id = {user_id} ORDER BY end_date DESC;"
+        url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
+        debug["sql_query"] = sql_query
+        response = requests.post(url, json={"query": sql_query}, headers=headers)
+        debug["sql_status_code"] = response.status_code
+        debug["sql_text"] = response.text
+        if response.status_code != 200:
+            return JSONResponse({"error": "Ошибка SQL-запроса", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
+        records = response.json()
+        debug["sql_records"] = records
 
-        if not data or len(data) == 0:
+        if not records or len(records) == 0:
             return {"has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}
 
-        # Берём самую свежую подписку
-        sub = data[0]
+        sub = records[0]
         debug["selected_sub"] = sub
         is_active = bool(sub.get("is_active", False))
         end_date = sub.get("end_date")
-        # Проверяем, что end_date в будущем
         now = datetime.now(timezone.utc)
         try:
             end_date_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00')) if end_date else None
