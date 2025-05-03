@@ -3382,55 +3382,54 @@ async def resolve_user_id(request: Request):
 
 @app.get("/subscription/status")
 async def get_subscription_status(request: Request):
-    # Тотальное логирование
-    debug = {}
     user_id_str = request.query_params.get("user_id")
-    debug["user_id_from_query"] = user_id_str
-    logger.info(f"[SUB_STATUS] Запрос /subscription/status, user_id (raw): {user_id_str}")
+    debug = {"user_id_from_query": user_id_str}
     if not user_id_str:
-        logger.error("[SUB_STATUS] user_id не передан!")
         return {"error": "user_id обязателен", "debug": debug}
     try:
         user_id = int(user_id_str)
         debug["user_id_int"] = user_id
     except Exception as e:
-        logger.error(f"[SUB_STATUS] user_id не число: {e}")
         debug["user_id_int_error"] = str(e)
         return {"error": "user_id должен быть числом", "debug": debug}
     try:
-        logger.info(f"[SUB_STATUS] Запрашиваем user_subscription по user_id={user_id} (int8)")
-        result = supabase.table("user_subscription")\
-            .select("id, user_id, start_date, end_date, payment_id, is_active, created_at, updated_at")\
-            .eq("user_id", user_id)\
-            .order("end_date", desc=True)\
-            .execute()
-        debug["supabase_result"] = result.data
-        logger.info(f"[SUB_STATUS] Результат запроса к Supabase: {result.data}")
-        sub = result.data[0] if result.data else None
-        now = datetime.utcnow()
-        debug["now_utc"] = now.isoformat()
-        if sub:
-            debug["latest_record"] = sub
-            is_active = sub.get("is_active", False) and sub.get("end_date") and datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00")) > now
-            response_data = {
-                "has_subscription": is_active,
-                "is_active": is_active,
-                "subscription_end_date": sub.get("end_date"),
-                "debug": debug
-            }
-            logger.info(f"[SUB_STATUS] Возвращаем статус: {response_data}")
-            return response_data
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_ANON_KEY')
+        url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
+        headers = {
+            "apikey": supabase_key,
+            "Authorization": f"Bearer {supabase_key}",
+            "Content-Type": "application/json"
+        }
+        sql_query = f"SELECT * FROM user_subscription WHERE user_id = {user_id} ORDER BY end_date DESC;"
+        response = requests.post(url, json={"query": sql_query}, headers=headers)
+        debug["sql_status_code"] = response.status_code
+        debug["sql_text"] = response.text
+        if response.status_code == 200:
+            records = response.json()
+            debug["sql_records"] = records
+            sub = records[0] if records else None
+            from datetime import datetime
+            now = datetime.utcnow()
+            debug["now_utc"] = now.isoformat()
+            if sub:
+                is_active = sub.get("is_active", False) and sub.get("end_date") and datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00")) > now
+                return {
+                    "has_subscription": is_active,
+                    "is_active": is_active,
+                    "subscription_end_date": sub.get("end_date"),
+                    "debug": debug
+                }
+            else:
+                return {
+                    "has_subscription": False,
+                    "is_active": False,
+                    "subscription_end_date": None,
+                    "debug": debug
+                }
         else:
-            logger.info(f"[SUB_STATUS] Подписка не найдена для user_id={user_id}")
-            response_data = {
-                "has_subscription": False,
-                "is_active": False,
-                "subscription_end_date": None,
-                "debug": debug
-            }
-            return response_data
+            return {"error": "Ошибка SQL-запроса", "debug": debug}
     except Exception as e:
-        logger.error(f"[SUB_STATUS] Ошибка в /subscription/status: {e}", exc_info=True)
         debug["exception"] = str(e)
         return {"error": str(e), "debug": debug}
 
