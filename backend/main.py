@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Request, Form, Depends, Body, Response as FastAPIResponse
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Request, Form, Depends, Body
 import uvicorn
 import os
 from pydantic import BaseModel, Field, Json
@@ -35,17 +35,12 @@ import telethon
 import aiohttp
 from telegram_utils import get_telegram_posts, get_mock_telegram_posts
 import move_temp_files
-from datetime import datetime, timedelta, timezone # <-- Добавляем timezone
+from datetime import datetime, timedelta
 import traceback
 # Убираем неиспользуемые импорты psycopg2
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
 # from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 import shutil # Добавляем импорт shutil
-import base64
-import urllib.parse
-from dateutil.relativedelta import relativedelta
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -77,7 +72,6 @@ SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 SESSION_NAME = "telegram_session" # <-- Определяем имя файла сессии
 IMAGE_SEARCH_COUNT = 15 # Сколько изображений запрашивать у Unsplash
 IMAGE_RESULTS_COUNT = 5 # Сколько изображений показывать пользователю
-SUBSCRIPTION_DURATION_MONTHS = 1 # Добавляем константу
 
 # --- Валидация переменных окружения без аварийного завершения --- 
 missing_keys = []
@@ -284,9 +278,9 @@ async def generate_stars_invoice_link(request: Request):
     try:
         data = await request.json()
         user_id = data.get("user_id")
-        amount = data.get("amount")
-        if not user_id or not amount:
-            raise HTTPException(status_code=400, detail="user_id и amount обязательны")
+        amount = data.get("amount") # Это значение больше не используется для цены
+        if not user_id: # amount больше не обязателен в запросе
+            raise HTTPException(status_code=400, detail="user_id обязателен")
         bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
         if not bot_token:
             raise HTTPException(status_code=500, detail="TELEGRAM_BOT_TOKEN не задан в окружении")
@@ -297,7 +291,8 @@ async def generate_stars_invoice_link(request: Request):
             "payload": f"stars_invoice_{user_id}_{int(time.time())}",
             "provider_token": "",
             "currency": "XTR",
-            "prices": [{"label": "XTR", "amount": int(amount)}],
+            # ИЗМЕНЕНО: Цена всегда 1 Star
+            "prices": [{"label": "XTR", "amount": 1}],
             "photo_url": "https://smart-content-assistant.onrender.com/static/premium_sub.jpg"
         }
         async with httpx.AsyncClient() as client:
@@ -315,151 +310,52 @@ async def generate_stars_invoice_link(request: Request):
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
-    logger.info('[telegram_webhook] Получены данные: %s', json.dumps(data, ensure_ascii=False))
     # 1. Обработка pre_checkout_query
     pre_checkout_query = data.get("pre_checkout_query")
     if pre_checkout_query:
         query_id = pre_checkout_query.get("id")
         bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-        logger.info('[telegram_webhook] pre_checkout_query: query_id=%s', query_id)
         if not bot_token:
-            logger.error('[telegram_webhook] Нет TELEGRAM_BOT_TOKEN')
             return {"ok": False, "error": "TELEGRAM_BOT_TOKEN не задан"}
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"https://api.telegram.org/bot{bot_token}/answerPreCheckoutQuery",
                 json={"pre_checkout_query_id": query_id, "ok": True}
             )
-            logger.info("[telegram_webhook] Ответ на pre_checkout_query: %s", resp.text)
+            print("Ответ на pre_checkout_query:", resp.text)
         return {"ok": True, "pre_checkout_query": True}
     # 2. Обработка успешной оплаты
     message = data.get("message", {})
     successful_payment = message.get("successful_payment")
     if successful_payment:
-        user_id_raw = message.get("from", {}).get("id")
-        try:
-            user_id = int(user_id_raw)
-            logger.info('[telegram_webhook] user_id приведён к int: %s (%s)', user_id, type(user_id))
-        except Exception as e:
-            logger.error('[telegram_webhook] Не удалось привести user_id к int: %s, ошибка: %s', user_id_raw, e)
-            return {"ok": False, "error": "Некорректный user_id"}
+        user_id = message.get("from", {}).get("id")
         payment_id = successful_payment.get("telegram_payment_charge_id")
-        now = datetime.now(timezone.utc)
-
-        # --- НОВЫЙ ТЕСТ: Устанавливаем ОЧЕНЬ далекую дату окончания --- 
-        far_future_end_date = datetime(2099, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
-        logger.info(f'[telegram_webhook] ТЕСТОВАЯ дата окончания: {far_future_end_date.isoformat()}')
-        # --- КОНЕЦ НОВОГО ТЕСТА ---
-        
+        now = datetime.utcnow()
+        start_date = now
+        end_date = now + timedelta(days=30)
         try:
-            # Прямой SQL-запрос через RPC Supabase с использованием SUPABASE_SERVICE_ROLE_KEY
-            supabase_url = os.environ["SUPABASE_URL"]
-            # Получаем SUPABASE_SERVICE_ROLE_KEY для обхода RLS
-            supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-            if not supabase_service_key:
-                logger.error('[telegram_webhook] SUPABASE_SERVICE_ROLE_KEY отсутствует в переменных окружения!')
-                supabase_service_key = os.environ.get("SUPABASE_ANON_KEY", "")
-                logger.warning('[telegram_webhook] Используем SUPABASE_ANON_KEY вместо SUPABASE_SERVICE_ROLE_KEY')
-                
-            headers = {
-                "apikey": supabase_service_key,
-                "Authorization": f"Bearer {supabase_service_key}",
-                "Content-Type": "application/json"
-            }
-            
-            # Сначала проверяем, есть ли уже подписка для этого пользователя
-            sql_query = f"""
-            SELECT * FROM user_subscription 
-            WHERE user_id = {user_id} 
-            ORDER BY end_date DESC 
-            LIMIT 1;
-            """
-            
-            url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
-            response = requests.post(url, json={"query": sql_query}, headers=headers)
-            
-            if response.status_code != 200:
-                logger.error(f'[telegram_webhook] Ошибка SQL-запроса при проверке подписки: {response.status_code} - {response.text}')
-                return {"ok": False, "error": "Ошибка SQL-запроса при проверке подписки"}
-                
-            records = response.json()
-            
-            if records and len(records) > 0:
-                # Если подписка уже существует, обновляем её
-                sub_id = records[0].get("id")
-                update_query = f"""
-                UPDATE user_subscription 
-                SET is_active = TRUE, 
-                    end_date = '{far_future_end_date.isoformat()}', 
-                    payment_id = '{payment_id}', 
-                    updated_at = NOW() 
-                WHERE id = '{sub_id}';
-                """
-                logger.info(f'[telegram_webhook] Обновляем существующую подписку ID={sub_id} для user_id={user_id}')
-                update_response = requests.post(url, json={"query": update_query}, headers=headers)
-                
-                if update_response.status_code != 200:
-                    logger.error(f'[telegram_webhook] Ошибка SQL-запроса при обновлении подписки: {update_response.status_code} - {update_response.text}')
-                    return {"ok": False, "error": "Ошибка SQL-запроса при обновлении подписки"}
-                    
-                logger.info(f'[telegram_webhook] Подписка успешно обновлена для user_id={user_id}')
+            # Проверяем, есть ли уже подписка
+            existing = supabase.table("user_subscription").select("*").eq("user_id", user_id).execute()
+            if existing.data and len(existing.data) > 0:
+                # Обновляем подписку
+                supabase.table("user_subscription").update({
+                    "is_active": True,
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "payment_id": payment_id
+                }).eq("user_id", user_id).execute()
             else:
-                # Если подписки нет, создаём новую
-                insert_query = f"""
-                INSERT INTO user_subscription (
-                    user_id, 
-                    start_date, 
-                    end_date, 
-                    payment_id, 
-                    is_active, 
-                    created_at, 
-                    updated_at
-                ) VALUES (
-                    {user_id}, 
-                    '{now.isoformat()}', 
-                    '{far_future_end_date.isoformat()}', 
-                    '{payment_id}', 
-                    TRUE, 
-                    NOW(), 
-                    NOW()
-                );
-                """
-                logger.info(f'[telegram_webhook] Создаём новую подписку для user_id={user_id}')
-                insert_response = requests.post(url, json={"query": insert_query}, headers=headers)
-                
-                if insert_response.status_code != 200:
-                    logger.error(f'[telegram_webhook] Ошибка SQL-запроса при создании подписки: {insert_response.status_code} - {insert_response.text}')
-                    return {"ok": False, "error": "Ошибка SQL-запроса при создании подписки"}
-                    
-                logger.info(f'[telegram_webhook] Новая подписка успешно создана для user_id={user_id}')
-                
-            # Двойная проверка - получаем статус подписки, чтобы убедиться, что всё работает
-            check_query = f"""
-            SELECT * FROM user_subscription 
-            WHERE user_id = {user_id} 
-            AND is_active = TRUE 
-            ORDER BY end_date DESC 
-            LIMIT 1;
-            """
-            
-            check_response = requests.post(url, json={"query": check_query}, headers=headers)
-            
-            if check_response.status_code == 200:
-                check_records = check_response.json()
-                if check_records and len(check_records) > 0:
-                    logger.info(f'[telegram_webhook] Подтверждено наличие активной подписки для user_id={user_id}: {json.dumps(check_records[0])}')
-                else:
-                    logger.warning(f'[telegram_webhook] После создания/обновления подписки для user_id={user_id}, активная запись не найдена!')
-            else:
-                logger.error(f'[telegram_webhook] Ошибка при проверке подписки после создания/обновления: {check_response.status_code} - {check_response.text}')
-                
+                # Создаём новую подписку
+                supabase.table("user_subscription").insert({
+                    "user_id": user_id,
+                    "is_active": True,
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "payment_id": payment_id
+                }).execute()
         except Exception as e:
-            logger.error('[telegram_webhook] Ошибка при активации подписки: %s', e, exc_info=True)
-            return {"ok": False, "error": f"Внутренняя ошибка: {str(e)}"}
-            
+            print("Ошибка при активации подписки:", e)
         return {"ok": True, "successful_payment": True}
-        
-    logger.info('[telegram_webhook] Нет события оплаты, возврат ok')
     return {"ok": True}
 
 
@@ -3432,134 +3328,4 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     logger.info(f"Запуск сервера на порту {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
-
-@app.post("/resolve-user-id")
-async def resolve_user_id(request: Request):
-    try:
-        data = await request.json()
-        init_data = data.get('initData')
-        logger.info('[resolve-user-id] Получен initData: %s', init_data)
-        if not init_data:
-            return {"error": "initData не передан"}
-        # Парсим строку как query string
-        params = urllib.parse.parse_qs(init_data)
-        user_param = params.get('user')
-        logger.info('[resolve-user-id] user_param: %s', user_param)
-        if user_param:
-            try:
-                user_obj = json.loads(user_param[0])
-                logger.info('[resolve-user-id] user_obj: %s', user_obj)
-                if user_obj and user_obj.get('id') and str(user_obj['id']).isdigit():
-                    return {"user_id": str(user_obj['id'])}
-            except Exception as e:
-                logger.error('[resolve-user-id] Ошибка декодирования user_param: %s', e)
-        return {"error": "user_id не найден"}
-    except Exception as e:
-        logger.error('[resolve-user-id] Ошибка: %s', e)
-        return {"error": str(e)}
-
-@app.get("/subscription/status")
-async def get_subscription_status(request: Request):
-    debug = {}
-    # === ЛОГ: Начало обработки запроса ===
-    logger.info("[get_subscription_status] Начало обработки запроса")
-    try:
-        user_id_str = request.query_params.get("user_id")
-        debug["user_id_from_query"] = user_id_str
-        # === ЛОГ: Получен user_id_str ===
-        logger.info(f"[get_subscription_status] Получен user_id_str: {user_id_str}")
-        if not user_id_str:
-            logger.warning("[get_subscription_status] user_id отсутствует в запросе")
-            return JSONResponse({"error": "user_id обязателен", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=400)
-        user_id = int(user_id_str)
-        debug["user_id_int"] = user_id
-        # === ЛОГ: user_id преобразован в int ===
-        logger.info(f"[get_subscription_status] user_id (int): {user_id}")
-
-        supabase_url = os.environ["SUPABASE_URL"]
-        supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        service_key_found = bool(supabase_service_key)
-        # === ЛОГ: Проверка наличия service key ===
-        logger.info(f"[get_subscription_status] SUPABASE_SERVICE_ROLE_KEY найден: {service_key_found}")
-        if not service_key_found:
-            logger.error("SUPABASE_SERVICE_ROLE_KEY отсутствует в переменных окружения! Используем ANON_KEY.")
-            debug["service_key_error"] = "SUPABASE_SERVICE_ROLE_KEY отсутствует"
-            supabase_service_key = os.environ.get("SUPABASE_ANON_KEY", "")
-            
-        headers = {
-            "apikey": supabase_service_key,
-            "Authorization": f"Bearer {supabase_service_key}",
-            "Content-Type": "application/json"
-        }
-        # === ЛОГ: Используемый ключ (частично маскирован) ===
-        masked_key = supabase_service_key[:4] + "..." + supabase_service_key[-4:] if len(supabase_service_key) > 8 else supabase_service_key
-        logger.info(f"[get_subscription_status] Используется ключ: {masked_key} (Service Key Found: {service_key_found})")
-        
-        sql_query = f"""
-        SELECT * FROM user_subscription 
-        WHERE user_id = {user_id} 
-        AND is_active = TRUE
-        ORDER BY end_date DESC 
-        LIMIT 1;
-        """
-        
-        url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
-        debug["sql_query"] = sql_query
-        debug["using_service_role_key"] = service_key_found
-        
-        # === ЛОГ: Перед выполнением SQL-запроса ===
-        logger.info(f"[get_subscription_status] Выполнение SQL запроса для user_id={user_id}: {sql_query}")
-        response = requests.post(url, json={"query": sql_query}, headers=headers)
-        debug["sql_status_code"] = response.status_code
-        debug["sql_text"] = response.text # Добавляем полный текст ответа для отладки
-        # === ЛОГ: Ответ от SQL-запроса ===
-        logger.info(f"[get_subscription_status] Ответ SQL: status={response.status_code}, text={response.text}")
-        
-        if response.status_code != 200:
-            logger.error(f"[get_subscription_status] Ошибка SQL-запроса: {response.status_code} - {response.text}")
-            return JSONResponse({"error": "Ошибка SQL-запроса", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
-        
-        # === ЛОГ: Попытка парсинга JSON ===
-        try:
-            records = response.json()
-            debug["sql_records"] = records
-            logger.info(f"[get_subscription_status] Распарсенный JSON: {records}")
-        except json.JSONDecodeError as json_err:
-            logger.error(f"[get_subscription_status] Ошибка парсинга JSON ответа SQL: {json_err}. Ответ: {response.text}")
-            debug["sql_json_parse_error"] = str(json_err)
-            records = [] # Устанавливаем пустой список при ошибке парсинга
-            # Возвращаем ошибку, т.к. не можем обработать ответ
-            return JSONResponse({"error": "Ошибка обработки ответа от БД", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
-
-        if not records or len(records) == 0:
-            # === ЛОГ: Активная подписка не найдена ===
-            logger.warning(f"[get_subscription_status] Активная подписка для user_id={user_id} НЕ НАЙДЕНА.")
-            return {"has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}
-
-        # === ЛОГ: Активная подписка найдена ===
-        sub = records[0]
-        debug["selected_sub"] = sub
-        logger.info(f"[get_subscription_status] НАЙДЕНА активная подписка для user_id={user_id}: {sub}")
-        
-        is_active = bool(sub.get("is_active", False))
-        end_date = sub.get("end_date")
-        
-        # --- Удалена ненужная проверка end_date > now --- 
-        
-        has_subscription = is_active
-        
-        # === ЛОГ: Финальные значения перед возвратом ===
-        logger.info(f"[get_subscription_status] Финальные значения для user_id={user_id}: is_active={is_active}, end_date={end_date}, has_subscription={has_subscription}")
-        
-        return {
-            "has_subscription": has_subscription,
-            "is_active": is_active,
-            "subscription_end_date": end_date,
-            "debug": debug
-        }
-    except Exception as e:
-        # === ЛОГ: Непредвиденная ошибка ===
-        logger.error(f"[get_subscription_status] Непредвиденная ошибка для user_id={user_id_str}: {e}", exc_info=True)
-        debug["exception"] = str(e)
-        return JSONResponse({"error": "Внутренняя ошибка", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
 
