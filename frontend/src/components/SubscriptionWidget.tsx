@@ -8,13 +8,13 @@ interface SubscriptionWidgetProps {
 
 // API_URL для относительных путей
 const API_URL = '';
+const SUBSCRIPTION_PRICE = 1; // в Stars (временно изменено с 70 на 1 для тестирования)
 
 const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
-  const SUBSCRIPTION_PRICE = 70; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
   
   // Инициализация и настройка Telegram WebApp
@@ -42,10 +42,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
       
       // Добавляем обработчик onEvent для события 'popup_closed'
       if (typeof window.Telegram.WebApp.onEvent === 'function') {
-        window.Telegram.WebApp.onEvent('popup_closed', () => {
-          console.log('Popup закрыт, обновляем статус подписки');
-          fetchSubscriptionStatus();
-        });
+        window.Telegram.WebApp.onEvent('popup_closed', handlePopupClosed);
       }
     } else {
       console.warn('window.Telegram.WebApp не найден!');
@@ -55,6 +52,10 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
     return () => {
       if (window.Telegram?.WebApp?.MainButton) {
         window.Telegram.WebApp.MainButton.offClick(handleSubscribeViaMainButton);
+      }
+      
+      if (window.Telegram?.WebApp && typeof window.Telegram.WebApp.onEvent === 'function') {
+        window.Telegram.WebApp.offEvent('popup_closed', handlePopupClosed);
       }
     };
   }, []);
@@ -73,11 +74,22 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
     }
   }, [userId]);
   
+  // Обработчик закрытия popup
+  const handlePopupClosed = () => {
+    console.log('Popup закрыт, обновляем статус подписки');
+    fetchSubscriptionStatus();
+  };
+  
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
     setLoading(true);
     setError(null);
     let hasPremium = false;
+    
     try {
+      if (!userId) {
+        throw new Error('ID пользователя не предоставлен');
+      }
+      
       const subscriptionData = await getUserSubscriptionStatus(userId);
       console.log('(fetchSubscriptionStatus) Получен ответ о статусе подписки:', subscriptionData);
       
@@ -165,10 +177,26 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
               });
             } else if (invoiceStatus === 'failed') {
               setError('Оплата не удалась. Пожалуйста, попробуйте позже.');
+              if (window?.Telegram?.WebApp?.showPopup) {
+                window.Telegram.WebApp.showPopup({
+                  title: 'Ошибка оплаты',
+                  message: 'Оплата не удалась. Пожалуйста, попробуйте позже.',
+                  buttons: [{ type: 'ok' }]
+                });
+              }
             } else if (invoiceStatus === 'cancelled') {
               console.log('Платеж отменен пользователем.');
+              setError('Платеж отменен.');
             } else {
-              console.log('Статус платежа:', invoiceStatus);
+              console.log('Неизвестный статус платежа:', invoiceStatus);
+              setError(`Неизвестный статус платежа: ${invoiceStatus}`);
+              if (window?.Telegram?.WebApp?.showPopup) {
+                window.Telegram.WebApp.showPopup({
+                  title: 'Статус платежа',
+                  message: `Статус платежа: ${invoiceStatus}. Обновите статус подписки.`,
+                  buttons: [{ type: 'ok' }]
+                });
+              }
             }
             setIsSubscribing(false);
           });
