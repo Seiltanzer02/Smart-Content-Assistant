@@ -88,6 +88,21 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       console.log('has_subscription =', subscriptionData.has_subscription);
       console.log('is_active_flag =', subscriptionData.is_active_flag);
       
+      // ПРИНУДИТЕЛЬНО устанавливаем правильный статус подписки, игнорируя isActive пропс
+      const hasPremium = subscriptionData.has_subscription || 
+                        (subscriptionData.is_active_flag === true);
+      
+      // Переопределяем значение, если isActive = true из App.tsx, но в базе подписка неактивна
+      if (isActive === true && !hasPremium) {
+        console.log('ВНИМАНИЕ: isActive=true жестко задан в App.tsx, но в базе данных подписка неактивна!');
+      }
+      
+      // Если подписка активна по пропсу или по базе данных, модифицируем объект
+      if (hasPremium && !subscriptionData.has_subscription) {
+        console.log('Переопределяем has_subscription = true на основе данных базы или пропса isActive');
+        subscriptionData.has_subscription = true;
+      }
+      
       setStatus(subscriptionData);
       
       // Показываем/скрываем главную кнопку в зависимости от статуса подписки
@@ -218,9 +233,13 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
           <div className="status-badge premium">Premium</div>
           <p>У вас активная подписка{status.subscription_end_date ? ` до ${new Date(status.subscription_end_date).toLocaleDateString()}` : ''}</p>
           <p>Все функции доступны без ограничений</p>
-          {status.is_active_flag !== undefined && (
-            <p><small style={{color: 'gray'}}>Статус в БД: is_active_flag = {status.is_active_flag ? 'true' : 'false'}</small></p>
-          )}
+          <div style={{fontSize: '12px', color: 'gray', marginTop: '10px', padding: '5px', borderTop: '1px solid #eaeaea'}}>
+            <p><strong>Диагностическая информация:</strong></p>
+            {status.is_active_flag !== undefined && (
+              <p>Флаг is_active в БД: <span style={{fontWeight: 'bold', color: status.is_active_flag ? 'green' : 'red'}}>{status.is_active_flag ? 'Активен' : 'Неактивен'}</span></p>
+            )}
+            <p>Подписка активирована через: {isActive && !status.is_active_flag ? 'App.tsx (принудительно)' : 'Базу данных'}</p>
+          </div>
         </div>
       ) : (
         <div className="subscription-free">
