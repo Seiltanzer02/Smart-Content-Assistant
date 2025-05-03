@@ -6,6 +6,7 @@ export interface SubscriptionStatus {
   analysis_count: number;
   post_generation_count: number;
   subscription_end_date?: string;
+  is_active_flag?: boolean;
 }
 
 // API_URL пустая строка для относительных путей

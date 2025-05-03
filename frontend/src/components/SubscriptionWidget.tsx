@@ -82,6 +82,12 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     try {
       // Используем функцию из API вместо прямого запроса
       const subscriptionData = await getUserSubscriptionStatus(userId);
+      
+      // Добавляем отладочное логирование
+      console.log('Получен ответ о статусе подписки:', subscriptionData);
+      console.log('has_subscription =', subscriptionData.has_subscription);
+      console.log('is_active_flag =', subscriptionData.is_active_flag);
+      
       setStatus(subscriptionData);
       
       // Показываем/скрываем главную кнопку в зависимости от статуса подписки
@@ -212,12 +218,18 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
           <div className="status-badge premium">Premium</div>
           <p>У вас активная подписка{status.subscription_end_date ? ` до ${new Date(status.subscription_end_date).toLocaleDateString()}` : ''}</p>
           <p>Все функции доступны без ограничений</p>
+          {status.is_active_flag !== undefined && (
+            <p><small style={{color: 'gray'}}>Статус в БД: is_active_flag = {status.is_active_flag ? 'true' : 'false'}</small></p>
+          )}
         </div>
       ) : (
         <div className="subscription-free">
           <div className="status-badge free">Бесплатный план</div>
           <p>Использовано анализов: {status?.analysis_count || 0}/2</p>
           <p>Использовано генераций постов: {status?.post_generation_count || 0}/2</p>
+          {status?.is_active_flag !== undefined && (
+            <p><small style={{color: 'gray'}}>Статус в БД: is_active_flag = {status.is_active_flag ? 'true' : 'false'}</small></p>
+          )}
           
           {showPaymentInfo ? (
             <div className="payment-info">
