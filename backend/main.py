@@ -3401,7 +3401,12 @@ async def get_subscription_status(request: Request):
             "Authorization": f"Bearer {supabase_key}",
             "Content-Type": "application/json"
         }
-        sql_query = f"SELECT * FROM user_subscription WHERE user_id = {user_id} ORDER BY end_date DESC;"
+        sql_query = f"""
+SELECT * FROM user_subscription 
+WHERE user_id = {user_id} AND is_active = TRUE AND end_date > NOW()
+ORDER BY end_date DESC
+LIMIT 1;
+"""
         url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
         debug["sql_query"] = sql_query
         response = requests.post(url, json={"query": sql_query}, headers=headers)
