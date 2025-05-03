@@ -1,10 +1,11 @@
 import axios from 'axios';
 
-// Новый интерфейс для статуса подписки
+// Определение интерфейса для статуса подписки
 export interface SubscriptionStatus {
   has_subscription: boolean;
-  is_active: boolean;
-  subscription_end_date?: string | null;
+  analysis_count: number;
+  post_generation_count: number;
+  subscription_end_date?: string;
 }
 
 // API_URL пустая строка для относительных путей
@@ -17,23 +18,17 @@ const API_URL = '';
  */
 export const getUserSubscriptionStatus = async (userId: string | null): Promise<SubscriptionStatus> => {
   if (!userId) {
-    console.error('[getUserSubscriptionStatus] Не передан userId!');
     throw new Error('ID пользователя не предоставлен');
   }
-  console.log(`[getUserSubscriptionStatus] Запрос статуса подписки для userId: ${userId}`);
+
   try {
-    const url = `/subscription/status?user_id=${userId}&t=${Date.now()}`;
-    console.log(`[getUserSubscriptionStatus] GET ${url}`);
-    const response = await axios.get(url);
-    console.log('[getUserSubscriptionStatus] Ответ от сервера:', response.data);
-    if (response.data.debug) {
-      console.log('[getUserSubscriptionStatus][DEBUG]:', response.data.debug);
-    }
-    const { has_subscription, is_active, subscription_end_date } = response.data;
-    console.log('[getUserSubscriptionStatus] Возвращаемые поля:', { has_subscription, is_active, subscription_end_date });
-    return { has_subscription, is_active, subscription_end_date };
+    const response = await axios.get(`${API_URL}/subscription/status`, {
+      headers: { 'x-telegram-user-id': userId }
+    });
+    
+    return response.data;
   } catch (error) {
-    console.error('[getUserSubscriptionStatus] Ошибка при получении статуса подписки:', error);
+    console.error('Ошибка при получении статуса подписки:', error);
     throw error;
   }
 };
@@ -46,19 +41,18 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
  */
 export const createSubscription = async (userId: string | null, paymentId?: string) => {
   if (!userId) {
-    console.error('[createSubscription] Не передан userId!');
     throw new Error('ID пользователя не предоставлен');
   }
-  console.log(`[createSubscription] Создание подписки для userId: ${userId}, paymentId: ${paymentId}`);
+
   try {
     const response = await axios.post(`${API_URL}/subscription/create`, 
       { payment_id: paymentId },
       { headers: { 'x-telegram-user-id': userId } }
     );
-    console.log('[createSubscription] Ответ от сервера:', response.data);
+    
     return response.data;
   } catch (error) {
-    console.error('[createSubscription] Ошибка при создании подписки:', error);
+    console.error('Ошибка при создании подписки:', error);
     throw error;
   }
 };
@@ -70,16 +64,15 @@ export const createSubscription = async (userId: string | null, paymentId?: stri
  * @returns Promise с данными инвойса, включая URL
  */
 export const generateInvoice = async (userId: number, amount: number = 70) => {
-  console.log(`[generateInvoice] Генерация инвойса для userId: ${userId}, amount: ${amount}`);
   try {
     const response = await axios.post(`${API_URL}/generate-invoice`, {
       user_id: userId,
       amount
     });
-    console.log('[generateInvoice] Ответ от сервера:', response.data);
+    
     return response.data;
   } catch (error) {
-    console.error('[generateInvoice] Ошибка при генерации инвойса:', error);
+    console.error('Ошибка при генерации инвойса:', error);
     throw error;
   }
 }; 

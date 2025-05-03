@@ -17,16 +17,16 @@ declare global {
 // Инициализация Telegram WebApp
 const initTelegramWebApp = () => {
   console.log('Инициализация Telegram WebApp...');
-  
-  // Проверяем доступность Telegram WebApp - сначала нативный, потом SDK
-  if (window.Telegram && window.Telegram.WebApp) {
+
+// Проверяем доступность Telegram WebApp - сначала нативный, потом SDK
+if (window.Telegram && window.Telegram.WebApp) {
     console.log('Найден window.Telegram.WebApp - используем нативный WebApp');
-    
+  
     // Сообщаем Telegram, что приложение готово
-    if (typeof window.Telegram.WebApp.ready === 'function') {
+  if (typeof window.Telegram.WebApp.ready === 'function') {
       console.log('Вызываем window.Telegram.WebApp.ready()');
-      window.Telegram.WebApp.ready();
-    }
+    window.Telegram.WebApp.ready();
+  }
     
     // Расширяем функционал приложения
     if (typeof window.Telegram.WebApp.expand === 'function') {
@@ -67,7 +67,7 @@ const initTelegramWebApp = () => {
         console.log('Тема изменилась');
       });
     }
-  } else if (WebApp) {
+} else if (WebApp) {
     console.log('Используем WebApp из @twa-dev/sdk');
     console.log('WebApp объект:', WebApp);
     
@@ -99,7 +99,7 @@ const initTelegramWebApp = () => {
     WebApp.onEvent('popup_closed', () => {
       console.log('Popup закрыт (SDK), возможно требуется обновить данные');
     });
-  } else {
+} else {
     console.warn('WebApp не найден ни в window.Telegram, ни в @twa-dev/sdk');
   }
 };
@@ -143,7 +143,7 @@ const initDataHandler = async (data: string) => {
         message: 'Не удалось обработать платеж. Пожалуйста, попробуйте позже.',
         buttons: [{type: 'ok'}]
       });
-    }
+}
   }
 };
 
