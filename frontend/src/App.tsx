@@ -1318,7 +1318,7 @@ function App() {
       
       {/* Блок подписки */}
       {showSubscription && (
-        <SubscriptionWidget userId={userId} isActive={true} />
+        <SubscriptionWidget userId={userId} />
       )}
 
       <main className="app-main">
@@ -1326,45 +1326,52 @@ function App() {
         {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
         {success && <SuccessMessage message={success} onClose={() => setSuccess(null)} />}
 
-        {/* Навигация */}
-    <div className="navigation-buttons">
+        {/* Панель навигации */}
+        <nav className="app-nav">
           <button 
-            onClick={() => setCurrentView('analyze')} 
-            className={`action-button ${currentView === 'analyze' ? 'active' : ''}`}
+            className={`nav-button ${currentView === 'analyze' ? 'active' : ''}`}
+            onClick={() => setCurrentView('analyze')}
           >
             Анализ
           </button>
+          {analysisResult && (
+            <button 
+              className={`nav-button ${currentView === 'suggestions' ? 'active' : ''}`}
+              onClick={() => setCurrentView('suggestions')}
+            >
+              Идеи
+            </button>
+          )}
+          {suggestedIdeas.length > 0 && (
+            <button 
+              className={`nav-button ${currentView === 'plan' ? 'active' : ''}`}
+              onClick={() => setCurrentView('plan')}
+            >
+              План
+            </button>
+          )}
           <button 
-            onClick={() => {
-              setCurrentView('suggestions');
-              if (suggestedIdeas.length === 0) {
-                fetchSavedIdeas();
-              }
-            }} 
-            className={`action-button ${currentView === 'suggestions' ? 'active' : ''}`}
-            disabled={!channelName}
-          >
-            Идеи
-          </button>
-          <button 
-            onClick={() => {
-              setCurrentView('calendar');
-              fetchSavedPosts();
-            }} 
-            className={`action-button ${currentView === 'calendar' ? 'active' : ''}`}
-          >
-            Календарь
-          </button>
-          <button 
-            onClick={() => {
-              setCurrentView('posts');
-              fetchSavedPosts();
-            }} 
-            className={`action-button ${currentView === 'posts' ? 'active' : ''}`}
+            className={`nav-button ${currentView === 'posts' ? 'active' : ''}`}
+            onClick={() => setCurrentView('posts')}
           >
             Посты
           </button>
-    </div>
+          <button 
+            className={`nav-button ${currentView === 'calendar' ? 'active' : ''}`}
+            onClick={() => setCurrentView('calendar')}
+          >
+            Календарь
+          </button>
+          {/* Кнопка для открытия виджета подписки */}
+          <button 
+             className="nav-button subscription-button"
+             onClick={() => setShowSubscription(!showSubscription)} // Переключатель
+             title={showSubscription ? "Скрыть статус подписки" : "Показать статус подписки"}
+           >
+             {/* Можно добавить иконку, например */} 
+             ⭐ Подписка 
+           </button>
+        </nav>
 
         {/* Выбор канала */}
         <div className="channel-selector">

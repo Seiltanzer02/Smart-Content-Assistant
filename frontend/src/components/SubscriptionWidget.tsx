@@ -4,13 +4,14 @@ import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice } from '
 
 interface SubscriptionWidgetProps {
   userId: string | null;
-  isActive?: boolean;
+  // isActive?: boolean; // Удаляем isActive
 }
 
 // API_URL для относительных путей
 const API_URL = '';
 
-const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActive }) => {
+// Удаляем isActive из параметров
+const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
@@ -34,9 +35,10 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
         window.Telegram.WebApp.MainButton.setText('Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars');
         window.Telegram.WebApp.MainButton.color = '#2481cc';
         window.Telegram.WebApp.MainButton.textColor = '#ffffff';
-        if (isActive) {
-          window.Telegram.WebApp.MainButton.hide();
-        }
+        // Логику скрытия/показа кнопки переносим в fetchSubscriptionStatus
+        // if (isActive) { 
+        //   window.Telegram.WebApp.MainButton.hide();
+        // }
         
         // Добавляем обработчик нажатия на главную кнопку
         window.Telegram.WebApp.MainButton.onClick(handleSubscribeViaMainButton);
@@ -59,9 +61,12 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     return () => {
       if (window.Telegram?.WebApp?.MainButton) {
         window.Telegram.WebApp.MainButton.offClick(handleSubscribeViaMainButton);
+        // Опционально: скрыть кнопку при размонтировании
+        // window.Telegram.WebApp.MainButton.hide(); 
       }
     };
-  }, [isActive]);
+  // Убираем isActive из зависимостей
+  }, []); 
   
   useEffect(() => {
     if (userId) {
@@ -79,33 +84,39 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
     setLoading(true);
+    let hasSubscription = false; // Значение по умолчанию
     try {
       // Используем функцию из API вместо прямого запроса
       const subscriptionData = await getUserSubscriptionStatus(userId);
-      setStatus(subscriptionData);
+      setStatus(subscriptionData); // Обновляем состояние
+      hasSubscription = subscriptionData?.has_subscription ?? false; // Получаем статус
       
       // Добавляем логирование для отладки
       console.log('Результат getUserSubscriptionStatus:', subscriptionData);
-      console.log('has_subscription тип:', typeof subscriptionData.has_subscription);
-      console.log('has_subscription значение:', subscriptionData.has_subscription);
+      console.log('has_subscription тип:', typeof subscriptionData?.has_subscription);
+      console.log('has_subscription значение:', hasSubscription);
       
-      // Показываем/скрываем главную кнопку в зависимости от статуса подписки
+      // Показываем/скрываем главную кнопку ТОЛЬКО на основе полученного статуса
       if (window.Telegram?.WebApp?.MainButton) {
-        if (!subscriptionData.has_subscription && !isActive) {
+        if (!hasSubscription) {
           window.Telegram.WebApp.MainButton.show();
         } else {
           window.Telegram.WebApp.MainButton.hide();
         }
       }
       
-      return subscriptionData.has_subscription;
     } catch (err: any) {
       console.error('Ошибка при получении статуса подписки:', err);
       setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке статуса подписки');
-      return false;
+      hasSubscription = false; // Считаем, что подписки нет при ошибке
+      // При ошибке, возможно, стоит скрыть кнопку подписки?
+      // if (window.Telegram?.WebApp?.MainButton) {
+      //   window.Telegram.WebApp.MainButton.hide();
+      // }
     } finally {
       setLoading(false);
     }
+    return hasSubscription; // Возвращаем полученный статус
   };
   
   // Функция для запуска платежа через MainButton
@@ -239,22 +250,28 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     );
   }
   
+  // Используем более надежную проверку статуса перед рендерингом
+  const isSubscribed = status !== null && status.has_subscription;
+
   return (
     <div className="subscription-widget">
       <h3>Статус подписки</h3>
       
-      {status?.has_subscription ? (
+      {/* Используем isSubscribed для условного рендеринга */}
+      {isSubscribed ? (
         <div className="subscription-active">
           <div className="status-badge premium">Premium</div>
-          <p>У вас активная подписка{status.subscription_end_date ? ` до ${new Date(status.subscription_end_date).toLocaleDateString()}` : ''}</p>
+          <p>У вас активная подписка{status?.subscription_end_date ? ` до ${new Date(status.subscription_end_date).toLocaleDateString()}` : ''}</p>
           <p>Все функции доступны без ограничений</p>
-          <p>Отладка: has_subscription = {String(status.has_subscription)}, тип: {typeof status.has_subscription}</p>
+          {/* Можно оставить или убрать отладочный вывод */}
+          <p>Отладка: has_subscription = {String(status?.has_subscription)}, тип: {typeof status?.has_subscription}</p>
         </div>
       ) : (
         <div className="subscription-free">
           <div className="status-badge free">Бесплатный план</div>
           <p>Использовано анализов: {status?.analysis_count || 0}/2</p>
           <p>Использовано генераций постов: {status?.post_generation_count || 0}/2</p>
+          {/* Можно оставить или убрать отладочный вывод */}
           <p>Отладка: has_subscription = {String(status?.has_subscription)}, тип: {typeof status?.has_subscription}</p>
           
           {showPaymentInfo ? (
