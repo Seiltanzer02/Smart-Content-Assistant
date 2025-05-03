@@ -3392,8 +3392,6 @@ async def get_subscription_status(request: Request):
             return JSONResponse({"error": "user_id обязателен", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=400)
         user_id = int(user_id_str)
         debug["user_id_int"] = user_id
-
-        # Прямой SQL-запрос через RPC Supabase
         supabase_url = os.environ["SUPABASE_URL"]
         supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
         headers = {
@@ -3405,39 +3403,58 @@ async def get_subscription_status(request: Request):
 SELECT * FROM user_subscription 
 WHERE user_id = {user_id} AND is_active = TRUE AND end_date > NOW()
 ORDER BY end_date DESC
-LIMIT 1;
+LIMIT 10;
 """
         url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
         debug["sql_query"] = sql_query
         response = requests.post(url, json={"query": sql_query}, headers=headers)
-        debug["sql_status_code"] = response.status_code
-        debug["sql_text"] = response.text
-        if response.status_code != 200:
-            return JSONResponse({"error": "Ошибка SQL-запроса", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
-        records = response.json()
-        debug["sql_records"] = records
-
-        if not records or len(records) == 0:
-            return {"has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}
-
-        sub = records[0]
-        debug["selected_sub"] = sub
-        is_active = bool(sub.get("is_active", False))
-        end_date = sub.get("end_date")
-        now = datetime.now(timezone.utc)
+        debug["http_status"] = response.status_code
+        debug["http_text"] = response.text
         try:
-            end_date_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00')) if end_date else None
+            data = response.json()
         except Exception as e:
-            debug["end_date_parse_error"] = str(e)
-            end_date_dt = None
-        has_subscription = is_active and end_date_dt and end_date_dt > now
-        return {
-            "has_subscription": bool(has_subscription),
-            "is_active": is_active,
-            "subscription_end_date": end_date,
+            debug["json_error"] = str(e)
+            return JSONResponse({"error": "Ошибка парсинга JSON", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
+        debug["raw_data"] = data
+        # Проверяем, что data — это список
+        debug["data_type"] = str(type(data))
+        if not isinstance(data, list):
+            return JSONResponse({"error": "Ответ Supabase не список", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
+        # Если есть хотя бы одна подходящая запись — возвращаем Premium
+        if len(data) > 0:
+            sub = data[0]
+            debug["first_record"] = sub
+            # Явно выводим типы всех полей
+            debug["first_record_types"] = {k: str(type(v)) for k, v in sub.items()}
+            # Проверяем поля
+            is_active = sub.get("is_active", False)
+            end_date = sub.get("end_date", None)
+            debug["is_active"] = is_active
+            debug["end_date"] = end_date
+            # Преобразуем дату
+            try:
+                end_date_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00")) if end_date else None
+                debug["end_date_dt"] = str(end_date_dt)
+            except Exception as e:
+                debug["end_date_parse_error"] = str(e)
+                end_date_dt = None
+            # Если is_active True и end_date в будущем — Premium
+            now = datetime.now(timezone.utc)
+            if is_active and end_date_dt and end_date_dt > now:
+                return JSONResponse({
+                    "has_subscription": True,
+                    "is_active": True,
+                    "subscription_end_date": end_date,
+                    "debug": debug
+                })
+        # Если нет подходящих записей — Free
+        return JSONResponse({
+            "has_subscription": False,
+            "is_active": False,
+            "subscription_end_date": None,
             "debug": debug
-        }
+        })
     except Exception as e:
-        debug["exception"] = str(e)
+        debug["fatal_error"] = str(e)
         return JSONResponse({"error": "Внутренняя ошибка", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
 

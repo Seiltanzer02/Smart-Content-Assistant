@@ -1315,6 +1315,13 @@ function App() {
     return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
   }
 
+  // Логируем debug-блок из subscriptionStatus при каждом рендере
+  React.useEffect(() => {
+    if (subscriptionStatus && (subscriptionStatus as any).debug) {
+      console.log('[App][DEBUG]', (subscriptionStatus as any).debug);
+    }
+  }, [subscriptionStatus]);
+
   // Основной интерфейс
   return (
     <SimpleErrorBoundary>
