@@ -1318,7 +1318,7 @@ function App() {
       
       {/* Блок подписки */}
       {showSubscription && (
-        <SubscriptionWidget userId={userId} isActive={true} />
+        <SubscriptionWidget userId={userId} isActive={false} />
       )}
 
       <main className="app-main">
