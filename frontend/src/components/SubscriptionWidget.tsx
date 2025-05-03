@@ -163,7 +163,7 @@ const SubscriptionWidget: React.FC<{
   // Добавляем useEffect для остановки polling при подтверждении Premium статуса
   useEffect(() => {
     console.log('[SubscriptionWidget] useEffect: изменение subscriptionStatus:', subscriptionStatus);
-    if (subscriptionStatus?.has_subscription) {
+    if (subscriptionStatus?.is_active) {
       console.log('[SubscriptionWidget] Premium status confirmed. Stopping polling.');
       stopPolling();
     }
@@ -211,14 +211,14 @@ const SubscriptionWidget: React.FC<{
     return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
   }
 
-  // Новый простой рендеринг
-  const isPremium = subscriptionStatus.is_active && subscriptionStatus.has_subscription;
+  // ИЗМЕНЕНО: теперь проверяем ТОЛЬКО is_active, а не оба флага
+  const isPremium = subscriptionStatus.is_active;
   console.log('[SubscriptionWidget] Рендеринг. isPremium:', isPremium, 'subscriptionStatus:', subscriptionStatus);
 
   // ======= ПОДРОБНОЕ ЛОГИРОВАНИЕ В РЕНДЕРЕ =======
   console.log('[SubscriptionWidget][RENDER] userId:', userId);
   console.log('[SubscriptionWidget][RENDER] subscriptionStatus:', subscriptionStatus);
-  console.log('[SubscriptionWidget][RENDER] isPremium:', subscriptionStatus?.is_active && subscriptionStatus?.has_subscription);
+  console.log('[SubscriptionWidget][RENDER] isPremium:', subscriptionStatus?.is_active);
   console.log('[SubscriptionWidget][RENDER] error:', error);
   console.log('[SubscriptionWidget][RENDER] isSubscribing:', isSubscribing);
   console.log('[SubscriptionWidget][RENDER] showPaymentInfo:', showPaymentInfo);

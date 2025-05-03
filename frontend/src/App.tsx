@@ -1315,21 +1315,14 @@ function App() {
     return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
   }
 
-  // Логируем debug-блок из subscriptionStatus при каждом рендере
-  React.useEffect(() => {
-    if (subscriptionStatus && (subscriptionStatus as any).debug) {
-      console.log('[App][DEBUG]', (subscriptionStatus as any).debug);
-    }
-  }, [subscriptionStatus]);
-
   // Основной интерфейс
   return (
     <SimpleErrorBoundary>
       <div style={{ background: '#ffe', color: '#333', padding: 8, marginBottom: 8, fontSize: 12, border: '1px solid #ccc', borderRadius: '4px' }}>
         <b>userId:</b> {String(userId)}<br/>
         <b>Статус подписки (raw):</b> {JSON.stringify(subscriptionStatus)}<br/>
-        {/* Добавим рендер статуса для наглядности */}
-        <b>Статус (интерпретация):</b> {subscriptionStatus === null ? 'Загрузка/Ошибка' : (subscriptionStatus.is_active && subscriptionStatus.has_subscription ? 'Premium' : 'Free')}<br/>
+        {/* ИЗМЕНЕНО: используем только is_active для определения Premium */}
+        <b>Статус (интерпретация):</b> {subscriptionStatus === null ? 'Загрузка/Ошибка' : (subscriptionStatus.is_active ? 'Premium' : 'Free')}<br/>
         <b>DEBUG Info:</b> <pre style={{whiteSpace:'pre-wrap', maxHeight: '100px', overflowY: 'auto', background:'#f8f8f8', border: '1px dashed #aaa', padding: '4px', margin: '4px 0'}}>{JSON.stringify(debugInfo, null, 2)}</pre>
       </div>
       <div className="app-container">
