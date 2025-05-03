@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Dict, Any, Optional
 from dateutil.relativedelta import relativedelta
@@ -115,12 +115,12 @@ class SupabaseSubscriptionService:
     async def get_subscription(self, user_id: int) -> Optional[Dict[str, Any]]:
         """Получает активную подписку пользователя с проверкой даты окончания."""
         try:
-            now = datetime.now()
+            now_utc = datetime.now(timezone.utc)
             result = self.supabase.table("user_subscription") \
                 .select("*") \
-                .eq("user_id", int(user_id)) \
+                .eq("user_id", user_id) \
                 .eq("is_active", True) \
-                .gt("end_date", now.isoformat()) \
+                .gt("end_date", now_utc.isoformat()) \
                 .order("end_date", desc=True) \
                 .limit(1) \
                 .execute()
