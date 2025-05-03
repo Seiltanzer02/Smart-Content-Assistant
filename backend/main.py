@@ -3399,3 +3399,61 @@ async def get_subscription_status(request: Request):
         logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True)
         raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера: {str(e)}")
 
+# --- Добавляем эндпоинт для получения статуса подписки (до монтирования SPA) ---
+@app.get("/subscription/status", tags=["subscription"])
+async def get_subscription_status(request: Request):
+    """Возвращает информацию о подписке и лимитах пользователя."""
+    user_id = request.headers.get("x-telegram-user-id") or request.query_params.get("user_id")
+
+    logger.info(f'Запрос /subscription/status для user_id: {user_id}')
+
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id обязателен")
+
+    try:
+        user_id_int = int(user_id)
+    except ValueError:
+        logger.error(f"Некорректный user_id: {user_id}")
+        raise HTTPException(status_code=400, detail="Некорректный user_id")
+
+    try:
+        now_utc = datetime.utcnow().isoformat()
+
+        # Проверяем активную подписку
+        result = supabase.table("user_subscription") \
+            .select("is_active, end_date, id") \
+            .eq("user_id", user_id_int) \
+            .eq("is_active", True) \
+            .gt("end_date", now_utc) \
+            .order("end_date", desc=True) \
+            .limit(1) \
+            .maybe_single() \
+            .execute()
+
+        has_active_subscription = bool(result.data)
+        end_date = result.data.get("end_date") if result.data else None
+
+        usage_stats = {"analysis_count": 0, "post_generation_count": 0}
+        if not has_active_subscription:
+            stats_result = supabase.table("user_usage_stats") \
+                .select("analysis_count, post_generation_count") \
+                .eq("user_id", user_id_int) \
+                .maybe_single() \
+                .execute()
+            if stats_result.data:
+                usage_stats["analysis_count"] = stats_result.data.get("analysis_count", 0)
+                usage_stats["post_generation_count"] = stats_result.data.get("post_generation_count", 0)
+
+        response_data = {
+            "has_subscription": has_active_subscription,
+            "subscription_end_date": end_date,
+            "analysis_count": usage_stats["analysis_count"],
+            "post_generation_count": usage_stats["post_generation_count"]
+        }
+
+        logger.info(f'Возвращаем статус для user_id {user_id_int}: {response_data}')
+        return response_data
+    except Exception as e:
+        logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True)
+        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
+
