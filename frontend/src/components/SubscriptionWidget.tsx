@@ -84,6 +84,11 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       const subscriptionData = await getUserSubscriptionStatus(userId);
       setStatus(subscriptionData);
       
+      // Добавляем логирование для отладки
+      console.log('Результат getUserSubscriptionStatus:', subscriptionData);
+      console.log('has_subscription тип:', typeof subscriptionData.has_subscription);
+      console.log('has_subscription значение:', subscriptionData.has_subscription);
+      
       // Показываем/скрываем главную кнопку в зависимости от статуса подписки
       if (window.Telegram?.WebApp?.MainButton) {
         if (!subscriptionData.has_subscription && !isActive) {
@@ -243,12 +248,14 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
           <div className="status-badge premium">Premium</div>
           <p>У вас активная подписка{status.subscription_end_date ? ` до ${new Date(status.subscription_end_date).toLocaleDateString()}` : ''}</p>
           <p>Все функции доступны без ограничений</p>
+          <p>Отладка: has_subscription = {String(status.has_subscription)}, тип: {typeof status.has_subscription}</p>
         </div>
       ) : (
         <div className="subscription-free">
           <div className="status-badge free">Бесплатный план</div>
           <p>Использовано анализов: {status?.analysis_count || 0}/2</p>
           <p>Использовано генераций постов: {status?.post_generation_count || 0}/2</p>
+          <p>Отладка: has_subscription = {String(status?.has_subscription)}, тип: {typeof status?.has_subscription}</p>
           
           {showPaymentInfo ? (
             <div className="payment-info">

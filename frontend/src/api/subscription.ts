@@ -26,6 +26,12 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
       headers: { 'x-telegram-user-id': userId }
     });
     
+    // Добавляем логирование для отладки
+    console.log('Ответ API /subscription/status:', response);
+    console.log('Данные ответа:', response.data);
+    console.log('Тип has_subscription:', typeof response.data.has_subscription);
+    console.log('Значение has_subscription:', response.data.has_subscription);
+    
     return response.data;
   } catch (error) {
     console.error('Ошибка при получении статуса подписки:', error);
@@ -63,7 +69,7 @@ export const createSubscription = async (userId: string | null, paymentId?: stri
  * @param amount Сумма платежа в Stars
  * @returns Promise с данными инвойса, включая URL
  */
-export const generateInvoice = async (userId: number, amount: number = 70) => {
+export const generateInvoice = async (userId: number, amount: number = 1) => {
   try {
     const response = await axios.post(`${API_URL}/generate-invoice`, {
       user_id: userId,
