@@ -1,300 +1,249 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import '../styles/SubscriptionWidget.css';
-import { getUserSubscriptionStatus, SubscriptionStatus } from '../api/subscription'; // Убираем generateInvoice, если он не используется здесь напрямую
-import { toast } from 'react-hot-toast';
-
-// Дефолтный статус, чтобы избежать undefined
-const defaultStatus: SubscriptionStatus = {
-  has_subscription: false,
-  analysis_count: 0,
-  post_generation_count: 0,
-  subscription_end_date: undefined,
-};
+import { getUserSubscriptionStatus, SubscriptionStatus } from '../api/subscription';
 
 interface SubscriptionWidgetProps {
   userId: string | null;
+  isActive?: boolean;
 }
 
-// Определяем возможные состояния виджета для большей ясности
-type WidgetState = 'loading' | 'error' | 'subscribed' | 'not_subscribed';
+// API_URL для относительных путей
+const API_URL = '';
 
-const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
+const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActive }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  // Инициализируем status дефолтным объектом
-  const [status, setStatus] = useState<SubscriptionStatus>(defaultStatus);
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-  const isFetching = useRef(false); // Флаг для предотвращения гонок запросов
-
-  const SUBSCRIPTION_PRICE = 1; // в Stars
-
-  // Используем useCallback для стабильности функции fetch
-  const fetchSubscriptionStatus = useCallback(async () => {
-    // Предотвращаем одновременные запросы
-    if (isFetching.current) {
-        console.log('[fetchSubscriptionStatus] Пропуск вызова: предыдущий запрос еще выполняется.');
-        return;
-    }
-    isFetching.current = true;
-    setLoading(true);
-    setError(null);
-
-    if (!userId) {
-      console.warn('[fetchSubscriptionStatus] userId отсутствует.');
-      setError('Ошибка: ID пользователя не определен.');
-      setStatus(defaultStatus); // Сбрасываем к дефолту при отсутствии ID
-      if (window.Telegram?.WebApp?.MainButton) {
+  const [status, setStatus] = useState<SubscriptionStatus | null>(null);
+  const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
+  const SUBSCRIPTION_PRICE = 1;
+  const [isSubscribing, setIsSubscribing] = useState(false);
+  
+  // Инициализация и настройка Telegram WebApp
+  useEffect(() => {
+    console.log('Инициализация Telegram WebApp...');
+    
+    // Проверяем наличие Telegram WebApp
+    if (window.Telegram?.WebApp) {
+      console.log('window.Telegram.WebApp найден, настраиваем...');
+      
+      // Инициализируем Telegram WebApp
+      window.Telegram.WebApp.ready();
+      
+      // Настраиваем главную кнопку
+      if (window.Telegram.WebApp.MainButton) {
+        window.Telegram.WebApp.MainButton.setText('Подписаться за ' + SUBSCRIPTION_PRICE + ' Star');
+        window.Telegram.WebApp.MainButton.color = '#2481cc';
+        window.Telegram.WebApp.MainButton.textColor = '#ffffff';
+        if (isActive) {
           window.Telegram.WebApp.MainButton.hide();
-      }
-      setLoading(false);
-      isFetching.current = false;
-      return;
-    }
-
-    try {
-      console.log(`[fetchSubscriptionStatus] Запрос статуса для userId: ${userId}`);
-      const data = await getUserSubscriptionStatus(userId);
-      // --- ЛОГИРОВАНИЕ СЫРЫХ ДАННЫХ ---
-      console.log('[fetchSubscriptionStatus] Сырой ответ от getUserSubscriptionStatus:', JSON.stringify(data, null, 2));
-      // ---
-
-      // Проверяем, что данные получены и имеют поле has_subscription БУЛЕВОГО типа
-      if (data && typeof data.has_subscription === 'boolean') {
-        console.log('[fetchSubscriptionStatus] Данные корректны, вызываю setStatus.');
-        setStatus(data);
-        if (data.has_subscription) {
-           if (window.Telegram?.WebApp?.MainButton) window.Telegram.WebApp.MainButton.hide();
-        } else {
-           if (window.Telegram?.WebApp?.MainButton) window.Telegram.WebApp.MainButton.show();
         }
+        
+        // Добавляем обработчик нажатия на главную кнопку
+        window.Telegram.WebApp.MainButton.onClick(handleSubscribeViaMainButton);
       } else {
-         // --- БОЛЕЕ ПОДРОБНОЕ ЛОГИРОВАНИЕ ОШИБКИ ---
-         console.warn('[fetchSubscriptionStatus] Получены некорректные данные!');
-         console.warn('[fetchSubscriptionStatus] Тип data:', typeof data);
-         if(data) {
-             console.warn('[fetchSubscriptionStatus] Тип data.has_subscription:', typeof data.has_subscription);
-             console.warn('[fetchSubscriptionStatus] Значение data.has_subscription:', data.has_subscription);
-         }
-         setError('Ошибка: Некорректные данные статуса.'); // Оставляем эту ошибку
-         // ---
-         setStatus(defaultStatus);
-         if (window.Telegram?.WebApp?.MainButton) window.Telegram.WebApp.MainButton.hide();
+        console.warn('MainButton недоступен в Telegram WebApp');
       }
-    } catch (err: any) {
-      console.error('[fetchSubscriptionStatus] Ошибка в catch:', err);
-      // Log axios error response if available
-      if (err.response) {
-          console.error('[fetchSubscriptionStatus] Axios error response data:', JSON.stringify(err.response.data, null, 2));
-          setError(`Ошибка ${err.response.status}: ${err.response.data?.detail || err.message}`);
-      } else {
-          setError(err.message || 'Ошибка при загрузке статуса');
+      
+      // Добавляем обработчик onEvent для события 'popup_closed'
+      if (typeof window.Telegram.WebApp.onEvent === 'function') {
+        window.Telegram.WebApp.onEvent('popup_closed', () => {
+          console.log('Popup закрыт, обновляем статус подписки');
+          fetchSubscriptionStatus();
+        });
       }
-      setStatus(defaultStatus);
-      if (window.Telegram?.WebApp?.MainButton) window.Telegram.WebApp.MainButton.hide();
-    } finally {
-      setLoading(false);
-      isFetching.current = false;
+    } else {
+      console.warn('window.Telegram.WebApp не найден!');
+    }
+    
+    // Функция очистки при размонтировании компонента
+    return () => {
+      if (window.Telegram?.WebApp?.MainButton) {
+        window.Telegram.WebApp.MainButton.offClick(handleSubscribeViaMainButton);
+      }
+    };
+  }, [isActive]);
+  
+  useEffect(() => {
+    if (userId) {
+      fetchSubscriptionStatus();
+    }
+    
+    // Добавляем логирование статуса Telegram WebApp при загрузке компонента
+    console.log('SubscriptionWidget загружен, проверка Telegram.WebApp:');
+    console.log('window.Telegram существует:', !!window.Telegram);
+    console.log('window.Telegram?.WebApp существует:', !!window.Telegram?.WebApp);
+    if (window.Telegram?.WebApp) {
+      console.log('window.Telegram.WebApp методы:', Object.keys(window.Telegram.WebApp));
     }
   }, [userId]);
-
-  // --- Эффекты ---
-  useEffect(() => {
-    const tg = window.Telegram?.WebApp;
-    if (!tg) {
-        console.warn('window.Telegram.WebApp не найден!');
-        return;
-    }
-
-    console.log('Инициализация и настройка Telegram WebApp...');
-    tg.ready();
-
-    // Обработчик изменения видимости
-    const handleViewportChanged = (eventPayload: { isStateStable: boolean }) => {
-        console.log('Viewport changed:', eventPayload);
-        if (eventPayload.isStateStable) {
-            console.log('Viewport стабилен, обновляем статус подписки...');
-            fetchSubscriptionStatus(); // Используем useCallback-версию
+  
+  const fetchSubscriptionStatus = async (): Promise<boolean> => {
+    setLoading(true);
+    try {
+      // Используем функцию из API вместо прямого запроса
+      const subscriptionData = await getUserSubscriptionStatus(userId);
+      setStatus(subscriptionData);
+      
+      // Показываем/скрываем главную кнопку в зависимости от статуса подписки
+      if (window.Telegram?.WebApp?.MainButton) {
+        if (!subscriptionData.has_subscription && !isActive) {
+          window.Telegram.WebApp.MainButton.show();
+        } else {
+          window.Telegram.WebApp.MainButton.hide();
         }
-    };
-    
-    // Обработчик закрытия попапа оплаты
-    const handlePopupClosed = () => {
-        console.log('Popup оплаты закрыт, обновляем статус...');
-        fetchSubscriptionStatus(); // Используем useCallback-версию
-    };
-
-    // Настройка кнопок и событий
-    if (tg.MainButton) {
-        tg.MainButton.setText(`Подписаться за ${SUBSCRIPTION_PRICE} Stars`);
-        tg.MainButton.color = '#2481cc';
-        tg.MainButton.textColor = '#ffffff';
-        tg.MainButton.hide(); // Прячем по умолчанию, пока статус не загружен
-        tg.MainButton.onClick(handleSubscribeViaMainButton);
+      }
+      
+      return subscriptionData.has_subscription;
+    } catch (err: any) {
+      console.error('Ошибка при получении статуса подписки:', err);
+      setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке статуса подписки');
+      return false;
+    } finally {
+      setLoading(false);
     }
-    if (typeof tg.onEvent === 'function') {
-        tg.onEvent('popup_closed', handlePopupClosed); 
-        tg.onEvent('viewportChanged', handleViewportChanged);
-    }
-
-    // Функция очистки
-    return () => {
-        console.log('Очистка обработчиков SubscriptionWidget...');
-        if (tg?.MainButton) {
-            tg.MainButton.offClick(handleSubscribeViaMainButton);
-            tg.MainButton.hide();
-        }
-        if (typeof tg?.offEvent === 'function') {
-            tg.offEvent('popup_closed', handlePopupClosed);
-            tg.offEvent('viewportChanged', handleViewportChanged);
-        }
-    };
-  // fetchSubscriptionStatus теперь в useCallback и зависит от userId, поэтому его можно убрать отсюда
-  // userId как зависимость для основного useEffect не нужен, так как есть отдельный useEffect ниже
-  }, [fetchSubscriptionStatus]); // Добавляем fetchSubscriptionStatus в зависимости
-
-  // Эффект для первоначальной загрузки и при смене userId
-  useEffect(() => {
-    console.log(`[useEffect userId] userId изменился: ${userId}. Вызов fetchSubscriptionStatus.`);
-    fetchSubscriptionStatus();
-  }, [userId, fetchSubscriptionStatus]); // fetchSubscriptionStatus добавлен как зависимость
-
-  // --- Обработчики ---
+  };
+  
+  // Функция для запуска платежа через MainButton
   const handleSubscribeViaMainButton = () => {
     console.log('Нажата главная кнопка в Telegram WebApp');
+    
+    // Показываем подтверждение через Telegram WebApp
     if (window.Telegram?.WebApp?.showConfirm) {
-        window.Telegram.WebApp.showConfirm(
-          `Вы хотите оформить подписку за ${SUBSCRIPTION_PRICE} Stars?`,
-          (confirmed) => {
-            if (confirmed) {
-              initiatePaymentFlow();
-            }
+      window.Telegram.WebApp.showConfirm(
+        'Вы хотите оформить подписку за ' + SUBSCRIPTION_PRICE + ' Star?',
+        (confirmed) => {
+          if (confirmed) {
+            handleSubscribe();
           }
-        );
+        }
+      );
     } else {
-        initiatePaymentFlow();
+      // Если метод showConfirm недоступен, просто продолжаем
+      handleSubscribe();
     }
   };
-
-  const initiatePaymentFlow = async () => {
-     if (!userId) {
-        setError("Не удалось получить ID пользователя для оплаты.");
-        return;
-     }
-
-     setIsProcessingPayment(true);
-     setError(null);
-
+  
+  const handleInvoiceGeneration = async () => {
+    if (!userId) {
+      setError("Не удалось определить ID пользователя");
+      return;
+    }
     try {
-       const numericUserId = parseInt(userId, 10);
-       if (isNaN(numericUserId)){
-           throw new Error("Некорректный формат ID пользователя");
-       }
-
-      const response = await fetch('/generate-stars-invoice-link', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: numericUserId, amount: SUBSCRIPTION_PRICE })
-      });
-
-      if (!response.ok) {
-          let errorDetail = `HTTP ошибка ${response.status}`;
-          try {
-              const errorData = await response.json();
-              errorDetail = errorData.detail || errorData.error || errorDetail;
-          } catch (jsonError) { /* ignore */ }
-          throw new Error(errorDetail);
+      setIsSubscribing(true);
+      if (window?.Telegram?.WebApp && typeof window?.Telegram?.WebApp.openInvoice === 'function') {
+        window.Telegram.WebApp.openInvoice(
+          { slug: 'stars', amount: SUBSCRIPTION_PRICE },
+          (paymentStatus) => {
+            if (paymentStatus === 'paid') {
+              fetchSubscriptionStatus();
+              if (window?.Telegram?.WebApp?.showPopup) {
+                window.Telegram.WebApp.showPopup({
+                  title: 'Успешная оплата',
+                  message: 'Ваша подписка Premium активирована!',
+                  buttons: [{ type: 'ok' }]
+                });
+              }
+            } else if (paymentStatus === 'failed' || paymentStatus === 'cancelled') {
+              if (window?.Telegram?.WebApp?.showPopup) {
+                window.Telegram.WebApp.showPopup({
+                  title: 'Ошибка оплаты',
+                  message: 'Не удалось завершить оплату. Пожалуйста, попробуйте снова.',
+                  buttons: [{ type: 'ok' }]
+                });
+              }
+            }
+          });
+      } else {
+        console.error('Telegram WebApp или openInvoice недоступен.');
+        setError('Не удалось инициировать оплату через Telegram.');
       }
-      const data = await response.json();
-      if (data.success && data.invoice_link) {
-          if (window?.Telegram?.WebApp?.openInvoice) {
-              window.Telegram.WebApp.openInvoice(data.invoice_link, (invoiceStatus) => {
-                  console.log(`Статус инвойса: ${invoiceStatus}`);
-                  if (invoiceStatus === 'paid') {
-                      toast.success('Оплата прошла успешно! Обновляем статус...');
-                      setTimeout(fetchSubscriptionStatus, 2500); // Небольшая задержка перед обновлением
-                  } else if (invoiceStatus === 'failed') {
-                      setError('Оплата не удалась.');
-                  } else if (invoiceStatus === 'cancelled') {
-                      setError('Платеж был отменен.');
-                  } else {
-                      setError(`Статус платежа: ${invoiceStatus}.`);
-                  }
-                  setIsProcessingPayment(false);
-              });
-          } else { throw new Error('Метод openInvoice не доступен.'); }
-      } else { throw new Error(data.error || 'Ошибка генерации ссылки.'); }
-    } catch (error) {
-      console.error('Ошибка в процессе инициирования оплаты:', error);
-      setError(`Ошибка оплаты: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
-      setIsProcessingPayment(false);
+    } catch (err: any) {
+      console.error('Ошибка при генерации инвойса:', err);
+      setError(err.message || 'Не удалось начать процесс оплаты.');
+    } finally {
+      setIsSubscribing(false);
     }
   };
-
-  // --- Рендеринг ---
-
-  // Показываем загрузку, пока loading=true ИЛИ если статус еще дефолтный (на случай быстрой первой загрузки)
-  if (loading && status === defaultStatus) {
+  
+  const handleSubscribe = async () => {
+    try {
+      // Получаем ID пользователя из Telegram WebApp
+      const userId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
+      
+      if (!userId) {
+        setError('Не удалось получить ID пользователя');
+        return;
+      }
+      
+      // Генерируем инвойс для оплаты
+      await handleInvoiceGeneration();
+    } catch (error) {
+      console.error('Ошибка при подписке:', error);
+      setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
+    }
+  };
+  
+  if (loading) {
     return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
   }
-
-  // Показываем ошибку, если она есть
+  
   if (error) {
     return (
       <div className="subscription-widget error">
         <p>Ошибка: {error}</p>
-        {userId && <button onClick={fetchSubscriptionStatus} disabled={loading}>Повторить</button>}
+        <button onClick={fetchSubscriptionStatus}>Повторить</button>
       </div>
     );
   }
-
-  // Основной рендеринг на основе status.has_subscription
+  
   return (
     <div className="subscription-widget">
       <h3>Статус подписки</h3>
-
-      {status.has_subscription ? (
-        // Состояние "Подписан"
+      
+      {status?.has_subscription ? (
         <div className="subscription-active">
           <div className="status-badge premium">Premium</div>
-          <p>
-            У вас активная подписка
-            {status.subscription_end_date
-              ? ` до ${new Date(status.subscription_end_date).toLocaleDateString()}`
-              : ''}
-          </p>
+          <p>У вас активная подписка{status.subscription_end_date ? ` до ${new Date(status.subscription_end_date).toLocaleDateString()}` : ''}</p>
           <p>Все функции доступны без ограничений</p>
-          {/* Отладка */}
-          <p>
-             Отладка: has_subscription = {String(status.has_subscription)}, тип: {typeof status.has_subscription}
-          </p>
         </div>
       ) : (
-        // Состояние "Не подписан"
         <div className="subscription-free">
           <div className="status-badge free">Бесплатный план</div>
-          <p>Использовано анализов: {status.analysis_count}/2</p>
-          <p>Использовано генераций постов: {status.post_generation_count}/2</p>
-          {/* Отладка */}
-           <p>
-             Отладка: has_subscription = {String(status.has_subscription)}, тип: {typeof status.has_subscription}
-          </p>
-
-          {/* Кнопка подписки */}
-          <div className="subscription-offer">
-             <h4>Получите безлимитный доступ</h4>
-              <ul>
-                <li>Неограниченный анализ каналов</li>
-                <li>Неограниченная генерация постов</li>
-                <li>Сохранение данных в облаке</li>
-              </ul>
-            <button
-              className="subscribe-button"
-              onClick={initiatePaymentFlow}
-              disabled={isProcessingPayment || loading} // Блокируем во время обработки/загрузки
-            >
-              {isProcessingPayment ? 'Обработка...' : `Подписаться за ${SUBSCRIPTION_PRICE} Star`}
-            </button>
-          </div>
+          <p>Доступно бесплатных анализов: {status?.analysis_count === null ? 'Неограниченно' : (2 - (status?.analysis_count || 0))}</p>
+          <p>Доступно бесплатных генераций постов: {status?.post_generation_count === null ? 'Неограниченно' : (2 - (status?.post_generation_count || 0))}</p>
+          
+          {showPaymentInfo ? (
+            <div className="payment-info">
+              <h4>Процесс оплаты</h4>
+              <p>Для оплаты подписки выполните следующие шаги:</p>
+              <ol>
+                <li>Нажмите кнопку "Оплатить" выше</li>
+                <li>Откроется чат с нашим ботом</li>
+                <li>Нажмите кнопку "Оплатить {SUBSCRIPTION_PRICE} Star" в боте</li>
+                <li>Подтвердите платеж</li>
+                <li>Вернитесь в это приложение</li>
+              </ol>
+              <p>После успешной оплаты ваша подписка активируется автоматически!</p>
+              <button 
+                className="cancel-button"
+                onClick={() => setShowPaymentInfo(false)}
+              >
+                Отменить
+              </button>
+            </div>
+          ) : (
+            <div className="subscription-offer">
+              <h4>Получите Premium</h4>
+              <p>Снимите все ограничения и получите полный доступ ко всем функциям.</p>
+              <button
+                className="subscribe-button"
+                onClick={handleInvoiceGeneration}
+                disabled={isSubscribing}
+              >
+                {isSubscribing ? 'Обработка...' : `Подписаться за ${SUBSCRIPTION_PRICE} Star`}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
