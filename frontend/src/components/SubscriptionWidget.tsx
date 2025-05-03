@@ -249,43 +249,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
           {status?.is_active_flag !== undefined && (
             <p><small style={{color: 'gray'}}>Статус в БД: is_active_flag = {status.is_active_flag ? 'true' : 'false'}</small></p>
           )}
-          
-          {showPaymentInfo ? (
-            <div className="payment-info">
-              <h4>Процесс оплаты</h4>
-              <p>Для оплаты подписки выполните следующие шаги:</p>
-              <ol>
-                <li>Нажмите кнопку "Оплатить" выше</li>
-                <li>Откроется чат с нашим ботом</li>
-                <li>Нажмите кнопку "Оплатить {SUBSCRIPTION_PRICE} Stars" в боте</li>
-                <li>Подтвердите платеж</li>
-                <li>Вернитесь в это приложение</li>
-              </ol>
-              <p>После успешной оплаты ваша подписка активируется автоматически!</p>
-              <button 
-                className="cancel-button"
-                onClick={() => setShowPaymentInfo(false)}
-              >
-                Отменить
-              </button>
-            </div>
-          ) : (
-            <div className="subscription-offer">
-              <h4>Получите безлимитный доступ</h4>
-              <ul>
-                <li>Неограниченный анализ каналов</li>
-                <li>Неограниченная генерация постов</li>
-                <li>Сохранение данных в облаке</li>
-              </ul>
-              <button 
-                className="subscribe-button"
-                onClick={handleSubscribe}
-                disabled={isSubscribing}
-              >
-                {isSubscribing ? 'Создание платежа...' : 'Подписаться за 70 Stars'}
-              </button>
-            </div>
-          )}
         </div>
       )}
     </div>

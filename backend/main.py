@@ -3330,6 +3330,7 @@ else:
 # Добавляем эндпоинт для проверки статуса подписки
 @app.get("/subscription/status")
 async def get_subscription_status(request: Request):
+    # Получаем user_id из query parameters или из заголовка X-Telegram-User-Id
     user_id = request.query_params.get("user_id")
     telegram_user_id = request.headers.get("X-Telegram-User-Id") or user_id
     
