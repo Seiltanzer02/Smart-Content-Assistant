@@ -367,6 +367,23 @@ async def telegram_webhook(request: Request):
                 "Content-Type": "application/json"
             }
             
+            # АНАЛИТИЧЕСКИЙ ЗАПРОС: посмотрим все подписки для этого пользователя
+            check_all_subs_query = f"""
+            SELECT * FROM user_subscription 
+            WHERE user_id = {user_id} 
+            ORDER BY end_date DESC;
+            """
+            logger.info(f'[telegram_webhook] Проверка всех подписок для user_id={user_id}: {check_all_subs_query}')
+            
+            url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
+            check_all_response = requests.post(url, json={"query": check_all_subs_query}, headers=headers)
+            
+            if check_all_response.status_code == 200:
+                all_subs = check_all_response.json()
+                logger.info(f'[telegram_webhook] Найдено {len(all_subs)} подписок для user_id={user_id}: {json.dumps(all_subs)}')
+            else:
+                logger.error(f'[telegram_webhook] Ошибка при проверке всех подписок: {check_all_response.status_code} - {check_all_response.text}')
+            
             # Сначала проверяем, есть ли уже подписка для этого пользователя
             sql_query = f"""
             SELECT * FROM user_subscription 
@@ -405,8 +422,12 @@ async def telegram_webhook(request: Request):
                 logger.info(f'[telegram_webhook] Подписка успешно обновлена для user_id={user_id}')
             else:
                 # Если подписки нет, создаём новую
+                # Сгенерируем UUID для новой записи
+                new_id = str(uuid.uuid4())
+                
                 insert_query = f"""
                 INSERT INTO user_subscription (
+                    id,
                     user_id, 
                     start_date, 
                     end_date, 
@@ -415,6 +436,7 @@ async def telegram_webhook(request: Request):
                     created_at, 
                     updated_at
                 ) VALUES (
+                    '{new_id}',
                     {user_id}, 
                     '{now.isoformat()}', 
                     '{far_future_end_date.isoformat()}', 
@@ -422,7 +444,8 @@ async def telegram_webhook(request: Request):
                     TRUE, 
                     NOW(), 
                     NOW()
-                );
+                )
+                RETURNING id;
                 """
                 logger.info(f'[telegram_webhook] Создаём новую подписку для user_id={user_id}')
                 insert_response = requests.post(url, json={"query": insert_query}, headers=headers)
@@ -431,7 +454,15 @@ async def telegram_webhook(request: Request):
                     logger.error(f'[telegram_webhook] Ошибка SQL-запроса при создании подписки: {insert_response.status_code} - {insert_response.text}')
                     return {"ok": False, "error": "Ошибка SQL-запроса при создании подписки"}
                     
-                logger.info(f'[telegram_webhook] Новая подписка успешно создана для user_id={user_id}')
+                # Получаем ID новой записи - хотя мы его уже знаем, т.к. сгенерировали new_id
+                try:
+                    result = insert_response.json()
+                    subscription_id = result[0]["id"] if result and len(result) > 0 else new_id
+                except Exception as parse_err:
+                    logger.error(f'[telegram_webhook] Ошибка при получении ID новой подписки: {parse_err}')
+                    subscription_id = new_id
+                    
+                logger.info(f'[telegram_webhook] Новая подписка успешно создана для user_id={user_id}, ID={subscription_id}')
                 
             # Двойная проверка - получаем статус подписки, чтобы убедиться, что всё работает
             check_query = f"""
@@ -2334,35 +2365,42 @@ async def fix_existing_ideas_formatting():
 # --- Запуск исправления форматирования при старте сервера ---
 @app.on_event("startup")
 async def startup_event():
-    """Запуск обслуживающих процессов при старте приложения."""
-    logger.info("Запуск обслуживающих процессов...")
-    
-    # Проверка и добавление недостающих столбцов (оставляем существующую логику)
-    if supabase:
-        if not await check_db_tables():
-            logger.error("Ошибка при проверке таблиц в базе данных!")
-            # Продолжаем работу приложения даже при ошибке
-        else:
-            logger.info("Проверка таблиц базы данных завершена успешно.")
-    else:
-        logger.warning("Клиент Supabase не инициализирован, проверка таблиц пропущена.")
-    
-    # Исправление форматирования в JSON полях
-    # await fix_formatting_in_json_fields() # Отключаем временно, если не нужно
-    
-    logger.info("Обслуживающие процессы запущены успешно")
-
-    # --- ДОБАВЛЕНО: Вызов fix_schema при старте --- 
+    """Выполняется при запуске приложения"""
     try:
-        fix_result = await fix_schema()
-        logger.info(f"Результат проверки/исправления схемы при старте: {fix_result}")
-        if not fix_result.get("success"):
-            logger.error("Ошибка при проверке/исправлении схемы БД при запуске!")
-            # Решите, следует ли прерывать запуск или нет.
-            # Пока продолжаем работу.
-    except Exception as schema_fix_error:
-        logger.error(f"Исключение при вызове fix_schema во время старта: {schema_fix_error}", exc_info=True)
-    # --- КОНЕЦ ДОБАВЛЕНИЯ ---
+        logger.info("Все необходимые переменные окружения найдены.")
+        logger.info("Инициализация Supabase...")
+        
+        # Вызов рефакторинга БД
+        await fix_formatting_in_json_fields() 
+        
+        # --- ДОБАВЛЕН ВЫЗОВ НОВОЙ ФУНКЦИИ ---
+        await check_user_subscription_table()
+        # --- КОНЕЦ ДОБАВЛЕНИЯ ---
+        
+        logger.info("Supabase успешно инициализирован.")
+        try:
+            # Проверка доступа к БД
+            supabase_client = supabase.create_client(
+                supabase_url=os.environ["SUPABASE_URL"],
+                supabase_key=os.environ["SUPABASE_ANON_KEY"]
+            )
+            response = supabase_client.table("suggested_ideas").select("id").limit(1).execute()
+            if response.data is not None:
+                logger.info("Таблица suggested_ideas существует и доступна.")
+            else:
+                logger.error("Не удалось получить доступ к таблице suggested_ideas.")
+        except Exception as e:
+            logger.error(f"Ошибка при проверке доступа к таблице suggested_ideas: {e}")
+
+        # Проверяем существование папки для статических файлов
+        static_folder = os.path.join(os.path.dirname(__file__), "static")
+        if os.path.exists(static_folder):
+            logger.info(f"Статические файлы будут обслуживаться из папки: {static_folder}")
+        else:
+            logger.warning(f"Папка статических файлов не найдена: {static_folder}")
+    except Exception as startup_error:
+        logger.error(f"Ошибка при запуске приложения: {startup_error}", exc_info=True)
+        # Даже при ошибке приложение продолжит запуск
 
 # --- Функция для исправления форматирования в существующих постах ---
 async def fix_existing_posts_formatting():
@@ -3463,20 +3501,24 @@ async def get_subscription_status(request: Request):
     debug = {}
     try:
         user_id_str = request.query_params.get("user_id")
+        logger.info(f"[subscription/status] Запрос для user_id={user_id_str}")
         debug["user_id_from_query"] = user_id_str
         if not user_id_str:
+            logger.error(f"[subscription/status] Отсутствует user_id в запросе")
             return JSONResponse({"error": "user_id обязателен", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=400)
         user_id = int(user_id_str)
         debug["user_id_int"] = user_id
+        logger.info(f"[subscription/status] user_id приведен к int: {user_id}")
 
         # Прямой SQL-запрос через RPC Supabase
         supabase_url = os.environ["SUPABASE_URL"]
         # Используем SUPABASE_SERVICE_ROLE_KEY вместо SUPABASE_ANON_KEY для обхода RLS
         supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         if not supabase_service_key:
-            logger.error("SUPABASE_SERVICE_ROLE_KEY отсутствует в переменных окружения!")
+            logger.error("[subscription/status] SUPABASE_SERVICE_ROLE_KEY отсутствует в переменных окружения!")
             debug["service_key_error"] = "SUPABASE_SERVICE_ROLE_KEY отсутствует"
             supabase_service_key = os.environ.get("SUPABASE_ANON_KEY", "")
+            logger.warning("[subscription/status] Используем SUPABASE_ANON_KEY вместо SUPABASE_SERVICE_ROLE_KEY")
             
         headers = {
             "apikey": supabase_service_key,
@@ -3493,52 +3535,299 @@ async def get_subscription_status(request: Request):
         ORDER BY end_date DESC 
         LIMIT 1;
         """
+        logger.info(f"[subscription/status] SQL запрос: {sql_query}")
         
         url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
         debug["sql_query"] = sql_query
         debug["using_service_role_key"] = bool(supabase_service_key == os.environ.get("SUPABASE_SERVICE_ROLE_KEY"))
         
+        logger.info(f"[subscription/status] Отправка запроса к {url} с ключом SERVICE_ROLE: {debug['using_service_role_key']}")
         response = requests.post(url, json={"query": sql_query}, headers=headers)
         debug["sql_status_code"] = response.status_code
         debug["sql_text"] = response.text
+        logger.info(f"[subscription/status] Ответ от Supabase: код {response.status_code}, текст: {response.text}")
+        
         if response.status_code != 200:
+            logger.error(f"[subscription/status] Ошибка SQL-запроса: {response.status_code} - {response.text}")
             return JSONResponse({"error": "Ошибка SQL-запроса", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
         records = response.json()
         debug["sql_records"] = records
+        logger.info(f"[subscription/status] Полученные записи: {records}")
 
         if not records or len(records) == 0:
+            logger.warning(f"[subscription/status] Подписка не найдена для user_id={user_id}")
             return {"has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}
 
         sub = records[0]
         debug["selected_sub"] = sub
+        logger.info(f"[subscription/status] Найдена подписка: {sub}")
         
         # Достаточно проверить is_active, так как это главный индикатор активной подписки
         is_active = bool(sub.get("is_active", False))
         end_date = sub.get("end_date")
+        logger.info(f"[subscription/status] Значение is_active: {is_active}, end_date: {end_date}")
         
         # Для дополнительной проверки end_date (необязательно, но хорошо иметь)
         now = datetime.now(timezone.utc)
         try:
             end_date_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00')) if end_date else None
+            logger.info(f"[subscription/status] end_date_dt: {end_date_dt}")
         except Exception as e:
             debug["end_date_parse_error"] = str(e)
             end_date_dt = None
+            logger.error(f"[subscription/status] Ошибка при парсинге end_date: {e}")
             
         # ВАЖНОЕ ИЗМЕНЕНИЕ: теперь has_subscription зависит ТОЛЬКО от is_active
         # end_date просто проверяем для информации
         has_subscription = is_active
+        logger.info(f"[subscription/status] Определено has_subscription: {has_subscription}")
         
         # Логируем важную информацию
-        logger.info(f"Статус подписки для user_id={user_id}: is_active={is_active}, end_date={end_date}, has_subscription={has_subscription}")
+        logger.info(f"[subscription/status] Статус подписки для user_id={user_id}: is_active={is_active}, end_date={end_date}, has_subscription={has_subscription}")
         
-        return {
+        result = {
             "has_subscription": has_subscription,
             "is_active": is_active,
             "subscription_end_date": end_date,
             "debug": debug
         }
+        logger.info(f"[subscription/status] Возвращаем результат: {result}")
+        return result
     except Exception as e:
         debug["exception"] = str(e)
-        logger.error(f"Ошибка при получении статуса подписки для user_id={user_id_str}: {e}")
+        logger.error(f"[subscription/status] Ошибка при получении статуса подписки для user_id={user_id_str}: {e}", exc_info=True)
         return JSONResponse({"error": "Внутренняя ошибка", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
 
+@app.get("/debug/create-subscription")
+async def debug_create_subscription(request: Request, user_id: str):
+    """
+    Отладочный эндпоинт для ручного создания/активации подписки.
+    ТОЛЬКО ДЛЯ ТЕСТИРОВАНИЯ!
+    """
+    logger.warning(f"[debug_create_subscription] Ручное создание подписки для user_id={user_id}")
+    
+    try:
+        # Преобразуем user_id в int
+        numeric_user_id = int(user_id)
+        logger.info(f"[debug_create_subscription] user_id преобразован в {numeric_user_id}")
+    except ValueError:
+        logger.error(f"[debug_create_subscription] Некорректный user_id: {user_id}")
+        return JSONResponse({"error": "user_id должен быть числом"}, status_code=400)
+    
+    # Получаем текущее время и далекую дату окончания
+    now = datetime.now(timezone.utc)
+    far_future_end_date = datetime(2099, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+    
+    try:
+        # Подключаемся к Supabase через RPC с SERVICE_ROLE_KEY
+        supabase_url = os.environ["SUPABASE_URL"]
+        supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        
+        if not supabase_service_key:
+            logger.error(f"[debug_create_subscription] SUPABASE_SERVICE_ROLE_KEY отсутствует!")
+            return JSONResponse({"error": "Отсутствует сервисный ключ"}, status_code=500)
+        
+        headers = {
+            "apikey": supabase_service_key,
+            "Authorization": f"Bearer {supabase_service_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # Сначала проверяем, есть ли уже подписка
+        check_query = f"""
+        SELECT * FROM user_subscription 
+        WHERE user_id = {numeric_user_id} 
+        ORDER BY end_date DESC 
+        LIMIT 1;
+        """
+        
+        url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
+        logger.info(f"[debug_create_subscription] Проверка подписки: {check_query}")
+        response = requests.post(url, json={"query": check_query}, headers=headers)
+        
+        if response.status_code != 200:
+            logger.error(f"[debug_create_subscription] Ошибка запроса: {response.status_code} - {response.text}")
+            return JSONResponse({"error": "Ошибка SQL-запроса"}, status_code=500)
+        
+        records = response.json()
+        
+        if records and len(records) > 0:
+            # Подписка существует, обновляем
+            sub_id = records[0].get("id")
+            update_query = f"""
+            UPDATE user_subscription 
+            SET is_active = TRUE, 
+                end_date = '{far_future_end_date.isoformat()}', 
+                payment_id = 'manual_debug_{int(time.time())}', 
+                updated_at = NOW() 
+            WHERE id = '{sub_id}';
+            """
+            
+            logger.info(f"[debug_create_subscription] Обновление подписки {sub_id}: {update_query}")
+            update_response = requests.post(url, json={"query": update_query}, headers=headers)
+            
+            if update_response.status_code != 200:
+                logger.error(f"[debug_create_subscription] Ошибка обновления: {update_response.status_code} - {update_response.text}")
+                return JSONResponse({"error": "Ошибка при обновлении подписки"}, status_code=500)
+            
+            response_data = {
+                "success": True, 
+                "message": f"Подписка {sub_id} обновлена для user_id={numeric_user_id}",
+                "subscription_id": sub_id,
+                "is_new": False
+            }
+            logger.info(f"[debug_create_subscription] {response_data['message']}")
+        else:
+            # Подписки нет, создаем новую
+            new_id = str(uuid.uuid4())
+            insert_query = f"""
+            INSERT INTO user_subscription (
+                id,
+                user_id, 
+                start_date, 
+                end_date, 
+                payment_id, 
+                is_active, 
+                created_at, 
+                updated_at
+            ) VALUES (
+                '{new_id}',
+                {numeric_user_id}, 
+                '{now.isoformat()}', 
+                '{far_future_end_date.isoformat()}', 
+                'manual_debug_{int(time.time())}', 
+                TRUE, 
+                NOW(), 
+                NOW()
+            )
+            RETURNING id;
+            """
+            
+            logger.info(f"[debug_create_subscription] Создание подписки: {insert_query}")
+            insert_response = requests.post(url, json={"query": insert_query}, headers=headers)
+            
+            if insert_response.status_code != 200:
+                logger.error(f"[debug_create_subscription] Ошибка создания: {insert_response.status_code} - {insert_response.text}")
+                return JSONResponse({"error": "Ошибка при создании подписки"}, status_code=500)
+            
+            response_data = {
+                "success": True, 
+                "message": f"Новая подписка создана для user_id={numeric_user_id}",
+                "subscription_id": new_id,
+                "is_new": True
+            }
+            logger.info(f"[debug_create_subscription] {response_data['message']}")
+        
+        # Проверяем результат
+        verify_query = f"""
+        SELECT * FROM user_subscription 
+        WHERE user_id = {numeric_user_id} 
+        AND is_active = TRUE
+        ORDER BY end_date DESC 
+        LIMIT 1;
+        """
+        
+        logger.info(f"[debug_create_subscription] Проверка результата: {verify_query}")
+        verify_response = requests.post(url, json={"query": verify_query}, headers=headers)
+        
+        if verify_response.status_code == 200:
+            verify_records = verify_response.json()
+            if verify_records and len(verify_records) > 0:
+                logger.info(f"[debug_create_subscription] Проверка успешна: {json.dumps(verify_records[0])}")
+                response_data["verification"] = "success"
+                response_data["subscription_data"] = verify_records[0]
+            else:
+                logger.warning(f"[debug_create_subscription] Проверка не удалась: подписка не найдена")
+                response_data["verification"] = "not_found"
+        else:
+            logger.error(f"[debug_create_subscription] Ошибка проверки: {verify_response.status_code} - {verify_response.text}")
+            response_data["verification"] = "error"
+        
+        return response_data
+    
+    except Exception as e:
+        logger.error(f"[debug_create_subscription] Ошибка: {str(e)}", exc_info=True)
+        return JSONResponse({"error": f"Внутренняя ошибка: {str(e)}"}, status_code=500)
+
+async def check_user_subscription_table():
+    """Проверяет доступ к таблице user_subscription и существование необходимых полей"""
+    logger.info("Проверка таблицы user_subscription...")
+    try:
+        # Получаем переменные окружения
+        supabase_url = os.environ["SUPABASE_URL"]
+        service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        anon_key = os.environ.get("SUPABASE_ANON_KEY", "")
+        
+        if not service_role_key:
+            logger.error("SUPABASE_SERVICE_ROLE_KEY отсутствует, невозможно проверить таблицу user_subscription!")
+            return
+        
+        # Создаем заголовки для запроса с SERVICE_ROLE_KEY
+        headers = {
+            "apikey": service_role_key,
+            "Authorization": f"Bearer {service_role_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # Проверяем существование таблицы
+        check_table_query = """
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name = 'user_subscription'
+        );
+        """
+        
+        url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
+        response = requests.post(url, json={"query": check_table_query}, headers=headers)
+        
+        if response.status_code != 200:
+            logger.error(f"Ошибка при проверке таблицы user_subscription: {response.status_code} - {response.text}")
+            return
+        
+        check_result = response.json()
+        table_exists = check_result[0].get("exists", False) if check_result and len(check_result) > 0 else False
+        
+        if not table_exists:
+            logger.error("Таблица user_subscription не существует!")
+            
+            # Создаем таблицу
+            create_table_query = """
+            CREATE TABLE IF NOT EXISTS user_subscription (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                user_id BIGINT NOT NULL,
+                start_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                end_date TIMESTAMPTZ NOT NULL,
+                payment_id TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_user_subscription_user_id ON user_subscription(user_id);
+            """
+            
+            create_response = requests.post(url, json={"query": create_table_query}, headers=headers)
+            
+            if create_response.status_code != 200:
+                logger.error(f"Ошибка при создании таблицы user_subscription: {create_response.status_code} - {create_response.text}")
+                return
+            
+            logger.info("Таблица user_subscription успешно создана!")
+        else:
+            logger.info("Таблица user_subscription существует.")
+        
+        # Проверяем тестовую запись для пользователя 427032240
+        test_user_id = 427032240
+        test_query = f"""
+        SELECT * FROM user_subscription 
+        WHERE user_id = {test_user_id} 
+        ORDER BY end_date DESC 
+        LIMIT 1;
+        """
+        
+        test_response = requests.post(url, json={"query": test_query}, headers=headers)
+        
+        if test_response.status_code != 200:
+            logger.error(f"Ошибка при проверке тестовой записи: {test_response.status_code} - {test_response.text}")
+            return
+        
