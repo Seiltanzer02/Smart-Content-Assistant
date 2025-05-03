@@ -1317,19 +1317,69 @@ function App() {
       </header>
       
       {/* Блок подписки */}
-      {(() => {
-        // Добавляем лог перед рендерингом виджета
-        console.log(`[App.tsx] Rendering SubscriptionWidget. showSubscription: ${showSubscription}, userId: ${userId}`);
-        if (showSubscription) {
-          return <SubscriptionWidget userId={userId} />;
-        }
-        return null;
-      })()}
+      {showSubscription && (
+        <SubscriptionWidget userId={userId} isActive={true} />
+      )}
 
       <main className="app-main">
         {/* Сообщения об ошибках и успешном выполнении */}
         {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
         {success && <SuccessMessage message={success} onClose={() => setSuccess(null)} />}
+
+        {/* Навигация */}
+    <div className="navigation-buttons">
+          <button 
+            onClick={() => setCurrentView('analyze')} 
+            className={`action-button ${currentView === 'analyze' ? 'active' : ''}`}
+          >
+            Анализ
+          </button>
+          <button 
+            onClick={() => {
+              setCurrentView('suggestions');
+              if (suggestedIdeas.length === 0) {
+                fetchSavedIdeas();
+              }
+            }} 
+            className={`action-button ${currentView === 'suggestions' ? 'active' : ''}`}
+            disabled={!channelName}
+          >
+            Идеи
+          </button>
+          <button 
+            onClick={() => {
+              setCurrentView('calendar');
+              fetchSavedPosts();
+            }} 
+            className={`action-button ${currentView === 'calendar' ? 'active' : ''}`}
+          >
+            Календарь
+          </button>
+          <button 
+            onClick={() => {
+              setCurrentView('posts');
+              fetchSavedPosts();
+            }} 
+            className={`action-button ${currentView === 'posts' ? 'active' : ''}`}
+          >
+            Посты
+          </button>
+    </div>
+
+        {/* Выбор канала */}
+        <div className="channel-selector">
+          <label>Каналы: </label>
+          <select 
+            value={channelName} 
+            onChange={(e) => setChannelName(e.target.value)}
+            className="channel-select"
+          >
+            <option value="">Выберите канал</option>
+            {allChannels.map(channel => (
+              <option key={channel} value={channel}>{channel}</option>
+            ))}
+          </select>
+        </div>
 
         {/* Контент */}
         <div className="view-container">
@@ -1846,11 +1896,7 @@ function App() {
             </div>
           )}
         </div>
-      </main> {/* <-- Закрывающий тег main */}
-
-      {/* Удаляем дублирующую навигацию и лишнюю кнопку подписки отсюда */} 
-      {/* {currentView === 'analyze' && !analysisResult && (...)} */}
-      {/* {!showSubscription && (...)} */}
+      </main> {/* <-- ИСПРАВЛЕНО: Добавлен закрывающий тег */} 
 
       <footer className="app-footer">
         <p>© 2024 Smart Content Assistant</p>

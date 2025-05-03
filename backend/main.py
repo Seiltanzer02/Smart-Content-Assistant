@@ -26,7 +26,7 @@ import uuid # Для генерации уникальных имен файло
 import mimetypes # Для определения типа файла
 from telethon.errors import RPCError
 import getpass # Для получения пароля
-from fastapi.responses import FileResponse, Response, JSONResponse # Добавляем Response, JSONResponse
+from fastapi.responses import FileResponse, Response # Добавляем Response
 from fastapi.staticfiles import StaticFiles
 import time # Добавляем модуль time для работы с временем
 import requests
@@ -41,7 +41,6 @@ import traceback
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
 # from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 import shutil # Добавляем импорт shutil
-from dateutil.relativedelta import relativedelta # Make sure this is imported
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -310,124 +309,52 @@ async def generate_stars_invoice_link(request: Request):
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
-    logger.info(f"--- Received Webhook Data ---")
-    logger.info(json.dumps(data, indent=2))
-    
     # 1. Обработка pre_checkout_query
     pre_checkout_query = data.get("pre_checkout_query")
     if pre_checkout_query:
         query_id = pre_checkout_query.get("id")
-        user_id_pre_checkout = pre_checkout_query.get("from", {}).get("id")
-        logger.info(f"--- Processing PreCheckoutQuery ID: {query_id} for User ID: {user_id_pre_checkout} ---")
         bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
         if not bot_token:
-            logger.error("TELEGRAM_BOT_TOKEN не задан для ответа на PreCheckoutQuery")
             return {"ok": False, "error": "TELEGRAM_BOT_TOKEN не задан"}
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"https://api.telegram.org/bot{bot_token}/answerPreCheckoutQuery",
                 json={"pre_checkout_query_id": query_id, "ok": True}
             )
-            logger.info(f"Ответ на PreCheckoutQuery ID {query_id}: {resp.status_code} - {resp.text}")
-        logger.info(f"--- Finished PreCheckoutQuery ID: {query_id} ---")
+            print("Ответ на pre_checkout_query:", resp.text)
         return {"ok": True, "pre_checkout_query": True}
-    
     # 2. Обработка успешной оплаты
     message = data.get("message", {})
     successful_payment = message.get("successful_payment")
     if successful_payment:
         user_id = message.get("from", {}).get("id")
         payment_id = successful_payment.get("telegram_payment_charge_id")
-        invoice_payload = successful_payment.get("invoice_payload") # Логируем payload
-        logger.info(f"--- Processing Successful Payment for User ID: {user_id} ---")
-        logger.info(f"Payment ID: {payment_id}, Invoice Payload: {invoice_payload}")
         now = datetime.utcnow()
         start_date = now
-        # Рассчитываем дату окончания (например, 1 месяц)
-        try:
-            # Используем relativedelta для добавления месяца
-            from dateutil.relativedelta import relativedelta 
-            end_date = now + relativedelta(months=1)
-            logger.info(f"Subscription period: {start_date.isoformat()} to {end_date.isoformat()}")
-        except ImportError:
-            logger.warning("dateutil.relativedelta не найден, используем timedelta(days=30)")
-            end_date = now + timedelta(days=30) # Запасной вариант
-        except Exception as date_err:
-            logger.error(f"Ошибка расчета end_date: {date_err}, используем timedelta(days=30)")
-            end_date = now + timedelta(days=30)
-            
-        db_operation_successful = False
-        db_error_details = None # Добавим переменную для деталей ошибки БД
+        end_date = now + timedelta(days=30)
         try:
             # Проверяем, есть ли уже подписка
-            logger.info(f"[Webhook] Checking existing subscription for User ID: {user_id}")
-            existing_result = supabase.table("user_subscription").select("id").eq("user_id", user_id).limit(1).execute()
-            logger.info(f"[Webhook] Existing subscription check result: {existing_result}") # Логируем весь результат
-
-            subscription_data = {
-                "user_id": user_id,
-                "is_active": True,
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
-                "payment_id": payment_id,
-                "updated_at": now.isoformat() # Обновляем updated_at
-            }
-
-            if existing_result.data and len(existing_result.data) > 0:
-                logger.info(f"[Webhook] Updating subscription for User ID: {user_id}")
-                update_result = supabase.table("user_subscription").update(subscription_data).eq("user_id", user_id).execute()
-                logger.info(f"[Webhook] Subscription update result: {update_result}") # Логируем весь результат
-                if hasattr(update_result, 'data') and update_result.data:
-                    db_operation_successful = True
-                else:
-                    db_error_details = f"Update failed: {getattr(update_result, 'error', update_result)}"
-                    logger.error(f"[Webhook] {db_error_details}")
+            existing = supabase.table("user_subscription").select("*").eq("user_id", user_id).execute()
+            if existing.data and len(existing.data) > 0:
+                # Обновляем подписку
+                supabase.table("user_subscription").update({
+                    "is_active": True,
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "payment_id": payment_id
+                }).eq("user_id", user_id).execute()
             else:
                 # Создаём новую подписку
-                logger.info(f"[Webhook] Creating new subscription for User ID: {user_id}")
-                # Добавляем created_at при создании
-                subscription_data["created_at"] = now.isoformat()
-                insert_result = supabase.table("user_subscription").insert(subscription_data).execute()
-                logger.info(f"[Webhook] New subscription creation result: {insert_result}") # Логируем весь результат
-                if hasattr(insert_result, 'data') and insert_result.data:
-                    db_operation_successful = True
-                else:
-                     db_error_details = f"Insert failed: {getattr(insert_result, 'error', insert_result)}"
-                     logger.error(f"[Webhook] {db_error_details}")
-
-            # Сбрасываем счетчики использования при успешной активации/обновлении подписки
-            if db_operation_successful:
-                logger.info(f"Resetting usage stats for User ID: {user_id}")
-                try:
-                    stats_update = supabase.table("user_usage_stats").update({
-                        "analysis_count": 0,
-                        "post_generation_count": 0,
-                        "updated_at": now.isoformat()
-                    }).eq("user_id", user_id).execute()
-                    # Если запись не найдена, можно создать новую
-                    if not stats_update.data:
-                         logger.info(f"No usage stats found for User ID: {user_id}, creating new record.")
-                         supabase.table("user_usage_stats").insert({
-                             "user_id": user_id,
-                             "analysis_count": 0,
-                             "post_generation_count": 0,
-                             "created_at": now.isoformat(),
-                             "updated_at": now.isoformat()
-                         }).execute()
-                    logger.info(f"Usage stats reset result: {stats_update.data}")
-                except Exception as stats_err:
-                    logger.error(f"Ошибка при сбросе статистики для User ID {user_id}: {stats_err}")
-            else:
-                 logger.warning(f"[Webhook] DB operation for subscription was not successful for User ID: {user_id}. Skipping usage stats reset.")
-
+                supabase.table("user_subscription").insert({
+                    "user_id": user_id,
+                    "is_active": True,
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "payment_id": payment_id
+                }).execute()
         except Exception as e:
-            db_error_details = f"Exception during DB operation: {str(e)}"
-            logger.error(f"[Webhook] {db_error_details}", exc_info=True)
-
-        logger.info(f"--- Finished Successful Payment for User ID: {user_id}, DB Success: {db_operation_successful}, DB Error: {db_error_details} ---")
-        return {"ok": True, "successful_payment": True, "db_success": db_operation_successful}
-    
-    logger.info("--- Webhook did not contain PreCheckoutQuery or SuccessfulPayment ---")
+            print("Ошибка при активации подписки:", e)
+        return {"ok": True, "successful_payment": True}
     return {"ok": True}
 
 
@@ -3343,133 +3270,6 @@ static_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fronte
 # ФЛАГ для монтирования статики в конце файла
 SHOULD_MOUNT_STATIC = os.path.exists(static_folder) and os.path.isdir(static_folder)
 
-# Добавляем эндпоинт для получения статуса подписки
-@app.get("/subscription/status")
-async def get_subscription_status(request: Request):
-    # --- UNIQUE LOG MARKER ---
-    logger.info(">>> EXECUTING CORRECT /subscription/status HANDLER (v4) <<<")
-    # ---
-
-    user_id_header = request.headers.get("x-telegram-user-id")
-    user_id_query = request.query_params.get("user_id")
-    logger.info(f"--- Request to /subscription/status --- Header: {user_id_header}, Query: {user_id_query}")
-    user_id = user_id_header or user_id_query
-    if not user_id: # Проверка #1: Наличие ID
-        logger.error("User ID not provided.")
-        raise HTTPException(status_code=400, detail="user_id обязателен")
-    try:
-        user_id_int = int(user_id)
-        logger.info(f"User ID for processing: {user_id_int}")
-    except ValueError: # Проверка #2: Корректность формата ID
-        logger.error(f"Invalid User ID format: {user_id}")
-        raise HTTPException(status_code=400, detail="Некорректный user_id")
-
-    # --- Инициализация переменных ответа ---
-    has_active_subscription = False
-    end_date = None
-    analysis_count = 0
-    post_generation_count = 0
-    debug_info = {} # To store debug data
-    error_details = [] # Список для сбора некритичных ошибок
-
-    try:
-        # --- Проверка активной подписки ---
-        now_utc = datetime.utcnow()
-        now_iso = now_utc.isoformat()
-        logger.info(f"Checking active subscription for user_id={user_id_int} against time {now_iso}")
-        count_result = None # Initialize count_result
-        try:
-            count_result = supabase.table("user_subscription")\
-                .select("id", count="exact")\
-                .eq("user_id", user_id_int)\
-                .eq("is_active", True)\
-                .gt("end_date", now_iso)\
-                .limit(1)\
-                .execute()
-            debug_info["subscription_query_raw"] = str(count_result) # Store raw result for debug
-            logger.info(f'[Status] Subscription count query result: {count_result}')
-
-            if hasattr(count_result, 'count') and count_result.count is not None and count_result.count > 0:
-                has_active_subscription = True
-                logger.info(f"[Status] Active subscription FOUND for user {user_id_int}.")
-                # Пытаемся получить дату окончания, если подписка есть
-                try:
-                     date_result = supabase.table("user_subscription")\
-                        .select("end_date")\
-                        .eq("user_id", user_id_int)\
-                        .eq("is_active", True)\
-                        .gt("end_date", now_iso)\
-                        .order("end_date", desc=True).limit(1).maybe_single().execute()
-                     debug_info["end_date_query_raw"] = str(date_result)
-                     if date_result.data:
-                         end_date = date_result.data.get("end_date")
-                     logger.info(f"[Status] Fetched end_date: {end_date}")
-                except Exception as date_e:
-                    logger.warning(f"[Status] Failed to fetch end_date: {date_e}")
-                    error_details.append("Failed to fetch end_date.")
-            else:
-                 logger.info(f"[Status] Active subscription NOT FOUND for user {user_id_int}.")
-                 has_active_subscription = False
-        except Exception as sub_e:
-            logger.error(f"[Status] Error during subscription check query: {sub_e}", exc_info=True)
-            error_details.append(f"Subscription check failed: {str(sub_e)}")
-            debug_info["subscription_query_error"] = str(sub_e)
-            has_active_subscription = False
-
-        # --- Получение статистики использования (только если нет подписки) ---
-        if not has_active_subscription:
-             logger.info(f"Querying usage stats for user {user_id_int}.")
-             try:
-                 stats_result = supabase.table("user_usage_stats").select("analysis_count, post_generation_count").eq("user_id", user_id_int).maybe_single().execute()
-                 debug_info["stats_query_raw"] = str(stats_result)
-                 if stats_result.data:
-                     analysis_count = stats_result.data.get("analysis_count", 0)
-                     post_generation_count = stats_result.data.get("post_generation_count", 0)
-                     if "post_generation_count" not in stats_result.data: logger.warning(f"[Status] 'post_generation_count' field missing in user_usage_stats for user {user_id_int}")
-                 logger.info(f'[Status] Usage stats result: analysis={analysis_count}, posts={post_generation_count}')
-             except Exception as stats_e:
-                 logger.error(f'[Status] Error fetching usage stats: {stats_e}', exc_info=True)
-                 error_details.append(f"Usage stats fetch failed: {str(stats_e)}")
-                 debug_info["stats_query_error"] = str(stats_e)
-        else:
-             logger.info(f"Active subscription found. Skipping usage stats query.")
-
-
-        # --- Prepare final response --- # Changed comment style
-        response_data = {
-            "has_subscription": bool(has_active_subscription),
-            "subscription_end_date": end_date,
-            "analysis_count": int(analysis_count),
-            "post_generation_count": int(post_generation_count),
-            "debug_info": debug_info, # Add debug info
-             "warnings": error_details # Add non-critical errors
-        }
-        logger.info(f'--- Preparing final response for /subscription/status for user {user_id_int} ---')
-        logger.info(f'Final response_data dict: {response_data}')
-        # <<< ДОБАВЛЕНО: ЛОГ ПЕРЕД ВОЗВРАТОМ >>>
-        logger.info(f"[RETURN] Attempting to return JSON for /subscription/status for user {user_id_int}. Data type: {type(response_data)}, Content: {response_data}")
-        # <<< КОНЕЦ ДОБАВЛЕНИЯ >>>
-        return response_data # Return directly
-
-    except HTTPException as http_exc:
-         logger.error(f"HTTP Exception in /subscription/status: {http_exc.detail}", exc_info=True)
-         raise http_exc
-    except Exception as e:
-        logger.error(f'CRITICAL UNHANDLED Exception in /subscription/status for user_id {user_id}: {e}', exc_info=True)
-        # Return error details IN THE RESPONSE BODY with 500 status
-        error_response = {
-            "has_subscription": False, # Default to false on critical error
-            "subscription_end_date": None,
-            "analysis_count": 0,
-            "post_generation_count": 0,
-            "error_details": f"Critical internal server error: {str(e)}",
-            "debug_info": debug_info # Include any debug info gathered before the crash
-        }
-        logger.error(f'--- Returning CRITICAL error response for /subscription/status: {error_response} ---')
-        # Use JSONResponse to send body with 500 status
-        return JSONResponse(status_code=500, content=error_response)
-
-# --- ТЕПЕРЬ НАСТРАИВАЕМ ОБСЛУЖИВАНИЕ СТАТИКИ SPA ПОСЛЕ ВСЕХ API-ЭНДПОИНТОВ ---
 if SHOULD_MOUNT_STATIC:
     logger.info(f"Статические файлы SPA будут обслуживаться из папки: {static_folder}")
     try: # ИСПРАВЛЕНО: Добавлен блок try...except
@@ -3492,12 +3292,10 @@ if SHOULD_MOUNT_STATIC:
         async def serve_spa_catch_all(request: Request, rest_of_path: str):
             # Исключаем API пути, чтобы избежать конфликтов (на всякий случай)
             # Проверяем, не начинается ли путь с /api/, /docs, /openapi.json или /uploads/
-            # Явно исключаем /subscription/status
             if rest_of_path.startswith("api/") or \
                rest_of_path.startswith("docs") or \
                rest_of_path.startswith("openapi.json") or \
-               rest_of_path.startswith("uploads/") or \
-               rest_of_path == "subscription/status":
+               rest_of_path.startswith("uploads/"):
                  # Этот код не должен выполняться, т.к. роуты API/docs/uploads определены выше, но для надежности
                  # Логируем попытку доступа к API через SPA catch-all
                  logger.debug(f"Запрос к '{rest_of_path}' перехвачен SPA catch-all, но проигнорирован (API/Docs/Uploads).")
@@ -3514,7 +3312,7 @@ if SHOULD_MOUNT_STATIC:
                 logger.error(f"Файл index.html не найден в {static_folder} для пути {rest_of_path}")
                 raise HTTPException(status_code=404, detail="Index file not found")
 
-        logger.info("Обработчики для SPA настроены (catch-all ВРЕМЕННО ОТКЛЮЧЕН).")
+        logger.info("Обработчики для SPA настроены.")
 
     except RuntimeError as mount_error: # ИСПРАВЛЕНО: Добавлен блок except
         logger.error(f"Ошибка при монтировании статических файлов SPA: {mount_error}. Возможно, имя 'static-spa' уже используется или путь '/' занят.")
