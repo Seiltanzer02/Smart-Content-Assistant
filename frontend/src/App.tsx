@@ -1317,76 +1317,19 @@ function App() {
       </header>
       
       {/* Блок подписки */}
-      {showSubscription && (
-        <SubscriptionWidget userId={userId} />
-      )}
+      {(() => {
+        // Добавляем лог перед рендерингом виджета
+        console.log(`[App.tsx] Rendering SubscriptionWidget. showSubscription: ${showSubscription}, userId: ${userId}`);
+        if (showSubscription) {
+          return <SubscriptionWidget userId={userId} />;
+        }
+        return null;
+      })()}
 
       <main className="app-main">
         {/* Сообщения об ошибках и успешном выполнении */}
         {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
         {success && <SuccessMessage message={success} onClose={() => setSuccess(null)} />}
-
-        {/* Панель навигации */}
-        <nav className="app-nav">
-          <button 
-            className={`nav-button ${currentView === 'analyze' ? 'active' : ''}`}
-            onClick={() => setCurrentView('analyze')}
-          >
-            Анализ
-          </button>
-          {analysisResult && (
-            <button 
-              className={`nav-button ${currentView === 'suggestions' ? 'active' : ''}`}
-              onClick={() => setCurrentView('suggestions')}
-            >
-              Идеи
-            </button>
-          )}
-          {suggestedIdeas.length > 0 && (
-            <button 
-              className={`nav-button ${currentView === 'plan' ? 'active' : ''}`}
-              onClick={() => setCurrentView('plan')}
-            >
-              План
-            </button>
-          )}
-          <button 
-            className={`nav-button ${currentView === 'posts' ? 'active' : ''}`}
-            onClick={() => setCurrentView('posts')}
-          >
-            Посты
-          </button>
-          <button 
-            className={`nav-button ${currentView === 'calendar' ? 'active' : ''}`}
-            onClick={() => setCurrentView('calendar')}
-          >
-            Календарь
-          </button>
-          {/* Кнопка для открытия виджета подписки */}
-          <button 
-             className="nav-button subscription-button"
-             onClick={() => setShowSubscription(!showSubscription)} // Переключатель
-             title={showSubscription ? "Скрыть статус подписки" : "Показать статус подписки"}
-           >
-             {/* Можно добавить иконку, например */} 
-             ⭐ Подписка 
-           </button>
-        </nav>
-
-        {/* Выбор канала */}
-        <div className="channel-selector">
-          <label>Каналы: </label>
-          <select 
-            value={channelName} 
-            onChange={(e) => setChannelName(e.target.value)}
-            className="channel-select"
-          >
-            <option value="">Выберите канал</option>
-            {allChannels.map(channel => (
-              <option key={channel} value={channel}>{channel}</option>
-            ))}
-          </select>
-        </div>
 
         {/* Контент */}
         <div className="view-container">
