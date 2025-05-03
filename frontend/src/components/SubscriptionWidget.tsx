@@ -54,33 +54,47 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
     try {
       console.log(`[fetchSubscriptionStatus] Запрос статуса для userId: ${userId}`);
       const data = await getUserSubscriptionStatus(userId);
-      console.log('[fetchSubscriptionStatus] Данные получены:', data);
+      // --- ЛОГИРОВАНИЕ СЫРЫХ ДАННЫХ ---
+      console.log('[fetchSubscriptionStatus] Сырой ответ от getUserSubscriptionStatus:', JSON.stringify(data, null, 2));
+      // ---
 
-      // Проверяем, что данные получены и имеют поле has_subscription
+      // Проверяем, что данные получены и имеют поле has_subscription БУЛЕВОГО типа
       if (data && typeof data.has_subscription === 'boolean') {
-        setStatus(data); // Устанавливаем полученные данные
+        console.log('[fetchSubscriptionStatus] Данные корректны, вызываю setStatus.');
+        setStatus(data);
         if (data.has_subscription) {
            if (window.Telegram?.WebApp?.MainButton) window.Telegram.WebApp.MainButton.hide();
         } else {
            if (window.Telegram?.WebApp?.MainButton) window.Telegram.WebApp.MainButton.show();
         }
       } else {
-         console.warn('[fetchSubscriptionStatus] Получены некорректные данные или отсутствует has_subscription:', data);
-         setError('Ошибка: Некорректные данные статуса.');
-         setStatus(defaultStatus); // Сбрасываем к дефолту при некорректных данных
+         // --- БОЛЕЕ ПОДРОБНОЕ ЛОГИРОВАНИЕ ОШИБКИ ---
+         console.warn('[fetchSubscriptionStatus] Получены некорректные данные!');
+         console.warn('[fetchSubscriptionStatus] Тип data:', typeof data);
+         if(data) {
+             console.warn('[fetchSubscriptionStatus] Тип data.has_subscription:', typeof data.has_subscription);
+             console.warn('[fetchSubscriptionStatus] Значение data.has_subscription:', data.has_subscription);
+         }
+         setError('Ошибка: Некорректные данные статуса.'); // Оставляем эту ошибку
+         // ---
+         setStatus(defaultStatus);
          if (window.Telegram?.WebApp?.MainButton) window.Telegram.WebApp.MainButton.hide();
       }
-
     } catch (err: any) {
-      console.error('[fetchSubscriptionStatus] Ошибка:', err);
-      setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке статуса');
-      setStatus(defaultStatus); // Сбрасываем к дефолту при ошибке
+      console.error('[fetchSubscriptionStatus] Ошибка в catch:', err);
+      // Log axios error response if available
+      if (err.response) {
+          console.error('[fetchSubscriptionStatus] Axios error response data:', JSON.stringify(err.response.data, null, 2));
+          setError(`Ошибка ${err.response.status}: ${err.response.data?.detail || err.message}`);
+      } else {
+          setError(err.message || 'Ошибка при загрузке статуса');
+      }
+      setStatus(defaultStatus);
       if (window.Telegram?.WebApp?.MainButton) window.Telegram.WebApp.MainButton.hide();
     } finally {
       setLoading(false);
-      isFetching.current = false; // Сбрасываем флаг
+      isFetching.current = false;
     }
-  // Включаем userId в зависимости useCallback
   }, [userId]);
 
   // --- Эффекты ---
