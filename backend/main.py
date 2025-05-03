@@ -3514,7 +3514,7 @@ if SHOULD_MOUNT_STATIC:
                 logger.error(f"Файл index.html не найден в {static_folder} для пути {rest_of_path}")
                 raise HTTPException(status_code=404, detail="Index file not found")
 
-        logger.info("Обработчики для SPA настроены.")
+        logger.info("Обработчики для SPA настроены (catch-all ВРЕМЕННО ОТКЛЮЧЕН).")
 
     except RuntimeError as mount_error: # ИСПРАВЛЕНО: Добавлен блок except
         logger.error(f"Ошибка при монтировании статических файлов SPA: {mount_error}. Возможно, имя 'static-spa' уже используется или путь '/' занят.")
