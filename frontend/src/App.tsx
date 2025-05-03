@@ -388,7 +388,7 @@ function App() {
   // В стейте добавляю debugInfo
   const [debugInfo, setDebugInfo] = useState<any>(null);
 
-  // Добавляем новую функцию checkSubscriptionStatus после refetchSubscriptionStatus
+  // --- ИЗМЕНЕНО: Упрощенный refetchSubscriptionStatus --- 
   const refetchSubscriptionStatus = useCallback(async () => {
     if (!userId) {
       console.log('[refetchSubscriptionStatus] userId is null, skipping fetch.');
@@ -426,130 +426,12 @@ function App() {
   }, [userId]); // Зависимость только от userId
   // --- КОНЕЦ ИЗМЕНЕНИЯ --- 
 
-  // Добавляем новую функцию для проверки статуса подписки
-  const checkSubscriptionStatus = useCallback(async () => {
-    if (!userId) return;
-    
-    console.log('[App] Checking subscription status for userId:', userId);
-    try {
-      const timestamp = Date.now(); // Добавляем временную метку для предотвращения кэширования
-      const response = await fetch(`/subscription/status?user_id=${userId}&t=${timestamp}`);
-      const contentType = response.headers.get('content-type') || '';
-      
-      // Проверяем, что ответ имеет правильный content-type
-      if (!contentType.includes('application/json')) {
-        console.error('[App] Subscription status response is not JSON:', contentType);
-        // Если получен не JSON, пробуем создать подписку через debug-эндпоинт
-        console.log('[App] Trying to create subscription via debug endpoint');
-        
-        const debugResponse = await fetch(`/debug/create-subscription?user_id=${userId}`);
-        if (debugResponse.ok) {
-          const debugData = await debugResponse.json();
-          console.log('[App] Debug create subscription response:', debugData);
-          
-          // После создания подписки, повторяем запрос на получение статуса
-          const retryResponse = await fetch(`/subscription/status?user_id=${userId}&t=${Date.now()}`);
-          const retryContentType = retryResponse.headers.get('content-type') || '';
-          
-          if (!retryContentType.includes('application/json')) {
-            console.error('[App] Retry subscription status is still not JSON');
-            const responseText = await retryResponse.text();
-            const fallbackStatus: SubscriptionStatus = {
-              has_subscription: true,
-              is_active: true,
-              subscription_end_date: new Date(Date.now() + 30*24*60*60*1000).toISOString(),
-              debug: {
-                error: 'Retry response is HTML instead of JSON',
-                debugCreationData: debugData,
-                htmlResponse: responseText
-              }
-            };
-            setSubscriptionStatus(fallbackStatus);
-            setDebugInfo(prev => ({...prev, subscriptionStatus: fallbackStatus, htmlRetryResponse: responseText}));
-            return;
-          }
-          
-          const retryData = await retryResponse.json() as SubscriptionStatus;
-          console.log('[App] Retry subscription status after debug creation:', retryData);
-          
-          setSubscriptionStatus(retryData);
-          setDebugInfo(prev => ({...prev, subscriptionStatus: retryData, debugCreationData: debugData}));
-          return;
-        } else {
-          // Если дебаг-эндпоинт не сработал, создаём фиктивный статус (fallback)
-          console.error('[App] Debug endpoint failed, using fallback status');
-          const fallbackStatus: SubscriptionStatus = {
-            has_subscription: true,
-            is_active: true,
-            subscription_end_date: new Date(Date.now() + 30*24*60*60*1000).toISOString(),
-            debug: {
-              error: 'Backend returned HTML instead of JSON, using fallback status',
-              htmlResponse: await response.text()
-            }
-          };
-          setSubscriptionStatus(fallbackStatus);
-          setDebugInfo(prev => ({...prev, subscriptionStatus: fallbackStatus, htmlResponse: true}));
-          return;
-        }
-      }
-      
-      // Если ответ JSON, обрабатываем как обычно
-      const data = await response.json() as SubscriptionStatus;
-      console.log('[App] Subscription status response:', data);
-      
-      // ИЗМЕНЕНО: добавлено логирование для отладки
-      console.log('[App] Подписка статус:', data);
-      console.log('[App] is_active:', data.is_active);
-      console.log('[App] has_subscription:', data.has_subscription);
-      console.log('[App] debug:', data.debug);
-      
-      // Явно устанавливаем is_active = true, если оно вдруг не стало таковым (для отладки)
-      if (data.debug && data.debug.selected_sub && data.debug.selected_sub.is_active) {
-        console.log('[App] ВАЖНО! В БД найдена подписка с is_active=true, устанавливаем принудительно!');
-        data.is_active = true;
-      }
-      
-      setSubscriptionStatus(data);
-      setDebugInfo(prev => ({...prev, subscriptionStatus: data}));
-    } catch (error) {
-      console.error('[App] Error checking subscription status:', error);
-      
-      // В случае ошибки, пробуем создать подписку через debug-эндпоинт
-      try {
-        console.log('[App] Error fetching status, trying debug endpoint as fallback');
-        const debugResponse = await fetch(`/debug/create-subscription?user_id=${userId}`);
-        if (debugResponse.ok) {
-          const debugData = await debugResponse.json();
-          console.log('[App] Debug create subscription response (after error):', debugData);
-          
-          // Создаём фиктивный успешный статус на основе данных от debug-эндпоинта
-          const fallbackStatus: SubscriptionStatus = {
-            has_subscription: true,
-            is_active: true,
-            subscription_end_date: debugData.subscription_data?.end_date || new Date(Date.now() + 30*24*60*60*1000).toISOString(),
-            debug: {
-              error: String(error),
-              debugCreationData: debugData
-            }
-          };
-          setSubscriptionStatus(fallbackStatus);
-          setDebugInfo(prev => ({...prev, subscriptionStatus: fallbackStatus, debugCreationAfterError: debugData}));
-        } else {
-          throw new Error('Debug endpoint failed');
-        }
-      } catch (debugError) {
-        // Если и debug-эндпоинт не сработал, просто логируем обе ошибки
-        setDebugInfo(prev => ({...prev, subscriptionError: String(error), debugError: String(debugError)}));
-      }
-    }
-  }, [userId]);
-
   // --- ИЗМЕНЕНО: Упрощенный useEffect для ПЕРВОНАЧАЛЬНОЙ загрузки --- 
   useEffect(() => {
     console.log(`[Initial Load Effect] Running. userId: ${userId}`);
     if (userId) {
-      console.log(`[Initial Load Effect] userId is set (${userId}). Calling checkSubscriptionStatus.`);
-      checkSubscriptionStatus(); // Используем новую функцию вместо refetchSubscriptionStatus
+      console.log(`[Initial Load Effect] userId is set (${userId}). Calling refetchSubscriptionStatus.`);
+      refetchSubscriptionStatus();
     } else {
       console.log('[Initial Load Effect] userId is null or undefined. Clearing status and debug info.');
       // Если userId нет, сбрасываем статус и debug
@@ -557,7 +439,7 @@ function App() {
       setDebugInfo(null);
     }
     // Перезапускаем эффект ТОЛЬКО при изменении userId
-  }, [userId, checkSubscriptionStatus]); // Добавляем checkSubscriptionStatus в зависимости
+  }, [userId, refetchSubscriptionStatus]); // Добавляем refetchSubscriptionStatus в зависимости
   // --- КОНЕЦ ИЗМЕНЕНИЯ --- 
 
   // useEffect для обновления при изменении видимости (остается без изменений)
