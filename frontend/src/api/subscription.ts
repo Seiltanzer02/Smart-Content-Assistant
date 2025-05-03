@@ -26,13 +26,20 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
     // Проверяем, есть ли подписка в Supabase напрямую через таблицу user_subscription
     console.log('Запрашиваем статус подписки для пользователя:', userId);
     
-    // ПРЯМОЙ ДОСТУП - обходим проблему маршрутизации SPA, запрашивая данные напрямую через axios без пути /subscription/status
+    // Добавляем случайный параметр для обхода SPA-роутера и кэширования
+    const randomParam = Math.random().toString(36).substring(2, 15);
+    
+    // ПРЯМОЙ ДОСТУП - обходим проблему маршрутизации SPA, запрашивая данные через axios
     const response = await axios.get(
-      `${API_URL}/subscription/status?user_id=${userId}`, 
+      `${API_URL}/subscription/status?user_id=${userId}&_=${randomParam}`, 
       {
         headers: { 
           'x-telegram-user-id': userId,
-          'Accept': 'application/json' 
+          'Accept': 'application/json',
+          // Добавляем заголовки для предотвращения кэширования
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
         }
       }
     );
