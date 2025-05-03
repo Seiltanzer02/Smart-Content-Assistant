@@ -3382,129 +3382,55 @@ async def resolve_user_id(request: Request):
 
 @app.get("/subscription/status")
 async def get_subscription_status(request: Request):
-    # Генерируем уникальный ID для этого запроса для логов
-    request_id = str(uuid.uuid4())
-    logger.info(f"[ReqID: {request_id}] Processing /subscription/status request...")
-    
+    # Тотальное логирование
+    debug = {}
     user_id_str = request.query_params.get("user_id")
-    logger.info(f"[ReqID: {request_id}] Received user_id (string): '{user_id_str}'")
-    
-    cache_headers = {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Pragma": "no-cache",
-        "Expires": "0",
-    }
-    
-    # Инициализируем переменные по умолчанию
-    has_subscription = False
-    is_active = False
-    subscription_end_date = None
-    response_data = {}
-    error_message = None
-
+    debug["user_id_from_query"] = user_id_str
+    logger.info(f"[SUB_STATUS] Запрос /subscription/status, user_id (raw): {user_id_str}")
     if not user_id_str:
-        error_message = "user_id обязателен"
-        logger.error(f"[ReqID: {request_id}] {error_message}")
-        response_data = {"error": error_message}
-        # ИЗМЕНЕНО: Возвращаем словарь напрямую, FastAPI сам установит статус 400 по HTTPException
-        raise HTTPException(status_code=400, detail=error_message)
-
+        logger.error("[SUB_STATUS] user_id не передан!")
+        return {"error": "user_id обязателен", "debug": debug}
     try:
-        # Пытаемся преобразовать user_id в int
         user_id = int(user_id_str)
-        logger.info(f"[ReqID: {request_id}] Converted user_id to int: {user_id}")
-    except ValueError:
-        error_message = "user_id должен быть числом"
-        logger.error(f"[ReqID: {request_id}] {error_message} (получено: '{user_id_str}')")
-        response_data = {"error": error_message}
-        # ИЗМЕНЕНО: Возвращаем словарь напрямую, FastAPI сам установит статус 400 по HTTPException
-        raise HTTPException(status_code=400, detail=error_message)
-
-    now = datetime.now(timezone.utc)
-    logger.info(f"[ReqID: {request_id}] Current UTC time: {now}")
-
+        debug["user_id_int"] = user_id
+    except Exception as e:
+        logger.error(f"[SUB_STATUS] user_id не число: {e}")
+        debug["user_id_int_error"] = str(e)
+        return {"error": "user_id должен быть числом", "debug": debug}
     try:
-        logger.info(f"[ReqID: {request_id}] Querying Supabase for user_subscription, user_id={user_id}, ordering by end_date desc...")
-        # Получаем ВСЕ записи по user_id, сортируем по end_date (последняя активная будет первой)
+        logger.info(f"[SUB_STATUS] Запрашиваем user_subscription по user_id={user_id} (int8)")
         result = supabase.table("user_subscription")\
             .select("id, user_id, start_date, end_date, payment_id, is_active, created_at, updated_at")\
             .eq("user_id", user_id)\
             .order("end_date", desc=True)\
             .execute()
-
-        logger.info(f"[ReqID: {request_id}] Supabase raw response: count={len(result.data) if result.data else 0}, data={result.data}")
-        
-        # Берем самую последнюю по дате окончания запись, если она есть
+        debug["supabase_result"] = result.data
+        logger.info(f"[SUB_STATUS] Результат запроса к Supabase: {result.data}")
         sub = result.data[0] if result.data else None
-
+        now = datetime.utcnow()
+        debug["now_utc"] = now.isoformat()
         if sub:
-            logger.info(f"[ReqID: {request_id}] Found latest subscription record: {sub}")
-            # Проверяем, активна ли она и не истекла ли
-            db_is_active = sub.get("is_active", False)
-            db_end_date_str = sub.get("end_date")
-            logger.info(f"[ReqID: {request_id}] Record details: db_is_active={db_is_active}, db_end_date_str='{db_end_date_str}'")
-
-            if db_is_active and db_end_date_str:
-                try:
-                    # Парсим дату окончания
-                    end_date = datetime.fromisoformat(db_end_date_str.replace("Z", "+00:00"))
-                    logger.info(f"[ReqID: {request_id}] Parsed end_date: {end_date}")
-                    
-                    # Сравниваем с текущим временем
-                    if end_date > now:
-                        logger.info(f"[ReqID: {request_id}] Subscription is active and end_date is in the future. Setting status to Premium.")
-                        is_active = True
-                        has_subscription = True
-                        subscription_end_date = db_end_date_str
-                    else:
-                        logger.warning(f"[ReqID: {request_id}] Subscription found but end_date is in the past ({end_date} <= {now}). Status remains Free.")
-                        # is_active и has_subscription остаются False
-                except Exception as e:
-                    error_message = f"Ошибка парсинга даты '{db_end_date_str}': {e}"
-                    logger.error(f"[ReqID: {request_id}] {error_message}", exc_info=True)
-                    # Не устанавливаем has_subscription/is_active, оставляем False
-            else:
-                logger.warning(f"[ReqID: {request_id}] Latest subscription record found but is_active={db_is_active} or end_date is missing. Status remains Free.")
-                # is_active и has_subscription остаются False
+            debug["latest_record"] = sub
+            is_active = sub.get("is_active", False) and sub.get("end_date") and datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00")) > now
+            response_data = {
+                "has_subscription": is_active,
+                "is_active": is_active,
+                "subscription_end_date": sub.get("end_date"),
+                "debug": debug
+            }
+            logger.info(f"[SUB_STATUS] Возвращаем статус: {response_data}")
+            return response_data
         else:
-            logger.info(f"[ReqID: {request_id}] No subscription records found for user_id={user_id}. Status is Free.")
-            # is_active и has_subscription остаются False
-
-        # Формируем ответ ВСЕГДА с обязательными полями
-        response_data = {
-            "has_subscription": has_subscription,
-            "is_active": is_active,
-            "subscription_end_date": subscription_end_date,
-        }
-        # --- УБРАНО ПОЛЕ DEBUG ИЗ ОТВЕТА --- 
-
-        logger.info(f"[ReqID: {request_id}] Final response data being sent: {response_data}")
-        return FastAPIResponse(
-            content=json.dumps(response_data),
-            media_type="application/json",
-            headers=cache_headers
-        )
-
-    except APIError as supabase_error:
-        error_message = f"Ошибка Supabase API при получении статуса подписки: {supabase_error.message}"
-        logger.error(f"[ReqID: {request_id}] {error_message}", exc_info=True)
-        response_data = {"error": error_message}
-        # УБРАНО ПОЛЕ DEBUG
-        return FastAPIResponse(
-            content=json.dumps(response_data),
-            status_code=500,
-            media_type="application/json",
-            headers=cache_headers
-        )
+            logger.info(f"[SUB_STATUS] Подписка не найдена для user_id={user_id}")
+            response_data = {
+                "has_subscription": False,
+                "is_active": False,
+                "subscription_end_date": None,
+                "debug": debug
+            }
+            return response_data
     except Exception as e:
-        error_message = f"Непредвиденная ошибка при получении статуса подписки: {str(e)}"
-        logger.error(f"[ReqID: {request_id}] {error_message}", exc_info=True)
-        response_data = {"error": error_message}
-        # УБРАНО ПОЛЕ DEBUG
-        return FastAPIResponse(
-            content=json.dumps(response_data),
-            status_code=500,
-            media_type="application/json",
-            headers=cache_headers
-        )
+        logger.error(f"[SUB_STATUS] Ошибка в /subscription/status: {e}", exc_info=True)
+        debug["exception"] = str(e)
+        return {"error": str(e), "debug": debug}
 
