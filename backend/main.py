@@ -334,28 +334,25 @@ async def telegram_webhook(request: Request):
         start_date = now
         end_date = now + timedelta(days=30)
         try:
-            # Проверяем, есть ли уже подписка
-            existing = supabase.table("user_subscription").select("*").eq("user_id", user_id).execute()
-            if existing.data and len(existing.data) > 0:
-                # Обновляем подписку
-                supabase.table("user_subscription").update({
-                    "is_active": True,
-                    "start_date": start_date.isoformat(),
-                    "end_date": end_date.isoformat(),
-                    "payment_id": payment_id
-                }).eq("user_id", user_id).execute()
-            else:
-                # Создаём новую подписку
-                supabase.table("user_subscription").insert({
-                    "user_id": user_id,
-                    "is_active": True,
-                    "start_date": start_date.isoformat(),
-                    "end_date": end_date.isoformat(),
-                    "payment_id": payment_id
-                }).execute()
+            # Деактивируем все старые подписки
+            supabase.table("user_subscription").update({
+                "is_active": False,
+                "updated_at": now.isoformat()
+            }).eq("user_id", int(user_id)).execute()
+            # Создаём новую
+            supabase.table("user_subscription").insert({
+                "user_id": int(user_id),
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "payment_id": payment_id,
+                "is_active": True,
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat()
+            }).execute()
+            logger.info(f'Подписка активирована для user_id={user_id}')
         except Exception as e:
-            print("Ошибка при активации подписки:", e)
-        return {"ok": True, "successful_payment": True}
+            logger.error(f'Ошибка при активации подписки: {e}')
+        return {"ok": True}
     return {"ok": True}
 
 
@@ -3335,18 +3332,20 @@ async def get_subscription_status(request: Request):
     user_id = request.headers.get("x-telegram-user-id")
     if not user_id:
         user_id = request.query_params.get("user_id")
-    logger.info(f'Запрос /subscription/status для user_id: {user_id}')
+    logger.info(f'[SUBSCRIPTION_STATUS] Запрос /subscription/status для user_id: {user_id} (тип: {type(user_id)})')
     if not user_id:
         return {"error": "user_id обязателен в заголовке x-telegram-user-id"}
     try:
-        # Используем сервис для проверки подписки
+        user_id_int = int(user_id)
+        logger.info(f'[SUBSCRIPTION_STATUS] Приведённый user_id к int: {user_id_int}')
         subscription_service = SupabaseSubscriptionService(supabase)
-        subscription = await subscription_service.get_subscription(int(user_id))
-        usage = await subscription_service.get_user_usage(int(user_id))
+        subscription = await subscription_service.get_subscription(user_id_int)
+        logger.info(f'[SUBSCRIPTION_STATUS] Результат поиска подписки: {subscription}')
+        usage = await subscription_service.get_user_usage(user_id_int)
+        logger.info(f'[SUBSCRIPTION_STATUS] Статистика использования: {usage}')
         if subscription:
             is_active = subscription.get("is_active", False)
             end_date = subscription.get("end_date")
-            # end_date уже проверяется в сервисе, но для фронта возвращаем строку
             response_data = {
                 "has_subscription": is_active,
                 "subscription_end_date": end_date,
@@ -3354,7 +3353,7 @@ async def get_subscription_status(request: Request):
                 "analysis_count": usage.get("analysis_count", 0),
                 "post_generation_count": usage.get("post_generation_count", 0)
             }
-            logger.info(f'Возвращаем статус для user_id {user_id}: {response_data}')
+            logger.info(f'[SUBSCRIPTION_STATUS] Возвращаем статус для user_id {user_id_int}: {response_data}')
             return response_data
         else:
             response_data = {
@@ -3362,9 +3361,9 @@ async def get_subscription_status(request: Request):
                 "analysis_count": usage.get("analysis_count", 0),
                 "post_generation_count": usage.get("post_generation_count", 0)
             }
-            logger.info(f'Подписка не найдена для user_id {user_id}, возвращаем: {response_data}')
+            logger.info(f'[SUBSCRIPTION_STATUS] Подписка не найдена для user_id {user_id_int}, возвращаем: {response_data}')
             return response_data
     except Exception as e:
-        logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True)
+        logger.error(f'[SUBSCRIPTION_STATUS] Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True)
         return {"error": str(e)}
 
