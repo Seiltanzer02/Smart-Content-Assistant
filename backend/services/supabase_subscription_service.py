@@ -115,42 +115,18 @@ class SupabaseSubscriptionService:
     async def get_subscription(self, user_id: int) -> Optional[Dict[str, Any]]:
         """Получает активную подписку пользователя с проверкой даты окончания."""
         try:
-            # Получаем все подписки пользователя, отсортированные по дате окончания
-            result = self.supabase.table("user_subscription").select("*").eq("user_id", user_id).order("end_date", desc=True).execute()
-            
+            now = datetime.now()
+            result = self.supabase.table("user_subscription") \
+                .select("*") \
+                .eq("user_id", int(user_id)) \
+                .eq("is_active", True) \
+                .gt("end_date", now.isoformat()) \
+                .order("end_date", desc=True) \
+                .limit(1) \
+                .execute()
             if not result.data or len(result.data) == 0:
                 return None
-            
-            # Проверяем самую последнюю подписку
-            subscription = result.data[0]
-            
-            # Проверяем флаг is_active и дату окончания
-            is_active = subscription.get("is_active", False)
-            end_date_str = subscription.get("end_date")
-            
-            if not is_active:
-                return None
-                
-            # Проверяем дату окончания, если она указана
-            if end_date_str:
-                try:
-                    # Парсим дату окончания
-                    if 'Z' in end_date_str:
-                        end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
-                    else:
-                        end_date = datetime.fromisoformat(end_date_str)
-                    
-                    # Проверяем, не истекла ли подписка
-                    if end_date <= datetime.now():
-                        # Подписка истекла, деактивируем её
-                        self.supabase.table("user_subscription").update({"is_active": False}).eq("id", subscription.get("id")).execute()
-                        logger.info(f"Деактивирована истекшая подписка пользователя {user_id}")
-                        return None
-                except Exception as date_error:
-                    logger.error(f"Ошибка при парсинге даты окончания подписки: {date_error}")
-            
-            return subscription
-            
+            return result.data[0]
         except Exception as e:
             logger.error(f"Ошибка при получении подписки: {e}")
             return None
@@ -159,27 +135,23 @@ class SupabaseSubscriptionService:
         """Создает новую подписку."""
         try:
             now = datetime.now()
-            end_date = now + relativedelta(months=SUBSCRIPTION_DURATION_MONTHS)
-            
+            end_date = now + relativedelta(days=30)
+            # Деактивируем все старые подписки
+            self.supabase.table("user_subscription").update({"is_active": False, "updated_at": now.isoformat()}).eq("user_id", int(user_id)).execute()
+            # Создаём новую
             subscription_data = {
-                "user_id": user_id,
+                "user_id": int(user_id),
                 "start_date": now.isoformat(),
                 "end_date": end_date.isoformat(),
                 "is_active": True,
-                "payment_id": payment_id
+                "payment_id": payment_id,
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat()
             }
-            
-            # Сначала деактивируем все текущие подписки
-            self.supabase.table("user_subscription").update({"is_active": False}).eq("user_id", user_id).execute()
-            
-            # Создаем новую активную подписку
             result = self.supabase.table("user_subscription").insert(subscription_data).execute()
-            
             if result.data and len(result.data) > 0:
                 return result.data[0]
-            
             return subscription_data
-            
         except Exception as e:
             logger.error(f"Ошибка при создании подписки: {e}")
             raise e
