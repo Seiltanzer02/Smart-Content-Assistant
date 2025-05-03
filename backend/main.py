@@ -44,6 +44,8 @@ import shutil # Добавляем импорт shutil
 import base64
 import urllib.parse
 from dateutil.relativedelta import relativedelta
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -3382,54 +3384,60 @@ async def resolve_user_id(request: Request):
 
 @app.get("/subscription/status")
 async def get_subscription_status(request: Request):
-    user_id_str = request.query_params.get("user_id")
-    debug = {"user_id_from_query": user_id_str}
-    if not user_id_str:
-        return {"error": "user_id обязателен", "debug": debug}
+    debug = {}
     try:
+        user_id_str = request.query_params.get("user_id")
+        debug["user_id_from_query"] = user_id_str
+        if not user_id_str:
+            return JSONResponse({"error": "user_id обязателен", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=400)
         user_id = int(user_id_str)
         debug["user_id_int"] = user_id
-    except Exception as e:
-        debug["user_id_int_error"] = str(e)
-        return {"error": "user_id должен быть числом", "debug": debug}
-    try:
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_ANON_KEY')
-        url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
+
+        # Прямой запрос к REST API Supabase
+        supabase_url = os.environ["SUPABASE_URL"]
+        supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
         headers = {
             "apikey": supabase_key,
-            "Authorization": f"Bearer {supabase_key}",
-            "Content-Type": "application/json"
+            "Authorization": f"Bearer {supabase_key}"
         }
-        sql_query = f"SELECT * FROM user_subscription WHERE user_id = {user_id} ORDER BY end_date DESC;"
-        response = requests.post(url, json={"query": sql_query}, headers=headers)
-        debug["sql_status_code"] = response.status_code
-        debug["sql_text"] = response.text
-        if response.status_code == 200:
-            records = response.json()
-            debug["sql_records"] = records
-            sub = records[0] if records else None
-            from datetime import datetime
-            now = datetime.utcnow()
-            debug["now_utc"] = now.isoformat()
-            if sub:
-                is_active = sub.get("is_active", False) and sub.get("end_date") and datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00")) > now
-                return {
-                    "has_subscription": is_active,
-                    "is_active": is_active,
-                    "subscription_end_date": sub.get("end_date"),
-                    "debug": debug
-                }
-            else:
-                return {
-                    "has_subscription": False,
-                    "is_active": False,
-                    "subscription_end_date": None,
-                    "debug": debug
-                }
-        else:
-            return {"error": "Ошибка SQL-запроса", "debug": debug}
+        params = {
+            "user_id": f"eq.{user_id}",
+            "order": "end_date.desc",
+            "select": "*"
+        }
+        r = requests.get(f"{supabase_url}/rest/v1/user_subscription", headers=headers, params=params)
+        debug["supabase_status_code"] = r.status_code
+        debug["supabase_url"] = r.url
+        try:
+            data = r.json()
+        except Exception as e:
+            debug["json_error"] = str(e)
+            return JSONResponse({"error": "Ошибка парсинга JSON", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
+        debug["raw_data"] = data
+
+        if not data or len(data) == 0:
+            return {"has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}
+
+        # Берём самую свежую подписку
+        sub = data[0]
+        debug["selected_sub"] = sub
+        is_active = bool(sub.get("is_active", False))
+        end_date = sub.get("end_date")
+        # Проверяем, что end_date в будущем
+        now = datetime.now(timezone.utc)
+        try:
+            end_date_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00')) if end_date else None
+        except Exception as e:
+            debug["end_date_parse_error"] = str(e)
+            end_date_dt = None
+        has_subscription = is_active and end_date_dt and end_date_dt > now
+        return {
+            "has_subscription": bool(has_subscription),
+            "is_active": is_active,
+            "subscription_end_date": end_date,
+            "debug": debug
+        }
     except Exception as e:
         debug["exception"] = str(e)
-        return {"error": str(e), "debug": debug}
+        return JSONResponse({"error": "Внутренняя ошибка", "has_subscription": False, "is_active": False, "subscription_end_date": None, "debug": debug}, status_code=500)
 
