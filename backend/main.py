@@ -3295,7 +3295,8 @@ if SHOULD_MOUNT_STATIC:
             if rest_of_path.startswith("api/") or \
                rest_of_path.startswith("docs") or \
                rest_of_path.startswith("openapi.json") or \
-               rest_of_path.startswith("uploads/"):
+               rest_of_path.startswith("uploads/") or \
+               rest_of_path.startswith("subscription/"):
                  # Этот код не должен выполняться, т.к. роуты API/docs/uploads определены выше, но для надежности
                  # Логируем попытку доступа к API через SPA catch-all
                  logger.debug(f"Запрос к '{rest_of_path}' перехвачен SPA catch-all, но проигнорирован (API/Docs/Uploads).")
