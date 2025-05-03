@@ -35,7 +35,7 @@ const SubscriptionWidget: React.FC<{
       console.log('[SubscriptionWidget] Polling timeout cleared');
     }
   };
-
+  
   const handleSubscribeViaMainButton = () => {
     console.log('[SubscriptionWidget] Нажатие на MainButton для подписки');
     if (window.Telegram?.WebApp?.showConfirm) {
@@ -52,7 +52,7 @@ const SubscriptionWidget: React.FC<{
       handleSubscribe();
     }
   };
-
+  
   const handleInvoiceGeneration = async (userId: string) => {
     console.log('[SubscriptionWidget] handleInvoiceGeneration вызван для userId:', userId);
     try {
@@ -122,7 +122,7 @@ const SubscriptionWidget: React.FC<{
       console.error('[SubscriptionWidget] Ошибка в handleInvoiceGeneration:', error);
     }
   };
-
+  
   const handleSubscribe = async () => {
     console.log('[SubscriptionWidget] handleSubscribe вызван. userId:', userId);
     if (!userId) {
@@ -132,7 +132,7 @@ const SubscriptionWidget: React.FC<{
     }
     await handleInvoiceGeneration(userId);
   };
-
+  
   useEffect(() => {
     console.log('[SubscriptionWidget] useEffect инициализации Telegram WebApp. isActive:', isActive);
     if (window.Telegram?.WebApp) {
@@ -175,11 +175,11 @@ const SubscriptionWidget: React.FC<{
       console.log('[SubscriptionWidget] Размонтирование компонента. Очищаю MainButton и polling');
       if (window.Telegram?.WebApp?.MainButton) {
         window.Telegram.WebApp.MainButton.offClick(handleSubscribeViaMainButton);
-      }
+  }
       stopPolling(); // Очищаем таймеры при размонтировании
     };
   }, [isActive, onSubscriptionUpdate]);
-
+  
   if (!userId) {
     console.error('[SubscriptionWidget] Нет userId!');
     return (
@@ -192,7 +192,7 @@ const SubscriptionWidget: React.FC<{
       </div>
     );
   }
-
+  
   if (error) {
     console.error('[SubscriptionWidget] Ошибка:', error);
     return (
@@ -261,7 +261,7 @@ const SubscriptionWidget: React.FC<{
   useEffect(() => {
     console.log('[SubscriptionWidget][useEffect] showPaymentInfo изменился:', showPaymentInfo);
   }, [showPaymentInfo]);
-
+  
   return (
     <div className="subscription-widget">
       <h3>Статус подписки</h3>
