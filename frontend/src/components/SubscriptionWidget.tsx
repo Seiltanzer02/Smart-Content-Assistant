@@ -74,38 +74,46 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
   useEffect(() => {
     // Настройка Telegram WebApp (выполняется один раз)
     console.log('Инициализация и настройка Telegram WebApp...');
-    if (window.Telegram?.WebApp) {
-      window.Telegram.WebApp.ready();
+    const tg = window.Telegram?.WebApp;
+    if (tg) {
+      tg.ready();
 
-      if (window.Telegram.WebApp.MainButton) {
-        window.Telegram.WebApp.MainButton.setText(`Подписаться за ${SUBSCRIPTION_PRICE} Stars`);
-        window.Telegram.WebApp.MainButton.color = '#2481cc';
-        window.Telegram.WebApp.MainButton.textColor = '#ffffff';
-        // Первоначальное состояние кнопки будет установлено после первого fetchSubscriptionStatus
-        window.Telegram.WebApp.MainButton.hide(); // Начинаем со скрытой кнопки
-        window.Telegram.WebApp.MainButton.onClick(handleSubscribeViaMainButton);
+      if (tg.MainButton) {
+        tg.MainButton.setText(`Подписаться за ${SUBSCRIPTION_PRICE} Stars`);
+        tg.MainButton.color = '#2481cc';
+        tg.MainButton.textColor = '#ffffff';
+        tg.MainButton.hide(); // Начинаем со скрытой кнопки
+        tg.MainButton.onClick(handleSubscribeViaMainButton);
       } else {
         console.warn('MainButton недоступен в Telegram WebApp');
       }
 
-      if (typeof window.Telegram.WebApp.onEvent === 'function') {
-        window.Telegram.WebApp.onEvent('popup_closed', () => {
-          console.log('Popup оплаты закрыт, обновляем статус...');
-          fetchSubscriptionStatus(); // Перезапрашиваем статус
-        });
+      // Обработчик закрытия окна оплаты
+      if (typeof tg.onEvent === 'function') {
+        tg.onEvent('popup_closed', handlePopupClosed);
       }
+      
+      // --- ДОБАВЛЕНО: Обработчик изменения видимости --- 
+      if (typeof tg.onEvent === 'function') {
+        tg.onEvent('viewportChanged', handleViewportChanged);
+      }
+      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+      
     } else {
       console.warn('window.Telegram.WebApp не найден!');
     }
 
     // Функция очистки
     return () => {
-      if (window.Telegram?.WebApp?.MainButton) {
-        window.Telegram.WebApp.MainButton.offClick(handleSubscribeViaMainButton);
-        window.Telegram.WebApp.MainButton.hide();
+      if (tg?.MainButton) {
+        tg.MainButton.offClick(handleSubscribeViaMainButton);
+        tg.MainButton.hide();
       }
-      if (typeof window.Telegram?.WebApp?.offEvent === 'function'){
-         window.Telegram.WebApp.offEvent('popup_closed', fetchSubscriptionStatus);
+      if (typeof tg?.offEvent === 'function'){
+         tg.offEvent('popup_closed', handlePopupClosed);
+         // --- ДОБАВЛЕНО: Удаление обработчика изменения видимости --- 
+         tg.offEvent('viewportChanged', handleViewportChanged);
+         // --- КОНЕЦ ДОБАВЛЕНИЯ ---
       }
     };
   }, []); // Пустой массив зависимостей - выполняется один раз
@@ -118,6 +126,24 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
 
 
   // --- Обработчики ---
+  
+  // --- ДОБАВЛЕНО: Выносим обработчики событий в отдельные функции --- 
+  const handlePopupClosed = () => {
+    console.log('Popup оплаты закрыт, обновляем статус...');
+    fetchSubscriptionStatus(); // Перезапрашиваем статус
+  };
+  
+  const handleViewportChanged = async (eventPayload: { isStateStable: boolean }) => {
+    console.log('Viewport changed:', eventPayload);
+    // Перезапрашиваем статус, только если viewport стабилен и приложение стало видимым
+    // (проверка на видимость может быть неточной, но isStateStable полезна)
+    if (eventPayload.isStateStable) {
+       console.log('Viewport стабилен, обновляем статус подписки...');
+       await fetchSubscriptionStatus(); 
+    }
+  };
+  // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+  
   const handleSubscribeViaMainButton = () => {
     console.log('Нажата главная кнопка в Telegram WebApp');
     if (window.Telegram?.WebApp?.showConfirm) {
