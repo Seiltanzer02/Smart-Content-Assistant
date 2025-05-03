@@ -1,18 +1,18 @@
 import React, { useState, useEffect, useCallback, useRef, SetStateAction, Dispatch } from 'react';
 import '../styles/SubscriptionWidget.css';
-import { getUserSubscriptionStatus, generateInvoice } from '../api/subscription';
+import { getUserSubscriptionStatus, generateInvoice, SubscriptionStatus } from '../api/subscription';
 import axios from 'axios';
 
 // API_URL для относительных путей
 const API_URL = '';
 
-// Тип для статуса подписки
-type SubscriptionStatus = {
-  has_subscription: boolean;
-  is_active: boolean;
-  subscription_end_date?: string;
-  debug?: any; // Добавляем поле debug
-};
+// Убираем дублирующий тип, используем импортированный SubscriptionStatus
+// type SubscriptionStatus = {
+//   has_subscription: boolean;
+//   is_active: boolean;
+//   subscription_end_date?: string;
+//   debug?: any; // Добавляем поле debug
+// };
 
 const SubscriptionWidget: React.FC<{
   userId: string | null,

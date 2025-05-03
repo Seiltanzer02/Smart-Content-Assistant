@@ -1308,7 +1308,7 @@ function App() {
     try {
       const timestamp = Date.now(); // Добавляем временную метку для предотвращения кэширования
       const response = await fetch(`/subscription/status?user_id=${userId}&t=${timestamp}`);
-      const data = await response.json();
+      const data = await response.json() as SubscriptionStatus; // Явно указываем тип данных
       console.log('[App] Subscription status response:', data);
       
       // ИЗМЕНЕНО: добавлено логирование для отладки
