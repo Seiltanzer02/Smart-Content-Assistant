@@ -41,6 +41,7 @@ import traceback
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
 # from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 import shutil # Добавляем импорт shutil
+from services.supabase_subscription_service import SupabaseSubscriptionService
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -3327,4 +3328,43 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     logger.info(f"Запуск сервера на порту {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
+
+# Добавляем эндпоинт для получения статуса подписки
+@app.get("/subscription/status")
+async def get_subscription_status(request: Request):
+    user_id = request.headers.get("x-telegram-user-id")
+    if not user_id:
+        user_id = request.query_params.get("user_id")
+    logger.info(f'Запрос /subscription/status для user_id: {user_id}')
+    if not user_id:
+        return {"error": "user_id обязателен в заголовке x-telegram-user-id"}
+    try:
+        # Используем сервис для проверки подписки
+        subscription_service = SupabaseSubscriptionService(supabase)
+        subscription = await subscription_service.get_subscription(int(user_id))
+        usage = await subscription_service.get_user_usage(int(user_id))
+        if subscription:
+            is_active = subscription.get("is_active", False)
+            end_date = subscription.get("end_date")
+            # end_date уже проверяется в сервисе, но для фронта возвращаем строку
+            response_data = {
+                "has_subscription": is_active,
+                "subscription_end_date": end_date,
+                "is_active": is_active,
+                "analysis_count": usage.get("analysis_count", 0),
+                "post_generation_count": usage.get("post_generation_count", 0)
+            }
+            logger.info(f'Возвращаем статус для user_id {user_id}: {response_data}')
+            return response_data
+        else:
+            response_data = {
+                "has_subscription": False,
+                "analysis_count": usage.get("analysis_count", 0),
+                "post_generation_count": usage.get("post_generation_count", 0)
+            }
+            logger.info(f'Подписка не найдена для user_id {user_id}, возвращаем: {response_data}')
+            return response_data
+    except Exception as e:
+        logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True)
+        return {"error": str(e)}
 

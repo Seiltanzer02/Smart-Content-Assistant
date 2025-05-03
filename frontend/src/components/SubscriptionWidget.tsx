@@ -15,7 +15,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
-  const SUBSCRIPTION_PRICE = 70; // в Stars
+  const SUBSCRIPTION_PRICE = 1; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
   
   // Инициализация и настройка Telegram WebApp
@@ -130,21 +130,52 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       const response = await fetch('/generate-stars-invoice-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, amount: 70 })
+        body: JSON.stringify({ user_id: userId, amount: 1 })
       });
       const data = await response.json();
       if (data.success && data.invoice_link) {
         if (window?.Telegram?.WebApp && typeof window?.Telegram?.WebApp.openInvoice === 'function') {
           window.Telegram.WebApp.openInvoice(data.invoice_link, (status) => {
             if (status === 'paid') {
-              fetchSubscriptionStatus();
-              if (window?.Telegram?.WebApp?.showPopup) {
-                window.Telegram.WebApp.showPopup({
-                  title: 'Успешная оплата',
-                  message: 'Ваша подписка Premium активирована!',
-                  buttons: [{ type: 'ok' }]
-                });
-              }
+              // После успешной оплаты делаем несколько попыток получить обновленный статус подписки
+              // так как обработка webhook может занять некоторое время
+              const checkSubscription = async (attempts = 3, delay = 1000) => {
+                try {
+                  let hasSubscription = await fetchSubscriptionStatus();
+                  
+                  if (hasSubscription) {
+                    // Статус обновлен успешно
+                    if (window?.Telegram?.WebApp?.showPopup) {
+                      window.Telegram.WebApp.showPopup({
+                        title: 'Успешная оплата',
+                        message: 'Ваша подписка Premium активирована!',
+                        buttons: [{ type: 'ok' }]
+                      });
+                    }
+                    return;
+                  } else if (attempts > 1) {
+                    // Если подписка еще не активна, но попытки остались - повторяем через delay мс
+                    console.log(`Подписка еще не активирована, осталось попыток: ${attempts-1}`);
+                    setTimeout(() => checkSubscription(attempts - 1, delay * 1.5), delay);
+                  } else {
+                    // Если все попытки исчерпаны, но подписка не активирована
+                    console.log('Не удалось получить обновленный статус подписки');
+                    if (window?.Telegram?.WebApp?.showPopup) {
+                      window.Telegram.WebApp.showPopup({
+                        title: 'Платеж получен',
+                        message: 'Подписка будет активирована в течение минуты. Пожалуйста, перезагрузите приложение.',
+                        buttons: [{ type: 'ok' }]
+                      });
+                    }
+                  }
+                } catch (error) {
+                  console.error('Ошибка при проверке статуса подписки:', error);
+                }
+              };
+              
+              // Запускаем процесс проверки
+              checkSubscription();
+              
               setTimeout(() => {
                 if (window?.Telegram?.WebApp?.close) {
                   window.Telegram.WebApp.close();
@@ -251,7 +282,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
                 onClick={handleSubscribe}
                 disabled={isSubscribing}
               >
-                {isSubscribing ? 'Создание платежа...' : 'Подписаться за 70 Stars'}
+                {isSubscribing ? 'Создание платежа...' : 'Подписаться за 1 Star'}
               </button>
             </div>
           )}
