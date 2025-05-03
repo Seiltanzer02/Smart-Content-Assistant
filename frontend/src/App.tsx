@@ -1903,7 +1903,11 @@ function App() {
             </div>
           )}
         </div>
-      </main> {/* <-- ИСПРАВЛЕНО: Добавлен закрывающий тег */} 
+      </main> {/* <-- Закрывающий тег main */}
+
+      {/* Удаляем дублирующую навигацию и лишнюю кнопку подписки отсюда */} 
+      {/* {currentView === 'analyze' && !analysisResult && (...)} */}
+      {/* {!showSubscription && (...)} */}
 
       <footer className="app-footer">
         <p>© 2024 Smart Content Assistant</p>

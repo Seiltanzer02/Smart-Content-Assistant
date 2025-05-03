@@ -85,6 +85,20 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId }) => {
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
     setLoading(true);
     let hasSubscription = false; // Значение по умолчанию
+    
+    // Добавляем проверку userId перед запросом
+    if (!userId) {
+      console.warn('[fetchSubscriptionStatus] userId отсутствует, статус не будет запрошен.');
+      setError('Ошибка: ID пользователя не определен.');
+      setLoading(false);
+      setStatus(null); // Сбрасываем статус
+      // Скрываем кнопку подписки, если ID нет
+      if (window.Telegram?.WebApp?.MainButton) {
+        window.Telegram.WebApp.MainButton.hide();
+      }
+      return false;
+    }
+    
     try {
       // Используем функцию из API вместо прямого запроса
       const subscriptionData = await getUserSubscriptionStatus(userId);
