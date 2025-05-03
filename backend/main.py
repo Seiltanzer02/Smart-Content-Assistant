@@ -3339,13 +3339,13 @@ async def get_subscription_status(request: Request):
 
     if not user_id:
         logger.error("user_id не предоставлен для /subscription/status")
-        return JSONResponse(status_code=400, content={"error": "user_id обязателен"})
+        raise HTTPException(status_code=400, detail="user_id обязателен")
 
     try:
         user_id_int = int(user_id) # Преобразуем в int здесь
     except ValueError:
         logger.error(f"Некорректный user_id: {user_id}")
-        return JSONResponse(status_code=400, content={"error": "Некорректный user_id"})
+        raise HTTPException(status_code=400, detail="Некорректный user_id")
 
     try:
         now_utc = datetime.utcnow().isoformat() # Текущее время в UTC для сравнения
@@ -3384,16 +3384,17 @@ async def get_subscription_status(request: Request):
                 logger.error(f'Ошибка при получении статистики использования для user {user_id_int}: {stats_e}')
 
         response_data = {
-            "has_subscription": has_active_subscription,
+            "has_subscription": bool(has_active_subscription),
             "subscription_end_date": end_date,
             "analysis_count": usage_stats["analysis_count"],
             "post_generation_count": usage_stats["post_generation_count"]
         }
 
         logger.info(f'Возвращаем статус для user_id {user_id_int}: {response_data}')
-        return JSONResponse(content=response_data)
+        # Убираем JSONResponse и используем стандартный ответ FastAPI
+        return response_data
 
     except Exception as e:
         logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True)
-        return JSONResponse(status_code=500, content={"error": f"Внутренняя ошибка сервера: {str(e)}"})
+        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера: {str(e)}")
 
