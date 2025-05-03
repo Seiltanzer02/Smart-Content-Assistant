@@ -41,7 +41,6 @@ import traceback
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
 # from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 import shutil # Добавляем импорт shutil
-from services.supabase_subscription_service import SupabaseSubscriptionService
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -334,25 +333,28 @@ async def telegram_webhook(request: Request):
         start_date = now
         end_date = now + timedelta(days=30)
         try:
-            # Деактивируем все старые подписки
-            supabase.table("user_subscription").update({
-                "is_active": False,
-                "updated_at": now.isoformat()
-            }).eq("user_id", int(user_id)).execute()
-            # Создаём новую
-            supabase.table("user_subscription").insert({
-                "user_id": int(user_id),
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
-                "payment_id": payment_id,
-                "is_active": True,
-                "created_at": now.isoformat(),
-                "updated_at": now.isoformat()
-            }).execute()
-            logger.info(f'Подписка активирована для user_id={user_id}')
+            # Проверяем, есть ли уже подписка
+            existing = supabase.table("user_subscription").select("*").eq("user_id", user_id).execute()
+            if existing.data and len(existing.data) > 0:
+                # Обновляем подписку
+                supabase.table("user_subscription").update({
+                    "is_active": True,
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "payment_id": payment_id
+                }).eq("user_id", user_id).execute()
+            else:
+                # Создаём новую подписку
+                supabase.table("user_subscription").insert({
+                    "user_id": user_id,
+                    "is_active": True,
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "payment_id": payment_id
+                }).execute()
         except Exception as e:
-            logger.error(f'Ошибка при активации подписки: {e}')
-        return {"ok": True}
+            print("Ошибка при активации подписки:", e)
+        return {"ok": True, "successful_payment": True}
     return {"ok": True}
 
 
@@ -3332,38 +3334,66 @@ async def get_subscription_status(request: Request):
     user_id = request.headers.get("x-telegram-user-id")
     if not user_id:
         user_id = request.query_params.get("user_id")
-    logger.info(f'[SUBSCRIPTION_STATUS] Запрос /subscription/status для user_id: {user_id} (тип: {type(user_id)})')
+
+    logger.info(f'Запрос /subscription/status для user_id: {user_id}')
+
     if not user_id:
-        return {"error": "user_id обязателен в заголовке x-telegram-user-id"}
+        logger.error("user_id не предоставлен для /subscription/status")
+        return JSONResponse(status_code=400, content={"error": "user_id обязателен"})
+
     try:
-        user_id_int = int(user_id)
-        logger.info(f'[SUBSCRIPTION_STATUS] Приведённый user_id к int: {user_id_int}')
-        subscription_service = SupabaseSubscriptionService(supabase)
-        subscription = await subscription_service.get_subscription(user_id_int)
-        logger.info(f'[SUBSCRIPTION_STATUS] Результат поиска подписки: {subscription}')
-        usage = await subscription_service.get_user_usage(user_id_int)
-        logger.info(f'[SUBSCRIPTION_STATUS] Статистика использования: {usage}')
-        if subscription:
-            is_active = subscription.get("is_active", False)
-            end_date = subscription.get("end_date")
-            response_data = {
-                "has_subscription": is_active,
-                "subscription_end_date": end_date,
-                "is_active": is_active,
-                "analysis_count": usage.get("analysis_count", 0),
-                "post_generation_count": usage.get("post_generation_count", 0)
-            }
-            logger.info(f'[SUBSCRIPTION_STATUS] Возвращаем статус для user_id {user_id_int}: {response_data}')
-            return response_data
-        else:
-            response_data = {
-                "has_subscription": False,
-                "analysis_count": usage.get("analysis_count", 0),
-                "post_generation_count": usage.get("post_generation_count", 0)
-            }
-            logger.info(f'[SUBSCRIPTION_STATUS] Подписка не найдена для user_id {user_id_int}, возвращаем: {response_data}')
-            return response_data
+        user_id_int = int(user_id) # Преобразуем в int здесь
+    except ValueError:
+        logger.error(f"Некорректный user_id: {user_id}")
+        return JSONResponse(status_code=400, content={"error": "Некорректный user_id"})
+
+    try:
+        now_utc = datetime.utcnow().isoformat() # Текущее время в UTC для сравнения
+        logger.debug(f"Текущее время UTC для сравнения: {now_utc}")
+
+        # Запрашиваем активную подписку, которая еще не истекла
+        result = supabase.table("user_subscription")\
+            .select("is_active, end_date, id")\
+            .eq("user_id", user_id_int)\
+            .eq("is_active", True)\
+            .gt("end_date", now_utc)\
+            .order("end_date", desc=True)\
+            .limit(1)\
+            .maybe_single()\
+            .execute()
+
+        logger.info(f'Результат запроса активной подписки для user {user_id_int}: {result.data}')
+
+        has_active_subscription = bool(result.data) # True если запись найдена, иначе False
+        end_date = result.data.get("end_date") if result.data else None
+
+        # Запросим статистику использования (если подписки нет)
+        usage_stats = {"analysis_count": 0, "post_generation_count": 0}
+        if not has_active_subscription:
+            try:
+                stats_result = supabase.table("user_usage_stats")\
+                    .select("analysis_count, post_generation_count")\
+                    .eq("user_id", user_id_int)\
+                    .maybe_single()\
+                    .execute()
+                if stats_result.data:
+                    usage_stats["analysis_count"] = stats_result.data.get("analysis_count", 0)
+                    usage_stats["post_generation_count"] = stats_result.data.get("post_generation_count", 0)
+                logger.info(f'Статистика использования для user {user_id_int}: {usage_stats}')
+            except Exception as stats_e:
+                logger.error(f'Ошибка при получении статистики использования для user {user_id_int}: {stats_e}')
+
+        response_data = {
+            "has_subscription": has_active_subscription,
+            "subscription_end_date": end_date,
+            "analysis_count": usage_stats["analysis_count"],
+            "post_generation_count": usage_stats["post_generation_count"]
+        }
+
+        logger.info(f'Возвращаем статус для user_id {user_id_int}: {response_data}')
+        return JSONResponse(content=response_data)
+
     except Exception as e:
-        logger.error(f'[SUBSCRIPTION_STATUS] Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True)
-        return {"error": str(e)}
+        logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True)
+        return JSONResponse(status_code=500, content={"error": f"Внутренняя ошибка сервера: {str(e)}"})
 
