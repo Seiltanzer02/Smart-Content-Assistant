@@ -26,7 +26,7 @@ import uuid # Для генерации уникальных имен файло
 import mimetypes # Для определения типа файла
 from telethon.errors import RPCError
 import getpass # Для получения пароля
-from fastapi.responses import FileResponse, Response # Добавляем Response
+from fastapi.responses import FileResponse, Response, JSONResponse # Добавляем Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import time # Добавляем модуль time для работы с временем
 import requests
@@ -41,6 +41,7 @@ import traceback
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
 # from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 import shutil # Добавляем импорт shutil
+from dateutil.relativedelta import relativedelta # Make sure this is imported
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -3403,7 +3404,10 @@ if __name__ == "__main__":
 # Добавляем эндпоинт для получения статуса подписки
 @app.get("/subscription/status")
 async def get_subscription_status(request: Request):
-    # --- Получение и проверка user_id (остается как есть) ---
+    # --- UNIQUE LOG MARKER ---
+    logger.info(">>> EXECUTING CORRECT /subscription/status HANDLER (v4) <<<")
+    # ---
+
     user_id_header = request.headers.get("x-telegram-user-id")
     user_id_query = request.query_params.get("user_id")
     logger.info(f"--- Request to /subscription/status --- Header: {user_id_header}, Query: {user_id_query}")
@@ -3423,14 +3427,15 @@ async def get_subscription_status(request: Request):
     end_date = None
     analysis_count = 0
     post_generation_count = 0
+    debug_info = {} # To store debug data
     error_details = [] # Список для сбора некритичных ошибок
 
     try:
         # --- Проверка активной подписки ---
         now_utc = datetime.utcnow()
         now_iso = now_utc.isoformat()
-        logger.debug(f"Current UTC time for comparison: {now_iso}")
         logger.info(f"Checking active subscription for user_id={user_id_int} against time {now_iso}")
+        count_result = None # Initialize count_result
         try:
             count_result = supabase.table("user_subscription")\
                 .select("id", count="exact")\
@@ -3439,88 +3444,83 @@ async def get_subscription_status(request: Request):
                 .gt("end_date", now_iso)\
                 .limit(1)\
                 .execute()
-
+            debug_info["subscription_query_raw"] = str(count_result) # Store raw result for debug
             logger.info(f'[Status] Subscription count query result: {count_result}')
+
             if hasattr(count_result, 'count') and count_result.count is not None and count_result.count > 0:
                 has_active_subscription = True
                 logger.info(f"[Status] Active subscription FOUND for user {user_id_int}.")
                 # Пытаемся получить дату окончания, если подписка есть
                 try:
-                    date_result = supabase.table("user_subscription")\
+                     date_result = supabase.table("user_subscription")\
                         .select("end_date")\
                         .eq("user_id", user_id_int)\
                         .eq("is_active", True)\
                         .gt("end_date", now_iso)\
                         .order("end_date", desc=True).limit(1).maybe_single().execute()
-                    if date_result.data:
-                        end_date = date_result.data.get("end_date")
-                    logger.info(f"[Status] Fetched end_date: {end_date}")
+                     debug_info["end_date_query_raw"] = str(date_result)
+                     if date_result.data:
+                         end_date = date_result.data.get("end_date")
+                     logger.info(f"[Status] Fetched end_date: {end_date}")
                 except Exception as date_e:
                     logger.warning(f"[Status] Failed to fetch end_date: {date_e}")
                     error_details.append("Failed to fetch end_date.")
             else:
                  logger.info(f"[Status] Active subscription NOT FOUND for user {user_id_int}.")
                  has_active_subscription = False
-
         except Exception as sub_e:
             logger.error(f"[Status] Error during subscription check query: {sub_e}", exc_info=True)
             error_details.append(f"Subscription check failed: {str(sub_e)}")
-            # Считаем, что подписки нет, если запрос упал
+            debug_info["subscription_query_error"] = str(sub_e)
             has_active_subscription = False
 
         # --- Получение статистики использования (только если нет подписки) ---
         if not has_active_subscription:
-            logger.info(f"Querying usage stats for user {user_id_int}.")
-            try:
-                # Убедимся, что выбираем правильные колонки
-                stats_result = supabase.table("user_usage_stats")\
-                    .select("analysis_count, post_generation_count")\
-                    .eq("user_id", user_id_int)\
-                    .maybe_single()\
-                    .execute()
-                if stats_result.data:
-                    analysis_count = stats_result.data.get("analysis_count", 0)
-                    # Явно проверяем наличие post_generation_count
-                    post_generation_count = stats_result.data.get("post_generation_count", 0)
-                    if "post_generation_count" not in stats_result.data:
-                        logger.warning(f"[Status] 'post_generation_count' field missing in user_usage_stats for user {user_id_int}")
-                logger.info(f'[Status] Usage stats result: analysis={analysis_count}, posts={post_generation_count}')
-            except Exception as stats_e:
-                logger.error(f'[Status] Error fetching usage stats: {stats_e}', exc_info=True)
-                error_details.append(f"Usage stats fetch failed: {str(stats_e)}")
-                # Оставляем счетчики по нулям при ошибке
+             logger.info(f"Querying usage stats for user {user_id_int}.")
+             try:
+                 stats_result = supabase.table("user_usage_stats").select("analysis_count, post_generation_count").eq("user_id", user_id_int).maybe_single().execute()
+                 debug_info["stats_query_raw"] = str(stats_result)
+                 if stats_result.data:
+                     analysis_count = stats_result.data.get("analysis_count", 0)
+                     post_generation_count = stats_result.data.get("post_generation_count", 0)
+                     if "post_generation_count" not in stats_result.data: logger.warning(f"[Status] 'post_generation_count' field missing in user_usage_stats for user {user_id_int}")
+                 logger.info(f'[Status] Usage stats result: analysis={analysis_count}, posts={post_generation_count}')
+             except Exception as stats_e:
+                 logger.error(f'[Status] Error fetching usage stats: {stats_e}', exc_info=True)
+                 error_details.append(f"Usage stats fetch failed: {str(stats_e)}")
+                 debug_info["stats_query_error"] = str(stats_e)
         else:
              logger.info(f"Active subscription found. Skipping usage stats query.")
 
-        # --- Формирование ГАРАНТИРОВАННО корректного ответа ---
-        response_data = {
-            "has_subscription": bool(has_active_subscription), # Гарантируем bool
-            "subscription_end_date": end_date,
-            "analysis_count": int(analysis_count), # Гарантируем int
-            "post_generation_count": int(post_generation_count) # Гарантируем int
-        }
-        if error_details: # Добавляем некритичные ошибки в ответ для информации
-            response_data["warnings"] = error_details
 
+        # --- Prepare final response --- # Changed comment style
+        response_data = {
+            "has_subscription": bool(has_active_subscription),
+            "subscription_end_date": end_date,
+            "analysis_count": int(analysis_count),
+            "post_generation_count": int(post_generation_count),
+            "debug_info": debug_info, # Add debug info
+             "warnings": error_details # Add non-critical errors
+        }
         logger.info(f'--- Preparing final response for /subscription/status for user {user_id_int} ---')
         logger.info(f'Final response_data dict: {response_data}')
-        return response_data
+        return response_data # Return directly
 
     except HTTPException as http_exc:
-         # Перехватываем и логируем HTTP исключения от проверок user_id
          logger.error(f"HTTP Exception in /subscription/status: {http_exc.detail}", exc_info=True)
-         raise http_exc # Перевыбрасываем исключение
+         raise http_exc
     except Exception as e:
-        # Ловим любые другие непредвиденные ошибки
         logger.error(f'CRITICAL UNHANDLED Exception in /subscription/status for user_id {user_id}: {e}', exc_info=True)
-        # Возвращаем 500, но с телом по умолчанию (False)
-        # Это не должно происходить, но для безопасности
+        # Return error details IN THE RESPONSE BODY with 500 status
         error_response = {
-            "has_subscription": False, "subscription_end_date": None,
-            "analysis_count": 0, "post_generation_count": 0,
-            "error_details": "Critical internal server error."
+            "has_subscription": False, # Default to false on critical error
+            "subscription_end_date": None,
+            "analysis_count": 0,
+            "post_generation_count": 0,
+            "error_details": f"Critical internal server error: {str(e)}",
+            "debug_info": debug_info # Include any debug info gathered before the crash
         }
-        # return JSONResponse(status_code=500, content=error_response) # Можно вернуть тело ошибки
-        # Или стандартный HTTPException
-        raise HTTPException(status_code=500, detail="Критическая внутренняя ошибка сервера при проверке статуса.")
+        logger.error(f'--- Returning CRITICAL error response for /subscription/status: {error_response} ---')
+        # Use JSONResponse to send body with 500 status
+        return JSONResponse(status_code=500, content=error_response)
 
