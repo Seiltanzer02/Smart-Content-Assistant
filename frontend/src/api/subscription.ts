@@ -1,12 +1,11 @@
 import axios from 'axios';
 
 // Новый интерфейс для статуса подписки
-export type SubscriptionStatus = {
+export interface SubscriptionStatus {
   has_subscription: boolean;
   is_active: boolean;
-  subscription_end_date?: string;
-  debug?: any;
-};
+  subscription_end_date?: string | null;
+}
 
 // API_URL пустая строка для относительных путей
 const API_URL = '';
@@ -30,7 +29,9 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
     if (response.data.debug) {
       console.log('[getUserSubscriptionStatus][DEBUG]:', response.data.debug);
     }
-    return response.data;
+    const { has_subscription, is_active, subscription_end_date } = response.data;
+    console.log('[getUserSubscriptionStatus] Возвращаемые поля:', { has_subscription, is_active, subscription_end_date });
+    return { has_subscription, is_active, subscription_end_date };
   } catch (error) {
     console.error('[getUserSubscriptionStatus] Ошибка при получении статуса подписки:', error);
     throw error;
