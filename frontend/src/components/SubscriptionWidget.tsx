@@ -65,7 +65,17 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   
   useEffect(() => {
     if (userId) {
+      console.log(`SubscriptionWidget: userId изменился на ${userId}, запрашиваем статус подписки`);
       fetchSubscriptionStatus();
+      
+      // Устанавливаем интервал для периодической проверки статуса подписки
+      const checkInterval = setInterval(() => {
+        fetchSubscriptionStatus();
+      }, 10000); // проверяем каждые 10 секунд
+      
+      return () => clearInterval(checkInterval);
+    } else {
+      console.warn('SubscriptionWidget: userId отсутствует или пустой');
     }
     
     // Добавляем логирование статуса Telegram WebApp при загрузке компонента
@@ -80,16 +90,21 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
     setLoading(true);
     try {
+      console.log(`SubscriptionWidget: запрашиваем статус подписки для userId=${userId}`);
+      
       // Используем функцию из API вместо прямого запроса
       const subscriptionData = await getUserSubscriptionStatus(userId);
+      console.log('SubscriptionWidget: получен статус подписки:', subscriptionData);
       setStatus(subscriptionData);
       
       // Показываем/скрываем главную кнопку в зависимости от статуса подписки
       if (window.Telegram?.WebApp?.MainButton) {
         if (!subscriptionData.has_subscription && !isActive) {
           window.Telegram.WebApp.MainButton.show();
+          console.log('SubscriptionWidget: Показана главная кнопка (нет подписки)');
         } else {
           window.Telegram.WebApp.MainButton.hide();
+          console.log('SubscriptionWidget: Скрыта главная кнопка (есть подписка)');
         }
       }
       
@@ -126,6 +141,8 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const handleInvoiceGeneration = async (userId: number) => {
     try {
       setIsSubscribing(true);
+      console.log(`SubscriptionWidget: генерация инвойса для userId=${userId}`);
+      
       // Получаем invoice_url с backend
       const response = await fetch('/generate-stars-invoice-link', {
         method: 'POST',
@@ -133,11 +150,19 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
         body: JSON.stringify({ user_id: userId })
       });
       const data = await response.json();
+      
+      console.log('SubscriptionWidget: ответ от generate-stars-invoice-link:', data);
+      
       if (data.success && data.invoice_link) {
         if (window?.Telegram?.WebApp && typeof window?.Telegram?.WebApp.openInvoice === 'function') {
+          console.log('SubscriptionWidget: открываем инвойс через WebApp');
           window.Telegram.WebApp.openInvoice(data.invoice_link, (status) => {
+            console.log(`SubscriptionWidget: инвойс закрыт со статусом: ${status}`);
+            
             if (status === 'paid') {
+              console.log('SubscriptionWidget: оплата успешна, обновляем статус...');
               fetchSubscriptionStatus();
+              
               if (window?.Telegram?.WebApp?.showPopup) {
                 window.Telegram.WebApp.showPopup({
                   title: 'Успешная оплата',
@@ -145,6 +170,13 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
                   buttons: [{ type: 'ok' }]
                 });
               }
+              
+              // После успешной оплаты делаем дополнительную паузу и еще раз проверяем статус
+              setTimeout(() => {
+                console.log('SubscriptionWidget: повторная проверка статуса после оплаты');
+                fetchSubscriptionStatus();
+              }, 2000);
+              
               setTimeout(() => {
                 if (window?.Telegram?.WebApp?.close) {
                   window.Telegram.WebApp.close();
@@ -182,6 +214,8 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
         return;
       }
       
+      console.log(`SubscriptionWidget: инициируем подписку для userId=${userId}`);
+      
       // Генерируем инвойс для оплаты
       await handleInvoiceGeneration(userId);
     } catch (error) {
@@ -202,6 +236,8 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       </div>
     );
   }
+  
+  console.log('SubscriptionWidget: рендеринг с данными статуса:', status);
   
   return (
     <div className="subscription-widget">

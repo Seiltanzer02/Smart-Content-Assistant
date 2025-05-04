@@ -309,54 +309,99 @@ async def generate_stars_invoice_link(request: Request):
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
-    data = await request.json()
-    # 1. Обработка pre_checkout_query
-    pre_checkout_query = data.get("pre_checkout_query")
-    if pre_checkout_query:
-        query_id = pre_checkout_query.get("id")
-        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-        if not bot_token:
-            return {"ok": False, "error": "TELEGRAM_BOT_TOKEN не задан"}
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"https://api.telegram.org/bot{bot_token}/answerPreCheckoutQuery",
-                json={"pre_checkout_query_id": query_id, "ok": True}
-            )
-            print("Ответ на pre_checkout_query:", resp.text)
-        return {"ok": True, "pre_checkout_query": True}
-    # 2. Обработка успешной оплаты
-    message = data.get("message", {})
-    successful_payment = message.get("successful_payment")
-    if successful_payment:
-        user_id = message.get("from", {}).get("id")
-        payment_id = successful_payment.get("telegram_payment_charge_id")
-        now = datetime.utcnow()
-        start_date = now
-        end_date = now + timedelta(days=30)
-        try:
-            # Проверяем, есть ли уже подписка
-            existing = supabase.table("user_subscription").select("*").eq("user_id", user_id).execute()
-            if existing.data and len(existing.data) > 0:
-                # Обновляем подписку
-                supabase.table("user_subscription").update({
-                    "is_active": True,
-                    "start_date": start_date.isoformat(),
-                    "end_date": end_date.isoformat(),
-                    "payment_id": payment_id
-                }).eq("user_id", user_id).execute()
-            else:
-                # Создаём новую подписку
-                supabase.table("user_subscription").insert({
-                    "user_id": user_id,
-                    "is_active": True,
-                    "start_date": start_date.isoformat(),
-                    "end_date": end_date.isoformat(),
-                    "payment_id": payment_id
-                }).execute()
-        except Exception as e:
-            print("Ошибка при активации подписки:", e)
-        return {"ok": True, "successful_payment": True}
-    return {"ok": True}
+    try:
+        data = await request.json()
+        logger.info(f"Получен вебхук от Telegram: {data}")
+        
+        # 1. Обработка pre_checkout_query
+        pre_checkout_query = data.get("pre_checkout_query")
+        if pre_checkout_query:
+            query_id = pre_checkout_query.get("id")
+            logger.info(f"Обработка pre_checkout_query с ID {query_id}")
+            
+            bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+            if not bot_token:
+                logger.error("TELEGRAM_BOT_TOKEN не задан в переменных окружения")
+                return {"ok": False, "error": "TELEGRAM_BOT_TOKEN не задан"}
+                
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"https://api.telegram.org/bot{bot_token}/answerPreCheckoutQuery",
+                    json={"pre_checkout_query_id": query_id, "ok": True}
+                )
+                logger.info(f"Ответ на pre_checkout_query: {resp.text}")
+            
+            return {"ok": True, "pre_checkout_query": True}
+            
+        # 2. Обработка успешной оплаты
+        message = data.get("message", {})
+        successful_payment = message.get("successful_payment")
+        if successful_payment:
+            user_id = message.get("from", {}).get("id")
+            payment_id = successful_payment.get("telegram_payment_charge_id")
+            
+            if not user_id:
+                logger.error("Получен webhook успешной оплаты без ID пользователя")
+                return {"ok": False, "error": "Отсутствует ID пользователя"}
+                
+            logger.info(f"Обработка successful_payment для пользователя {user_id}, payment_id: {payment_id}")
+            
+            # Временные параметры подписки
+            now = datetime.utcnow()
+            start_date = now
+            end_date = now + timedelta(days=30)
+            
+            try:
+                if not supabase:
+                    logger.error("Клиент Supabase не инициализирован при обработке успешной оплаты")
+                    return {"ok": False, "error": "База данных недоступна"}
+                
+                # Проверяем, есть ли уже подписка
+                logger.info(f"Проверяем наличие существующей подписки для пользователя {user_id}")
+                existing = supabase.table("user_subscription").select("*").eq("user_id", user_id).execute()
+                
+                if existing.data and len(existing.data) > 0:
+                    # Обновляем подписку
+                    logger.info(f"Найдена существующая подписка для пользователя {user_id}, обновляем")
+                    update_result = supabase.table("user_subscription").update({
+                        "is_active": True,
+                        "start_date": start_date.isoformat(),
+                        "end_date": end_date.isoformat(),
+                        "payment_id": payment_id
+                    }).eq("user_id", user_id).execute()
+                    
+                    logger.info(f"Результат обновления подписки: {getattr(update_result, 'data', None)}")
+                else:
+                    # Создаём новую подписку
+                    logger.info(f"Создаём новую подписку для пользователя {user_id}")
+                    insert_result = supabase.table("user_subscription").insert({
+                        "user_id": user_id,
+                        "is_active": True,
+                        "start_date": start_date.isoformat(),
+                        "end_date": end_date.isoformat(),
+                        "payment_id": payment_id
+                    }).execute()
+                    
+                    logger.info(f"Результат создания подписки: {getattr(insert_result, 'data', None)}")
+                
+                # Проверяем, что подписка успешно активирована
+                verify_result = supabase.table("user_subscription").select("*").eq("user_id", user_id).eq("is_active", True).execute()
+                if verify_result.data and len(verify_result.data) > 0:
+                    logger.info(f"Подписка успешно активирована для пользователя {user_id}")
+                else:
+                    logger.warning(f"Не удалось найти активную подписку после обновления/создания для пользователя {user_id}")
+                
+                return {"ok": True, "successful_payment": True, "user_id": user_id}
+            except Exception as e:
+                logger.error(f"Ошибка при активации подписки: {e}", exc_info=True)
+                return {"ok": False, "error": f"Ошибка при активации подписки: {str(e)}"}
+        
+        # Если тип вебхука не распознан
+        logger.warning(f"Получен нераспознанный тип вебхука: {data}")
+        return {"ok": True, "unrecognized_webhook": True}
+    except Exception as e:
+        logger.error(f"Ошибка при обработке вебхука Telegram: {e}", exc_info=True)
+        return {"ok": False, "error": str(e)}
 
 
 # --- Настройка обслуживания статических файлов ---
@@ -3445,19 +3490,25 @@ async def get_subscription_status(request: Request):
         # Преобразуем ID пользователя в число
         try:
             telegram_user_id = int(telegram_user_id)
-            logger.info(f'Запрос /subscription/status для user_id: {telegram_user_id}') # <-- Добавляем лог
+            logger.info(f'Запрос /subscription/status для user_id: {telegram_user_id}')
         except (ValueError, TypeError):
+            logger.error(f"Некорректный ID пользователя в заголовке: {telegram_user_id}")
             raise HTTPException(status_code=400, detail="Некорректный ID пользователя")
         
         if not supabase:
+            logger.error("Supabase клиент не инициализирован при запросе /subscription/status")
             raise HTTPException(status_code=500, detail="База данных недоступна")
         
         # 1. Проверяем наличие активной подписки
+        logger.info(f"Проверяем подписку для user_id={telegram_user_id}")
         subscription_result = supabase.table("user_subscription").select("*").eq("user_id", telegram_user_id).eq("is_active", True).execute()
         
         subscription_data = None
         if hasattr(subscription_result, 'data') and len(subscription_result.data) > 0:
             subscription_data = subscription_result.data[0]
+            logger.info(f"Найдена активная подписка для user_id={telegram_user_id}: {subscription_data}")
+        else:
+            logger.info(f"Активная подписка для user_id={telegram_user_id} не найдена. Результат запроса: {getattr(subscription_result, 'data', None)}")
         
         # 2. Получаем статистику использования услуг
         usage_result = supabase.table("user_usage_stats").select("*").eq("user_id", telegram_user_id).execute()
@@ -3481,11 +3532,12 @@ async def get_subscription_status(request: Request):
         if subscription_data:
             response["subscription_end_date"] = subscription_data.get("end_date")
         
+        logger.info(f"Ответ /subscription/status для user_id={telegram_user_id}: {response}")
         return response
         
     except HTTPException as e:
         raise e
     except Exception as e:
-        logger.error(f'Ошибка в /subscription/status для user_id {telegram_user_id}: {e}', exc_info=True) # <-- Добавляем лог ошибки
+        logger.error(f'Ошибка в /subscription/status для user_id {telegram_user_id}: {e}', exc_info=True)
         raise HTTPException(status_code=500, detail=f"Ошибка при получении статуса подписки: {str(e)}")
 
