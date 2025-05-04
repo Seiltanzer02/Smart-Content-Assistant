@@ -1369,9 +1369,9 @@ async def force_premium_status(user_id: str, days: int = 30, admin_key: str = Qu
                 start_date,
                 start_date
             )
-            
-            return {
-                "success": True,
+        
+        return {
+            "success": True,
                 "message": f"Премиум-статус успешно активирован для пользователя {user_id}",
                 "user_id": user_id,
                 "start_date": start_date.isoformat(),
