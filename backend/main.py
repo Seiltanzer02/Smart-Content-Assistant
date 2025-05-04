@@ -1,34 +1,38 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Request, Form, Depends, Body
-import uvicorn
+# Основные библиотеки
 import os
-from pydantic import BaseModel, Field, Json
-from fastapi import HTTPException
+import sys
+import json
 import logging
-import asyncio  # Для асинхронных операций и sleep
+import asyncio
+import httpx
+import tempfile
+import shutil
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta
+from pydantic import BaseModel, Field
+
+# FastAPI компоненты
+from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+
+# Telethon
 from telethon import TelegramClient
 from telethon.errors import ChannelInvalidError, ChannelPrivateError, UsernameNotOccupiedError
 from dotenv import load_dotenv
-import httpx # Для асинхронных HTTP запросов
-from collections import Counter
-import re # Для очистки текста
-from openai import AsyncOpenAI, OpenAIError # Добавляем OpenAI
-import json # Для парсинга потенциального JSON ответа
-from typing import List, Optional, Dict, Any, Tuple, Union
-from telethon.tl.functions.channels import GetFullChannelRequest
-from telethon.tl.types import Message
-import random # <--- Добавляем импорт random
-from supabase import create_client, Client, AClient # <--- Импортируем create_client, Client, AClient
-from postgrest.exceptions import APIError # <--- ИМПОРТИРУЕМ ИЗ POSTGREST
-from telethon.sessions import StringSession # Если используем строку сессии
+
+# Supabase
+from supabase import create_client, Client, AClient
+from postgrest.exceptions import APIError
+from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError, FloodWaitError, PhoneNumberInvalidError, AuthKeyError, ApiIdInvalidError
-import uuid # Для генерации уникальных имен файлов
-import mimetypes # Для определения типа файла
+import uuid
+import mimetypes
 from telethon.errors import RPCError
-import getpass # Для получения пароля
-from fastapi.responses import FileResponse, Response # Добавляем Response
+import getpass
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-import time # Добавляем модуль time для работы с временем
+import time
 import requests
 from bs4 import BeautifulSoup
 import telethon
@@ -37,11 +41,16 @@ from telegram_utils import get_telegram_posts, get_mock_telegram_posts
 import move_temp_files
 from datetime import datetime, timedelta
 import traceback
-# Убираем неиспользуемые импорты psycopg2
-# import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
-# from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
-import shutil # Добавляем импорт shutil
-import asyncpg # Добавляем импорт для работы с PostgreSQL
+
+# Unsplash
+from unsplash import Api as UnsplashApi
+from unsplash import Auth as UnsplashAuth
+
+# DeepSeek
+from openai import AsyncOpenAI, OpenAIError
+
+# PostgreSQL
+import asyncpg
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -324,16 +333,28 @@ async def telegram_webhook(request: Request):
         user_id = message.get('from', {}).get('id')
         text = message.get('text', '')
         
+        # Дополнительное логирование
+        logger.info(f"Обрабатываем сообщение от пользователя {user_id}: {text}")
+        
         # Если это команда /start с параметром check_premium или команда /check_premium
         if text.startswith('/start check_premium') or text == '/check_premium':
+            logger.info(f"Получена команда проверки премиума от пользователя {user_id}")
             # Проверяем премиум-статус пользователя
             db_url = os.getenv("DATABASE_URL")
             if not db_url:
                 logger.error("Отсутствует DATABASE_URL при проверке премиума")
+                # Отправляем уведомление пользователю о проблеме
+                await send_telegram_message(user_id, "Ошибка сервера: не удалось подключиться к базе данных. Пожалуйста, сообщите администратору.")
                 return {"ok": True, "error": "DB connection error"}
-                
+            
             # Создаем подключение к БД
-            conn = await asyncpg.connect(db_url)
+            try:
+                conn = await asyncpg.connect(db_url)
+            except Exception as e:
+                logger.error(f"Ошибка подключения к БД: {e}")
+                await send_telegram_message(user_id, "Ошибка подключения к базе данных. Пожалуйста, попробуйте позже.")
+                return {"ok": False, "error": str(e)}
+                
             try:
                 # Проверяем наличие активной подписки
                 query = """
@@ -345,6 +366,8 @@ async def telegram_webhook(request: Request):
                 """
                 count = await conn.fetchval(query, user_id)
                 has_premium = count > 0
+                
+                logger.info(f"Результат проверки подписки для {user_id}: count={count}, has_premium={has_premium}")
                 
                 # Получаем информацию о подписке для ответа
                 if has_premium:
@@ -362,23 +385,15 @@ async def telegram_webhook(request: Request):
                 else:
                     reply_text = "❌ У вас нет активной ПРЕМИУМ подписки.\nДля получения премиум-доступа оформите подписку в приложении."
                 
-                # Отправляем ответ пользователю
-                telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
-                if telegram_token:
-                    telegram_api_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
-                    async with httpx.AsyncClient() as client:
-                        response = await client.post(telegram_api_url, json={
-                            "chat_id": user_id,
-                            "text": reply_text,
-                            "parse_mode": "HTML"
-                        })
-                        logger.info(f"Отправлен ответ о премиум-статусе: {response.status_code} {response.text[:100]}...")
+                # Отправляем ответ пользователю с выделенной функцией
+                await send_telegram_message(user_id, reply_text)
                 
                 logger.info(f"Проверка премиум-статуса через бот для пользователя {user_id}: {has_premium}")
                 return {"ok": True, "has_premium": has_premium}
                 
             except Exception as e:
                 logger.error(f"Ошибка при проверке премиум-статуса: {e}")
+                await send_telegram_message(user_id, f"Произошла ошибка при проверке статуса подписки. Пожалуйста, попробуйте позже.")
                 return {"ok": False, "error": str(e)}
             
             finally:
@@ -391,6 +406,100 @@ async def telegram_webhook(request: Request):
         logger.error(f"Ошибка при обработке вебхука Telegram: {e}")
         return {"ok": False, "error": str(e)}
 
+# Выделим отправку сообщений в отдельную функцию для переиспользования
+async def send_telegram_message(chat_id, text, parse_mode="HTML"):
+    """Отправляет сообщение через Telegram API"""
+    telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not telegram_token:
+        logger.error("Отсутствует TELEGRAM_BOT_TOKEN при отправке сообщения")
+        return False
+        
+    telegram_api_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(telegram_api_url, json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": parse_mode
+            })
+            if response.status_code == 200:
+                logger.info(f"Сообщение успешно отправлено пользователю {chat_id}")
+                return True
+            else:
+                logger.error(f"Ошибка при отправке сообщения: {response.status_code} {response.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Исключение при отправке сообщения в Telegram: {e}")
+            return False
+
+# Добавляем прямой эндпоинт для проверки и обновления статуса подписки
+@app.get("/manual-check-premium/{user_id}")
+async def manual_check_premium(user_id: int, request: Request, force_update: bool = False):
+    """
+    Ручная проверка премиум-статуса и обновление кэша.
+    Параметр force_update=true позволяет принудительно обновить кэш для пользователя.
+    """
+    try:
+        db_url = os.getenv("DATABASE_URL")
+        if not db_url:
+            return {"success": False, "error": "DATABASE_URL не определен"}
+            
+        # Подключаемся к БД
+        conn = await asyncpg.connect(db_url)
+        try:
+            # Проверяем наличие активной подписки
+            query = """
+            SELECT COUNT(*) 
+            FROM user_subscription 
+            WHERE user_id = $1 
+              AND is_active = TRUE 
+              AND end_date > NOW()
+            """
+            count = await conn.fetchval(query, user_id)
+            has_premium = count > 0
+            
+            # Получаем детали подписки
+            subscription_details = {}
+            if has_premium:
+                details_query = """
+                SELECT 
+                    end_date,
+                    payment_id,
+                    created_at,
+                    updated_at
+                FROM user_subscription 
+                WHERE user_id = $1 
+                  AND is_active = TRUE
+                ORDER BY end_date DESC 
+                LIMIT 1
+                """
+                record = await conn.fetchrow(details_query, user_id)
+                if record:
+                    subscription_details = {
+                        "end_date": record["end_date"].strftime('%Y-%m-%d %H:%M:%S'),
+                        "payment_id": record["payment_id"],
+                        "created_at": record["created_at"].strftime('%Y-%m-%d %H:%M:%S'),
+                        "updated_at": record["updated_at"].strftime('%Y-%m-%d %H:%M:%S')
+                    }
+            
+            # Если force_update = true, принудительно обновляем статус во всех кэшах
+            if force_update and has_premium:
+                # Здесь можно добавить логику обновления кэша или других механизмов
+                # В этом примере мы просто логируем событие
+                logger.info(f"Принудительное обновление премиум-статуса для пользователя {user_id}")
+            
+            return {
+                "success": True, 
+                "user_id": user_id,
+                "has_premium": has_premium,
+                "subscription_details": subscription_details
+            }
+            
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.error(f"Ошибка при ручной проверке премиум-статуса: {e}")
+        return {"success": False, "error": str(e)}
 
 # --- Настройка обслуживания статических файлов ---
 import os
@@ -3361,4 +3470,143 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     logger.info(f"Запуск сервера на порту {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
+
+# Добавляем прямой эндпоинт для проверки и обновления статуса подписки из клиента
+@app.get("/direct_premium_check")
+async def direct_premium_check(request: Request, user_id: Optional[str] = None):
+    """
+    Прямая проверка премиум-статуса для клиента.
+    Принимает user_id в параметре запроса или берет его из заголовка x-telegram-user-id.
+    """
+    try:
+        effective_user_id = user_id
+        
+        # Если user_id не предоставлен в параметрах, проверяем заголовки
+        if not effective_user_id:
+            effective_user_id = request.headers.get("x-telegram-user-id")
+            
+        # Если все равно нет ID, пробуем получить из данных запроса
+        if not effective_user_id and hasattr(request, "state"):
+            effective_user_id = request.state.get("user_id")
+        
+        # Логируем информацию о запросе
+        logger.info(f"Прямая проверка премиум-статуса для user_id: {effective_user_id}")
+            
+        if not effective_user_id:
+            return {
+                "has_premium": False,
+                "user_id": None,
+                "error": "ID пользователя не предоставлен",
+                "message": "Не удалось определить ID пользователя"
+            }
+            
+        # Подключаемся к БД и проверяем статус подписки
+        db_url = os.getenv("DATABASE_URL")
+        if not db_url:
+            return {
+                "has_premium": False,
+                "user_id": effective_user_id,
+                "error": "DATABASE_URL не определен"
+            }
+            
+        # Подключаемся к БД
+        conn = await asyncpg.connect(db_url)
+        try:
+            # Проверяем наличие активной подписки
+            query = """
+            SELECT COUNT(*) 
+            FROM user_subscription 
+            WHERE user_id = $1 
+              AND is_active = TRUE 
+              AND end_date > NOW()
+            """
+            count = await conn.fetchval(query, effective_user_id)
+            has_premium = count > 0
+            
+            logger.info(f"Прямая проверка премиума для {effective_user_id}: count={count}, has_premium={has_premium}")
+            
+            # Получаем детали подписки
+            subscription_details = {}
+            if has_premium:
+                details_query = """
+                SELECT 
+                    end_date,
+                    created_at,
+                    updated_at
+                FROM user_subscription 
+                WHERE user_id = $1 
+                  AND is_active = TRUE
+                ORDER BY end_date DESC 
+                LIMIT 1
+                """
+                record = await conn.fetchrow(details_query, effective_user_id)
+                if record:
+                    subscription_end_date = record["end_date"].strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    # Получаем лимиты использования
+                    analysis_count = 9999  # Для премиум - неограниченно
+                    post_generation_count = 9999  # Для премиум - неограниченно
+                    
+                    return {
+                        "has_premium": True,
+                        "user_id": effective_user_id,
+                        "error": None,
+                        "subscription_end_date": subscription_end_date,
+                        "analysis_count": analysis_count,
+                        "post_generation_count": post_generation_count
+                    }
+            
+            # Если подписки нет, или не получили детали
+            return {
+                "has_premium": False,
+                "user_id": effective_user_id,
+                "error": None,
+                "analysis_count": 3,  # Значения по умолчанию для бесплатного режима
+                "post_generation_count": 1  # Значения по умолчанию для бесплатного режима
+            }
+                
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.error(f"Ошибка при прямой проверке премиум-статуса: {e}")
+        return {
+            "has_premium": False,
+            "user_id": effective_user_id if 'effective_user_id' in locals() else None,
+            "error": str(e)
+        }
+
+# Добавляем эндпоинт для API v2 для проверки премиум-статуса
+@app.get("/api-v2/premium/check")
+async def premium_check_v2(request: Request, user_id: Optional[str] = None):
+    """Альтернативный эндпоинт для проверки премиум-статуса (API v2)"""
+    return await direct_premium_check(request, user_id)
+
+# Добавляем эндпоинт для отправки тестового сообщения через бота
+@app.get("/test-bot-message/{user_id}")
+async def test_bot_message(user_id: int, request: Request, message: str = "Тестовое сообщение от бота"):
+    """
+    Отправляет тестовое сообщение пользователю для проверки работы бота.
+    """
+    try:
+        result = await send_telegram_message(
+            user_id, 
+            f"<b>Тест системы уведомлений</b>\n\n{message}\n\nВремя отправки: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        return {
+            "success": result,
+            "user_id": user_id,
+            "message": message,
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+    except Exception as e:
+        logger.error(f"Ошибка при отправке тестового сообщения: {e}")
+        return {"success": False, "error": str(e)}
+
+# Добавляем raw API эндпоинт для обхода SPA роутера
+@app.get("/raw-api-data/xyz123/premium-data/{user_id}")
+async def raw_premium_data(user_id: str, request: Request):
+    """
+    Специальный нестандартный URL для получения премиум-статуса в обход SPA роутера.
+    """
+    return await direct_premium_check(request, user_id)
 
