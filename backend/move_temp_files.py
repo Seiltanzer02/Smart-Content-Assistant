@@ -115,60 +115,50 @@ def add_missing_columns() -> bool:
             logger.error(f"Ошибка при выполнении команды: {str(e)}")
             return False
     
-    # Добавление столбца author_url в таблицу saved_images
-    logger.info("Добавление столбца author_url в таблицу saved_images")
-    try:
-        # Используем упрощенный синтаксис SQL без ключевого слова TABLE
-        add_column_cmd = "ALTER TABLE saved_images ADD COLUMN IF NOT EXISTS author_url TEXT"
-        create_index_cmd = "CREATE INDEX IF NOT EXISTS idx_saved_images_author_url ON saved_images(author_url)"
-        
-        if execute_sql_command(add_column_cmd) and execute_sql_command(create_index_cmd):
-            logger.info("Столбец author_url успешно добавлен в таблицу saved_images")
-        else:
-            logger.warning("Возникли проблемы при добавлении столбца author_url")
-    except Exception as e:
-        logger.error(f"Ошибка при добавлении столбца author_url: {str(e)}")
+    # Список SQL-команд для выполнения
+    commands = [
+        # Добавление author_url в таблицу saved_images
+        {
+            "name": "Добавление столбца author_url в таблицу saved_images",
+            "cmd": "ALTER TABLE saved_images ADD COLUMN IF NOT EXISTS author_url TEXT"
+        },
+        # Индекс для author_url
+        {
+            "name": "Создание индекса для author_url в таблице saved_images",
+            "cmd": "CREATE INDEX IF NOT EXISTS idx_saved_images_author_url ON saved_images(author_url)"
+        },
+        # Добавление preview_url в таблицу saved_images
+        {
+            "name": "Добавление столбца preview_url в таблицу saved_images",
+            "cmd": "ALTER TABLE saved_images ADD COLUMN IF NOT EXISTS preview_url TEXT"
+        },
+        # Добавление updated_at в таблицу channel_analysis
+        {
+            "name": "Добавление столбца updated_at в таблицу channel_analysis",
+            "cmd": "ALTER TABLE channel_analysis ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()"
+        },
+        # Добавление analyzed_posts_count в таблицу channel_analysis
+        {
+            "name": "Добавление столбца analyzed_posts_count в таблицу channel_analysis",
+            "cmd": "ALTER TABLE channel_analysis ADD COLUMN IF NOT EXISTS analyzed_posts_count INTEGER DEFAULT 0"
+        },
+        # Индекс для analyzed_posts_count
+        {
+            "name": "Создание индекса для analyzed_posts_count в таблице channel_analysis",
+            "cmd": "CREATE INDEX IF NOT EXISTS idx_channel_analysis_analyzed_posts_count ON channel_analysis(analyzed_posts_count)"
+        }
+    ]
     
-    # Добавление столбца preview_url в таблицу saved_images
-    logger.info("Добавление столбца preview_url в таблицу saved_images")
-    try:
-        add_column_cmd = "ALTER TABLE saved_images ADD COLUMN IF NOT EXISTS preview_url TEXT"
-        
-        if execute_sql_command(add_column_cmd):
-            logger.info("Столбец preview_url успешно добавлен в таблицу saved_images")
-        else:
-            logger.warning("Возникли проблемы при добавлении столбца preview_url")
-    except Exception as e:
-        logger.error(f"Ошибка при добавлении столбца preview_url: {str(e)}")
-    
-    # Добавление столбца updated_at в таблицу channel_analysis
-    logger.info("Добавление столбца updated_at в таблицу channel_analysis")
-    try:
-        add_column_cmd = "ALTER TABLE channel_analysis ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()"
-        
-        if execute_sql_command(add_column_cmd):
-            logger.info("Столбец updated_at успешно добавлен в таблицу channel_analysis")
-        else:
-            logger.warning("Возникли проблемы при добавлении столбца updated_at")
-    except Exception as e:
-        logger.error(f"Ошибка при добавлении столбца updated_at: {str(e)}")
-    
-    # Добавление столбца analyzed_posts_count в таблицу channel_analysis
-    logger.info("Добавление столбца analyzed_posts_count в таблицу channel_analysis")
-    try:
-        # Используем упрощенный синтаксис SQL без ключевого слова TABLE
-        add_column_cmd = "ALTER TABLE channel_analysis ADD COLUMN IF NOT EXISTS analyzed_posts_count INTEGER DEFAULT 0"
-        create_index_cmd = "CREATE INDEX IF NOT EXISTS idx_channel_analysis_analyzed_posts_count ON channel_analysis(analyzed_posts_count)"
-        
-        if execute_sql_command(add_column_cmd) and execute_sql_command(create_index_cmd):
-            logger.info("Столбец analyzed_posts_count успешно добавлен в таблицу channel_analysis")
-        else:
-            logger.warning("Возникли проблемы при добавлении столбца analyzed_posts_count")
-    except Exception as e:
-        logger.error(f"Ошибка при добавлении столбца analyzed_posts_count: {str(e)}")
+    # Выполнение всех команд
+    success = True
+    for command in commands:
+        logger.info(command["name"])
+        if not execute_sql_command(command["cmd"]):
+            logger.warning(f"Не удалось выполнить команду: {command['name']}")
+            success = False
     
     logger.info("Столбцы успешно добавлены или уже существуют")
-    return True
+    return success
 
 def main():
     """Главная функция скрипта"""
