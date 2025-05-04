@@ -317,6 +317,86 @@ if os.path.exists(static_files_path) and os.path.isdir(static_files_path):
             logger.error(f"Файл index.html не найден в {static_files_path} для пути {rest_of_path}")
             raise HTTPException(status_code=404, detail="Index file not found")
 
+    # Принудительная проверка премиум
+    @app.get("/force-premium-status/{user_id}", include_in_schema=True)
+    async def force_premium_status(user_id: str):
+        """
+        Прямая проверка премиум-статуса по ID пользователя без использования ORM.
+        Этот метод имеет максимальный приоритет перед SPA-обработчиком.
+        """
+        try:
+            # Преобразование user_id в число
+            try:
+                user_id_int = int(user_id)
+            except ValueError:
+                return JSONResponse(
+                    content={"has_premium": False, "error": "Invalid user_id format"},
+                    headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+                )
+            
+            # Получение данных из БД
+            db_url = os.getenv("DATABASE_URL")
+            if not db_url:
+                logger.error("DATABASE_URL не указан в переменных окружения")
+                return JSONResponse(
+                    content={"has_premium": False, "error": "DB connection error"},
+                    headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+                )
+            
+            # Прямой запрос к базе данных
+            conn = await asyncpg.connect(db_url)
+            try:
+                # Проверяем наличие активной подписки
+                query = """
+                SELECT COUNT(*) 
+                FROM subscriptions 
+                WHERE user_id = $1 
+                  AND is_active = TRUE 
+                  AND end_date > NOW()
+                """
+                count = await conn.fetchval(query, user_id_int)
+                has_premium = count > 0
+                
+                # Получаем информацию о текущей/последней подписке
+                if has_premium:
+                    sub_query = """
+                    SELECT end_date 
+                    FROM subscriptions 
+                    WHERE user_id = $1 
+                      AND is_active = TRUE
+                      AND end_date > NOW()
+                    ORDER BY end_date DESC 
+                    LIMIT 1
+                    """
+                    end_date = await conn.fetchval(sub_query, user_id_int)
+                    end_date_str = end_date.isoformat() if end_date else None
+                else:
+                    end_date_str = None
+                    
+                result = {
+                    "has_premium": has_premium,
+                    "user_id": user_id,
+                    "error": None,
+                    "subscription_end_date": end_date_str,
+                    "analysis_count": 9999 if has_premium else 1,
+                    "post_generation_count": 9999 if has_premium else 1
+                }
+                
+                logger.info(f"Проверка премиума для пользователя {user_id}: {result}")
+                return JSONResponse(
+                    content=result,
+                    headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+                )
+                
+            finally:
+                await conn.close()
+        except Exception as e:
+            logger.error(f"Error in force_premium_status: {e}")
+            return JSONResponse(
+                content={"has_premium": False, "error": str(e)},
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+            )
+
 else:
     logger.warning(f"Папка статических файлов SPA не найдена: {static_files_path}")
     logger.warning("Фронтенд не будет обслуживаться. Работают только API эндпоинты.")
