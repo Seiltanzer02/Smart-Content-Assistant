@@ -1097,68 +1097,69 @@ def clean_text_formatting(text):
 @app.post("/generate-plan", response_model=PlanGenerationResponse)
 async def generate_content_plan(request: Request, req: PlanGenerationRequest):
     """Генерация плана контента на основе тем и стилей."""
-    # Получение telegram_user_id из заголовков
-    telegram_user_id = request.headers.get("X-Telegram-User-Id")
-    if not telegram_user_id:
-        logger.warning("Запрос генерации плана без идентификации пользователя Telegram")
-        raise HTTPException(status_code=401, detail="Для генерации плана необходимо авторизоваться через Telegram")
-    
-    themes = req.themes
-    styles = req.styles
-    period_days = req.period_days
-    channel_name = req.channel_name  # Обязательное поле
-    
-    # --- ДОБАВЛЕНО: Проверка подписки и лимитов ---
     try:
-        # Проверяем наличие подписки
-        has_subscription = False
-        if supabase:
-            subscription_result = supabase.table("user_subscription").select("*").eq("user_id", int(telegram_user_id)).eq("is_active", True).execute()
-            has_subscription = hasattr(subscription_result, 'data') and len(subscription_result.data) > 0
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            logger.warning("Запрос генерации плана без идентификации пользователя Telegram")
+            raise HTTPException(status_code=401, detail="Для генерации плана необходимо авторизоваться через Telegram")
         
-        # Если нет подписки, проверяем лимиты
-        if not has_subscription:
-            # Ограничиваем период для бесплатных пользователей
-            if period_days > 7:
-                period_days = 7
-                logger.info(f"Период генерации плана ограничен до 7 дней для бесплатного пользователя {telegram_user_id}")
-    except Exception as e:
-        # Логируем ошибку, но продолжаем выполнение
-        logger.error(f"Ошибка при проверке подписки для генерации плана: {e}")
-    # --- КОНЕЦ ДОБАВЛЕНИЯ ---
-    
-    # Подготовка списка тем для запроса
-    themes_str = "\n".join([f"- {theme}" for theme in themes])
-    styles_str = "\n".join([f"- {style}" for style in styles])
-    
-    if not themes or not styles:
-        logger.warning(f"Запрос с пустыми темами или стилями: themes={themes}, styles={styles}")
-        return PlanGenerationResponse(
-            message="Необходимо указать темы и стили для генерации плана",
-            plan=[]
-        )
+        themes = req.themes
+        styles = req.styles
+        period_days = req.period_days
+        channel_name = req.channel_name  # Обязательное поле
         
-    # Проверяем наличие API ключа
-    if not OPENROUTER_API_KEY:
-        logger.warning("Генерация плана невозможна: отсутствует OPENROUTER_API_KEY")
-        # Генерируем простой план без использования API
-        plan_items = []
-        for day in range(1, period_days + 1):
-            random_theme = random.choice(themes)
-            random_style = random.choice(styles)
-            plan_items.append(PlanItem(
-                day=day,
-                topic_idea=f"Пост о {random_theme}",
-                format_style=random_style
-            ))
-        logger.info(f"Создан базовый план из {len(plan_items)} идей (без использования API)")
-        return PlanGenerationResponse(
-            plan=plan_items,
-            message="План сгенерирован с базовыми идеями (API недоступен)"
-        )
+        # --- ДОБАВЛЕНО: Проверка подписки и лимитов ---
+        try:
+            # Проверяем наличие подписки
+            has_subscription = False
+            if supabase:
+                subscription_result = supabase.table("user_subscription").select("*").eq("user_id", int(telegram_user_id)).eq("is_active", True).execute()
+                has_subscription = hasattr(subscription_result, 'data') and len(subscription_result.data) > 0
+            
+            # Если нет подписки, проверяем лимиты
+            if not has_subscription:
+                # Ограничиваем период для бесплатных пользователей
+                if period_days > 7:
+                    period_days = 7
+                    logger.info(f"Период генерации плана ограничен до 7 дней для бесплатного пользователя {telegram_user_id}")
+        except Exception as e:
+            # Логируем ошибку, но продолжаем выполнение
+            logger.error(f"Ошибка при проверке подписки для генерации плана: {e}")
+        # --- КОНЕЦ ДОБАВЛЕНИЯ ---
         
-    # --- ИЗМЕНЕНИЕ НАЧАЛО: Уточненные промпты --> ЕЩЕ БОЛЕЕ СТРОГИЙ ПРОМПТ ---
-    system_prompt = f"""Ты - опытный контент-маркетолог. Твоя задача - сгенерировать план публикаций для Telegram-канала на {period_days} дней.
+        # Подготовка списка тем для запроса
+        themes_str = "\n".join([f"- {theme}" for theme in themes])
+        styles_str = "\n".join([f"- {style}" for style in styles])
+        
+        if not themes or not styles:
+            logger.warning(f"Запрос с пустыми темами или стилями: themes={themes}, styles={styles}")
+            return PlanGenerationResponse(
+                message="Необходимо указать темы и стили для генерации плана",
+                plan=[]
+            )
+            
+        # Проверяем наличие API ключа
+        if not OPENROUTER_API_KEY:
+            logger.warning("Генерация плана невозможна: отсутствует OPENROUTER_API_KEY")
+            # Генерируем простой план без использования API
+            plan_items = []
+            for day in range(1, period_days + 1):
+                random_theme = random.choice(themes)
+                random_style = random.choice(styles)
+                plan_items.append(PlanItem(
+                    day=day,
+                    topic_idea=f"Пост о {random_theme}",
+                    format_style=random_style
+                ))
+            logger.info(f"Создан базовый план из {len(plan_items)} идей (без использования API)")
+            return PlanGenerationResponse(
+                plan=plan_items,
+                message="План сгенерирован с базовыми идеями (API недоступен)"
+            )
+            
+        # --- ИЗМЕНЕНИЕ НАЧАЛО: Уточненные промпты --> ЕЩЕ БОЛЕЕ СТРОГИЙ ПРОМПТ ---
+        system_prompt = f"""Ты - опытный контент-маркетолог. Твоя задача - сгенерировать план публикаций для Telegram-канала на {period_days} дней.
 Используй предоставленные темы и стили.
 
 Темы: {', '.join(themes)}
@@ -1178,7 +1179,7 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
 
 Формат КАЖДОЙ строки: День <номер_дня>:: <Идея поста>:: <Стиль из списка>"""
 
-    user_prompt = f"""Сгенерируй план контента для Telegram-канала \"{channel_name}\" на {period_days} дней.
+        user_prompt = f"""Сгенерируй план контента для Telegram-канала \"{channel_name}\" на {period_days} дней.
 Темы: {', '.join(themes)}
 Стили (используй ТОЛЬКО их): {', '.join(styles)}
 
@@ -1186,142 +1187,142 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
 День <номер_дня>:: <Идея поста>:: <Стиль из списка>
 
 Не включай ничего, кроме этих строк."""
-    # --- ИЗМЕНЕНИЕ КОНЕЦ ---
+        # --- ИЗМЕНЕНИЕ КОНЕЦ ---
 
-    # Настройка клиента OpenAI для использования OpenRouter
-    client = AsyncOpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=OPENROUTER_API_KEY
-    )
-    
-    # Запрос к API
-    logger.info(f"Отправка запроса на генерацию плана контента для канала @{channel_name} с уточненным промптом")
-    response = await client.chat.completions.create(
-        model="deepseek/deepseek-chat-v3-0324:free", # <--- ИЗМЕНЕНО НА НОВУЮ БЕСПЛАТНУЮ МОДЕЛЬ
-        messages=[
-            # {"role": "system", "content": system_prompt}, # Системный промпт может конфликтовать с некоторыми моделями, тестируем без него или с ним
-            {"role": "user", "content": user_prompt} # Помещаем все инструкции в user_prompt
-        ],
-        temperature=0.7, # Немного снижаем температуру для строгости формата
-        max_tokens=150 * period_days, # Примерно 150 токенов на идею
-        timeout=120,
-        extra_headers={
-            "HTTP-Referer": "https://content-manager.onrender.com",
-            "X-Title": "Smart Content Assistant"
-        }
-    )
-    
-    # === НАЧАЛО ИЗМЕНЕНИЯ: Проверка ответа API ===
-    plan_text = ""
-    if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-        plan_text = response.choices[0].message.content.strip()
-        logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
-    else:
-        # Логируем полный ответ, если структура неожиданная
-        logger.error(f"Некорректный или пустой ответ от OpenRouter API при генерации плана. Status: {response.response.status_code if hasattr(response, 'response') else 'N/A'}")
-        try:
-            # Попробуем залогировать тело ответа, если оно есть
-            raw_response_content = await response.response.text() if hasattr(response, 'response') and hasattr(response.response, 'text') else str(response)
-            logger.error(f"Полный ответ API (или его представление): {raw_response_content}")
-        except Exception as log_err:
-            logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
-            
-        # Возвращаем пустой план с сообщением об ошибке
-        return PlanGenerationResponse(
-            plan=[],
-            message="Ошибка: API не вернул ожидаемый результат для генерации плана."
+        # Настройка клиента OpenAI для использования OpenRouter
+        client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY
         )
-    # === КОНЕЦ ИЗМЕНЕНИЯ ===
-    
-    plan_items = []
-    lines = plan_text.split('\n')
-
-    # --- ИЗМЕНЕНИЕ НАЧАЛО: Улучшенный парсинг с новым разделителем ---
-    expected_style_set = set(s.lower() for s in styles) # Для быстрой проверки
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-            
-        parts = line.split('::')
-        if len(parts) == 3:
-            # === ИСПРАВЛЕНО: Выровнен отступ для try ===
-            try:
-                day_part = parts[0].lower().replace('день', '').strip()
-                day = int(day_part)
-                topic_idea = clean_text_formatting(parts[1].strip())
-                format_style = clean_text_formatting(parts[2].strip())
-
-                # Проверяем, входит ли стиль в запрошенный список (без учета регистра)
-                if format_style.lower() not in expected_style_set:
-                    logger.warning(f"Стиль '{format_style}' из ответа LLM не найден в запрошенных стилях. Выбираем случайный.")
-                    format_style = random.choice(styles) if styles else "Без указания стиля"
-
-                if topic_idea: # Пропускаем, если тема пустая
-                    plan_items.append(PlanItem(
-                        day=day,
-                        topic_idea=topic_idea,
-                        format_style=format_style
-                    ))
-                else:
-                    logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
-            # === ИСПРАВЛЕНО: Выровнен отступ для except ===
-            except ValueError:
-                logger.warning(f"Не удалось извлечь номер дня из строки плана: {line}")
-            except Exception as parse_err:
-                logger.warning(f"Ошибка парсинга строки плана '{line}': {parse_err}")
-        # === ИСПРАВЛЕНО: Выровнен отступ для else ===
+        
+        # Запрос к API
+        logger.info(f"Отправка запроса на генерацию плана контента для канала @{channel_name} с уточненным промптом")
+        response = await client.chat.completions.create(
+            model="deepseek/deepseek-chat-v3-0324:free", # <--- ИЗМЕНЕНО НА НОВУЮ БЕСПЛАТНУЮ МОДЕЛЬ
+            messages=[
+                # {"role": "system", "content": system_prompt}, # Системный промпт может конфликтовать с некоторыми моделями, тестируем без него или с ним
+                {"role": "user", "content": user_prompt} # Помещаем все инструкции в user_prompt
+            ],
+            temperature=0.7, # Немного снижаем температуру для строгости формата
+            max_tokens=150 * period_days, # Примерно 150 токенов на идею
+            timeout=120,
+            extra_headers={
+                "HTTP-Referer": "https://content-manager.onrender.com",
+                "X-Title": "Smart Content Assistant"
+            }
+        )
+        
+        # === НАЧАЛО ИЗМЕНЕНИЯ: Проверка ответа API ===
+        plan_text = ""
+        if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+            plan_text = response.choices[0].message.content.strip()
+            logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
         else:
-            logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
-    # --- ИЗМЕНЕНИЕ КОНЕЦ ---
+            # Логируем полный ответ, если структура неожиданная
+            logger.error(f"Некорректный или пустой ответ от OpenRouter API при генерации плана. Status: {response.response.status_code if hasattr(response, 'response') else 'N/A'}")
+            try:
+                # Попробуем залогировать тело ответа, если оно есть
+                raw_response_content = await response.response.text() if hasattr(response, 'response') and hasattr(response.response, 'text') else str(response)
+                logger.error(f"Полный ответ API (или его представление): {raw_response_content}")
+            except Exception as log_err:
+                logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
+                
+            # Возвращаем пустой план с сообщением об ошибке
+            return PlanGenerationResponse(
+                plan=[],
+                message="Ошибка: API не вернул ожидаемый результат для генерации плана."
+            )
+        # === КОНЕЦ ИЗМЕНЕНИЯ ===
+        
+        plan_items = []
+        lines = plan_text.split('\n')
 
-    # ... (остальная логика обработки plan_items: сортировка, дополнение, проверка пустого плана) ...
-    # Если и сейчас нет идей, генерируем вручную
-    if not plan_items:
-        logger.warning("Не удалось извлечь идеи из ответа LLM или все строки были некорректными, генерируем базовый план.")
-        for day in range(1, period_days + 1):
-            random_theme = random.choice(themes) if themes else "Общая тема"
-            random_style = random.choice(styles) if styles else "Общий стиль"
-            # === ИЗМЕНЕНИЕ: Убираем 'Пост о' ===
-            fallback_topic = f"{random_theme} ({random_style})"
-            plan_items.append(PlanItem(
-                day=day,
-                topic_idea=fallback_topic, # <--- Используем новую строку
-                format_style=random_style
-            ))
-    
-    # Сортируем по дням
-    plan_items.sort(key=lambda x: x.day)
-    
-    # Обрезаем до запрошенного количества дней (на случай, если LLM выдал больше)
-    plan_items = plan_items[:period_days]
-    
-    # Если план получился короче запрошенного периода, дополняем (возможно, из-за ошибок парсинга)
-    if len(plan_items) < period_days:
-        existing_days = {item.day for item in plan_items}
-        needed_days = period_days - len(plan_items)
-        logger.warning(f"План короче запрошенного ({len(plan_items)}/{period_days}), дополняем {needed_days} идеями.")
-        start_day = max(existing_days) + 1 if existing_days else 1
-        for i in range(needed_days):
-            current_day = start_day + i
-            if current_day not in existing_days:
-                random_theme = random.choice(themes) if themes else "Дополнительная тема"
-                random_style = random.choice(styles) if styles else "Дополнительный стиль"
-                # === ИЗМЕНЕНИЕ: Убираем 'Пост о' и '(Дополнено)' ===
+        # --- ИЗМЕНЕНИЕ НАЧАЛО: Улучшенный парсинг с новым разделителем ---
+        expected_style_set = set(s.lower() for s in styles) # Для быстрой проверки
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            parts = line.split('::')
+            if len(parts) == 3:
+                # === ИСПРАВЛЕНО: Выровнен отступ для try ===
+                try:
+                    day_part = parts[0].lower().replace('день', '').strip()
+                    day = int(day_part)
+                    topic_idea = clean_text_formatting(parts[1].strip())
+                    format_style = clean_text_formatting(parts[2].strip())
+
+                    # Проверяем, входит ли стиль в запрошенный список (без учета регистра)
+                    if format_style.lower() not in expected_style_set:
+                        logger.warning(f"Стиль '{format_style}' из ответа LLM не найден в запрошенных стилях. Выбираем случайный.")
+                        format_style = random.choice(styles) if styles else "Без указания стиля"
+
+                    if topic_idea: # Пропускаем, если тема пустая
+                        plan_items.append(PlanItem(
+                            day=day,
+                            topic_idea=topic_idea,
+                            format_style=format_style
+                        ))
+                    else:
+                        logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
+                # === ИСПРАВЛЕНО: Выровнен отступ для except ===
+                except ValueError:
+                    logger.warning(f"Не удалось извлечь номер дня из строки плана: {line}")
+                except Exception as parse_err:
+                    logger.warning(f"Ошибка парсинга строки плана '{line}': {parse_err}")
+            # === ИСПРАВЛЕНО: Выровнен отступ для else ===
+            else:
+                logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
+        # --- ИЗМЕНЕНИЕ КОНЕЦ ---
+
+        # ... (остальная логика обработки plan_items: сортировка, дополнение, проверка пустого плана) ...
+        # Если и сейчас нет идей, генерируем вручную
+        if not plan_items:
+            logger.warning("Не удалось извлечь идеи из ответа LLM или все строки были некорректными, генерируем базовый план.")
+            for day in range(1, period_days + 1):
+                random_theme = random.choice(themes) if themes else "Общая тема"
+                random_style = random.choice(styles) if styles else "Общий стиль"
+                # === ИЗМЕНЕНИЕ: Убираем 'Пост о' ===
                 fallback_topic = f"{random_theme} ({random_style})"
                 plan_items.append(PlanItem(
-                    day=current_day,
+                    day=day,
                     topic_idea=fallback_topic, # <--- Используем новую строку
                     format_style=random_style
                 ))
-    
-        # Сортируем по дням еще раз после возможного дополнения
+        
+        # Сортируем по дням
         plan_items.sort(key=lambda x: x.day)
+        
+        # Обрезаем до запрошенного количества дней (на случай, если LLM выдал больше)
+        plan_items = plan_items[:period_days]
+        
+        # Если план получился короче запрошенного периода, дополняем (возможно, из-за ошибок парсинга)
+        if len(plan_items) < period_days:
+            existing_days = {item.day for item in plan_items}
+            needed_days = period_days - len(plan_items)
+            logger.warning(f"План короче запрошенного ({len(plan_items)}/{period_days}), дополняем {needed_days} идеями.")
+            start_day = max(existing_days) + 1 if existing_days else 1
+            for i in range(needed_days):
+                current_day = start_day + i
+                if current_day not in existing_days:
+                    random_theme = random.choice(themes) if themes else "Дополнительная тема"
+                    random_style = random.choice(styles) if styles else "Дополнительный стиль"
+                    # === ИЗМЕНЕНИЕ: Убираем 'Пост о' и '(Дополнено)' ===
+                    fallback_topic = f"{random_theme} ({random_style})"
+                    plan_items.append(PlanItem(
+                        day=current_day,
+                        topic_idea=fallback_topic, # <--- Используем новую строку
+                        format_style=random_style
+                    ))
+        
+            # Сортируем по дням еще раз после возможного дополнения
+            plan_items.sort(key=lambda x: x.day)
+        
+        logger.info(f"Сгенерирован и обработан план из {len(plan_items)} идей для канала @{channel_name}")
+        return PlanGenerationResponse(plan=plan_items)
     
-    logger.info(f"Сгенерирован и обработан план из {len(plan_items)} идей для канала @{channel_name}")
-    return PlanGenerationResponse(plan=plan_items)
-                
     except Exception as e:
         logger.error(f"Ошибка при генерации плана: {e}\\n{traceback.format_exc()}") # Добавляем traceback
         return PlanGenerationResponse(
