@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from dateutil.relativedelta import relativedelta
 
@@ -78,6 +78,14 @@ class SubscriptionStatusResponse(BaseModel):
     post_generation_count: int
     subscription_end_date: Optional[str] = None
 
+class DirectPremiumStatusResponse(BaseModel):
+    has_premium: bool
+    user_id: str
+    error: Optional[str] = None
+    subscription_end_date: Optional[str] = None
+    analysis_count: Optional[int] = None
+    post_generation_count: Optional[int] = None
+
 async def get_subscription_service():
     """Создает экземпляр SubscriptionService с подключением к базе данных"""
     try:
@@ -92,8 +100,178 @@ async def get_subscription_service():
         logger.error(f"Ошибка при создании SubscriptionService: {e}")
         raise
 
+# Middleware для корректной обработки API-запросов
+@app.middleware("http")
+async def api_priority_middleware(request: Request, call_next):
+    """Middleware для обеспечения приоритета API-маршрутов над SPA-маршрутами"""
+    path = request.url.path
+    
+    # Приоритетные API пути (нужно обновить при добавлении новых)
+    api_paths = [
+        "/api/",
+        "/subscription/",
+        "/subscription/status",
+        "/direct_premium_check",
+        "/force-premium-status/",
+        "/api-v2/subscription/status",
+        "/api-v2/premium/check",
+    ]
+    
+    # Проверяем, является ли путь API-запросом
+    is_api_request = any(path.startswith(prefix) for prefix in api_paths)
+    
+    # Добавляем выявление API-запросов по заголовкам для всех путей
+    headers = request.headers
+    accept_header = headers.get("accept", "")
+    is_json_request = "application/json" in accept_header
+    
+    # Если JSON запрос или путь из API-списка, добавляем заголовок для внутренней маршрутизации
+    if is_api_request or is_json_request:
+        logger.info(f"Приоритетный API запрос: {path} (Accept: {accept_header})")
+        request.state.is_api_request = True
+    else:
+        request.state.is_api_request = False
+        
+    # Выполняем запрос
+    response = await call_next(request)
+    
+    # Добавляем заголовки для предотвращения кэширования для всех API ответов
+    if is_api_request or is_json_request:
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        
+    return response
+
 # ===========================================
-# === ВСЕ ОПРЕДЕЛЕНИЯ API МАРШРУТОВ ЗДЕСЬ ===
+# === НОВЫЕ API МАРШРУТЫ ДЛЯ ПОДПИСОК ===
+# ===========================================
+
+@app.get("/api-v2/subscription/status", response_model=SubscriptionStatusResponse)
+async def get_subscription_status_v2(user_id: str):
+    """
+    Новый API-эндпоинт для получения статуса подписки
+    Использует GET-параметр user_id для максимальной совместимости
+    """
+    try:
+        if not user_id:
+            logger.error("get_subscription_status_v2: user_id не предоставлен")
+            return JSONResponse(
+                status_code=400,
+                content={"error": "user_id is required"},
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+            )
+        
+        # Получение сервиса подписок
+        subscription_service = await get_subscription_service()
+        
+        # Запрос на получение данных подписки
+        user_id_int = int(user_id)
+        subscription_data = await subscription_service.get_subscription(user_id_int)
+        
+        # Логирование успешного запроса
+        logger.info(f"[API-V2] Получен статус подписки для user_id={user_id}: {subscription_data}")
+        
+        return JSONResponse(
+            content=dict(subscription_data),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+        
+    except ValueError as ve:
+        logger.error(f"Ошибка преобразования user_id: {ve}")
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Invalid user_id format: {str(ve)}"},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при получении статуса подписки: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error fetching subscription status: {str(e)}"},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+
+@app.get("/api-v2/premium/check", response_model=DirectPremiumStatusResponse)
+async def check_premium_v2(user_id: str):
+    """
+    Новый API-эндпоинт для проверки премиум-статуса
+    Возвращает только has_premium и минимум информации
+    """
+    try:
+        if not user_id:
+            logger.error("check_premium_v2: user_id не предоставлен")
+            return JSONResponse(
+                status_code=400,
+                content={"has_premium": False, "error": "user_id is required"},
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+            )
+        
+        # Получение данных из БД
+        db_url = os.getenv("DATABASE_URL")
+        if not db_url:
+            return JSONResponse(
+                content={"has_premium": False, "error": "DB connection error", "user_id": user_id},
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+            )
+                
+        # Прямой запрос к базе данных
+        user_id_int = int(user_id)
+        conn = await asyncpg.connect(db_url)
+        try:
+            # Проверяем наличие активной подписки
+            query = """
+            SELECT COUNT(*) 
+            FROM subscriptions 
+            WHERE user_id = $1 
+              AND is_active = TRUE 
+              AND end_date > NOW()
+            """
+            count = await conn.fetchval(query, user_id_int)
+            has_premium = count > 0
+            
+            # Получаем информацию о текущей/последней подписке
+            if has_premium:
+                sub_query = """
+                SELECT end_date 
+                FROM subscriptions 
+                WHERE user_id = $1 
+                  AND is_active = TRUE
+                ORDER BY end_date DESC 
+                LIMIT 1
+                """
+                end_date = await conn.fetchval(sub_query, user_id_int)
+                end_date_str = end_date.isoformat() if end_date else None
+            else:
+                end_date_str = None
+                
+            result = {
+                "has_premium": has_premium,
+                "user_id": user_id,
+                "error": None,
+                "subscription_end_date": end_date_str,
+                "analysis_count": 9999 if has_premium else FREE_ANALYSIS_LIMIT,
+                "post_generation_count": 9999 if has_premium else FREE_POST_LIMIT
+            }
+            
+            logger.info(f"[API-V2] Проверка премиума для пользователя {user_id}: {has_premium}")
+            return JSONResponse(
+                content=result,
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+            )
+            
+        finally:
+            await conn.close()
+            
+    except Exception as e:
+        logger.error(f"Ошибка в check_premium_v2: {e}")
+        return JSONResponse(
+            content={"has_premium": False, "error": str(e), "user_id": user_id},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+
+# ===========================================
+# === СУЩЕСТВУЮЩИЕ API МАРШРУТЫ === 
 # ===========================================
 
 @app.get("/subscription/status", response_model=SubscriptionStatusResponse)
@@ -112,30 +290,41 @@ async def get_subscription_status(request: Request, user_id: Optional[str] = Non
         # Проверка наличия user_id
         if not user_id:
             logger.error("get_subscription_status: user_id не предоставлен ни в параметрах, ни в заголовках")
-            raise HTTPException(status_code=400, detail="user_id is required")
+            return JSONResponse(
+                status_code=400,
+                content={"error": "user_id is required"},
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+            )
             
         # Получение сервиса подписок
         subscription_service = await get_subscription_service()
         
         # Запрос на получение данных подписки
-        subscription_data = await subscription_service.get_subscription(int(user_id))
-        
-        # Добавляем заголовки для предотвращения кэширования
-        response = JSONResponse(content=dict(subscription_data))
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
+        user_id_int = int(user_id)
+        subscription_data = await subscription_service.get_subscription(user_id_int)
         
         # Логирование успешного запроса
         logger.info(f"Получен статус подписки для user_id={user_id}: {subscription_data}")
         
-        return response
+        return JSONResponse(
+            content=dict(subscription_data),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+        
     except ValueError as ve:
         logger.error(f"Ошибка преобразования user_id: {ve}")
-        raise HTTPException(status_code=400, detail=f"Invalid user_id format: {str(ve)}")
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Invalid user_id format: {str(ve)}"},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
     except Exception as e:
         logger.error(f"Ошибка при получении статуса подписки: {e}")
-        raise HTTPException(status_code=500, detail=f"Error fetching subscription status: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error fetching subscription status: {str(e)}"},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
 
 @app.get("/direct_premium_check", response_model=DirectPremiumStatusResponse)
 async def direct_premium_check(request: Request, user_id: Optional[str] = None):
@@ -153,30 +342,111 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
         # Проверка наличия user_id
         if not user_id:
             logger.error("direct_premium_check: user_id не предоставлен ни в параметрах, ни в заголовках")
-            raise HTTPException(status_code=400, detail="user_id is required")
+            return JSONResponse(
+                status_code=400,
+                content={"has_premium": False, "error": "user_id is required"},
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+            )
             
         # Получение сервиса подписок
         subscription_service = await get_subscription_service()
         
         # Прямой запрос в БД на проверку премиум-статуса
-        has_premium = await subscription_service.check_premium_directly(int(user_id))
-        
-        # Добавляем заголовки для предотвращения кэширования
-        response = JSONResponse(content={"has_premium": has_premium, "user_id": user_id})
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
+        user_id_int = int(user_id)
+        has_premium = await subscription_service.check_premium_directly(user_id_int)
         
         # Логирование успешного запроса
         logger.info(f"Прямая проверка премиум для user_id={user_id}: {has_premium}")
         
-        return response
+        return JSONResponse(
+            content={"has_premium": has_premium, "user_id": user_id},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+        
     except ValueError as ve:
         logger.error(f"Ошибка преобразования user_id: {ve}")
-        raise HTTPException(status_code=400, detail=f"Invalid user_id format: {str(ve)}")
+        return JSONResponse(
+            status_code=400,
+            content={"has_premium": False, "error": f"Invalid user_id format: {str(ve)}"},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
     except Exception as e:
         logger.error(f"Ошибка при прямой проверке премиум: {e}")
-        raise HTTPException(status_code=500, detail=f"Error checking premium status: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"has_premium": False, "error": f"Error checking premium status: {str(e)}"},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+
+@app.get("/force-premium-status/{user_id}", response_model=DirectPremiumStatusResponse)
+async def force_premium_status(user_id: str):
+    """
+    Принудительная проверка премиум-статуса по ID пользователя.
+    Этот метод имеет максимальный приоритет перед SPA-обработчиком.
+    """
+    try:
+        # Преобразование user_id в число
+        user_id_int = int(user_id)
+        
+        # Получение данных из БД
+        db_url = os.getenv("DATABASE_URL")
+        if not db_url:
+            return JSONResponse(
+                content={"has_premium": False, "error": "DB connection error", "user_id": user_id},
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+            )
+            
+        # Прямой запрос к базе данных
+        conn = await asyncpg.connect(db_url)
+        try:
+            # Проверяем наличие активной подписки
+            query = """
+            SELECT COUNT(*) 
+            FROM subscriptions 
+            WHERE user_id = $1 
+              AND is_active = TRUE 
+              AND end_date > NOW()
+            """
+            count = await conn.fetchval(query, user_id_int)
+            has_premium = count > 0
+            
+            # Получаем информацию о текущей/последней подписке
+            if has_premium:
+                sub_query = """
+                SELECT end_date 
+                FROM subscriptions 
+                WHERE user_id = $1 
+                ORDER BY end_date DESC 
+                LIMIT 1
+                """
+                end_date = await conn.fetchval(sub_query, user_id_int)
+                end_date_str = end_date.isoformat() if end_date else None
+            else:
+                end_date_str = None
+                
+            result = {
+                "has_premium": has_premium,
+                "user_id": user_id,
+                "error": None,
+                "subscription_end_date": end_date_str,
+                "analysis_count": 9999 if has_premium else FREE_ANALYSIS_LIMIT,
+                "post_generation_count": 9999 if has_premium else FREE_POST_LIMIT
+            }
+            
+            logger.info(f"Force premium check for user {user_id}: {result}")
+            return JSONResponse(
+                content=result,
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+            )
+            
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.error(f"Error in force_premium_status: {e}")
+        return JSONResponse(
+            content={"has_premium": False, "error": str(e), "user_id": user_id},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_channel(
@@ -219,30 +489,199 @@ async def generate_invoice(
     # ... (реализация) ...
     pass # Заглушка
 
+# Добавляем диагностический эндпоинт
+@app.get("/subscription/diagnose", response_model=Dict[str, Any])
+async def diagnose_subscription(user_id: str):
+    """
+    Диагностический эндпоинт для проверки всех аспектов подписки.
+    Возвращает детальную информацию для отладки.
+    """
+    result = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "user_id": user_id,
+        "database_connection": False,
+        "subscription_records": [],
+        "active_subscription": False,
+        "has_premium": False,
+        "environment_variables": {
+            "DATABASE_URL_SET": bool(os.getenv("DATABASE_URL"))
+        },
+        "errors": []
+    }
+    
+    try:
+        # Проверяем соединение с базой данных
+        db_url = os.getenv("DATABASE_URL")
+        if not db_url:
+            result["errors"].append("DATABASE_URL not set in environment variables")
+            return JSONResponse(
+                content=result,
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+            )
+        
+        # Подключение к базе данных
+        conn = await asyncpg.connect(db_url)
+        result["database_connection"] = True
+        
+        try:
+            # Запрос всех записей о подписках пользователя
+            subscription_query = """
+            SELECT 
+                id, user_id, start_date, end_date, payment_id, is_active, 
+                created_at, updated_at,
+                NOW() as current_time,
+                CASE WHEN end_date > NOW() AND is_active = TRUE THEN TRUE ELSE FALSE END as is_valid
+            FROM subscriptions 
+            WHERE user_id = $1
+            ORDER BY end_date DESC
+            """
+            
+            # Выполняем запрос
+            subscriptions = await conn.fetch(subscription_query, int(user_id))
+            
+            # Обрабатываем результаты
+            for sub in subscriptions:
+                sub_dict = dict(sub)
+                for key in sub_dict:
+                    if isinstance(sub_dict[key], datetime):
+                        sub_dict[key] = sub_dict[key].isoformat()
+                result["subscription_records"].append(sub_dict)
+            
+            # Проверяем наличие активной подписки
+            premium_query = """
+            SELECT COUNT(*) 
+            FROM subscriptions 
+            WHERE user_id = $1 
+              AND is_active = TRUE 
+              AND end_date > NOW()
+            """
+            count = await conn.fetchval(premium_query, int(user_id))
+            result["active_subscription"] = count > 0
+            result["has_premium"] = count > 0
+            result["premium_count"] = count
+            
+            # Получаем информацию о самой свежей подписке
+            if subscriptions:
+                result["latest_subscription"] = dict(subscriptions[0])
+                for key in result["latest_subscription"]:
+                    if isinstance(result["latest_subscription"][key], datetime):
+                        result["latest_subscription"][key] = result["latest_subscription"][key].isoformat()
+            
+        finally:
+            # Закрываем соединение с базой данных
+            await conn.close()
+            
+    except ValueError as ve:
+        result["errors"].append(f"Invalid user_id format: {str(ve)}")
+    except Exception as e:
+        result["errors"].append(f"Error during diagnosis: {str(e)}")
+    
+    # Возвращаем результат в формате JSON
+    return JSONResponse(
+        content=result,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
+
+# Эндпоинт принудительного создания премиум-подписки для тестирования
+@app.post("/debug/create-premium/{user_id}", response_model=Dict[str, Any])
+async def debug_create_premium(user_id: str, request: Request):
+    """
+    ⚠️ ТОЛЬКО ДЛЯ ОТЛАДКИ ⚠️
+    Создает тестовую премиум-подписку для указанного пользователя.
+    """
+    # Проверяем, что запрос идет локально или с доверенного IP
+    client_host = request.client.host if request.client else None
+    trusted_hosts = ['127.0.0.1', 'localhost', '::1']
+    
+    if not (client_host in trusted_hosts or request.headers.get('X-Debug-Token') == os.getenv("DEBUG_TOKEN")):
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Debug endpoints are only accessible from trusted hosts"},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+    
+    try:
+        # Подключение к базе данных
+        db_url = os.getenv("DATABASE_URL")
+        if not db_url:
+            return JSONResponse(
+                status_code=500, 
+                content={"error": "DATABASE_URL not set"},
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+            )
+        
+        # Преобразуем user_id в число
+        user_id_int = int(user_id)
+        
+        # Текущее время и дата окончания (через 30 дней)
+        now = datetime.now(timezone.utc)
+        end_date = now + timedelta(days=30)
+        
+        # Идентификатор тестового платежа
+        test_payment_id = f"debug_payment_{now.strftime('%Y%m%d%H%M%S')}"
+        
+        # Подключаемся к базе данных
+        conn = await asyncpg.connect(db_url)
+        
+        try:
+            # Деактивируем все существующие подписки пользователя
+            await conn.execute("""
+                UPDATE subscriptions
+                SET is_active = FALSE, updated_at = NOW()
+                WHERE user_id = $1
+            """, user_id_int)
+            
+            # Создаем новую тестовую подписку
+            subscription_id = await conn.fetchval("""
+                INSERT INTO subscriptions 
+                    (user_id, start_date, end_date, payment_id, is_active, created_at, updated_at)
+                VALUES 
+                    ($1, $2, $3, $4, TRUE, NOW(), NOW())
+                RETURNING id
+            """, user_id_int, now, end_date, test_payment_id)
+            
+            # Формируем ответ
+            result = {
+                "success": True,
+                "message": f"Debug premium subscription created for user {user_id}",
+                "subscription_id": subscription_id,
+                "user_id": user_id,
+                "start_date": now.isoformat(),
+                "end_date": end_date.isoformat(),
+                "payment_id": test_payment_id,
+                "is_active": True
+            }
+            
+            logger.warning(f"DEBUG: Created premium subscription for user {user_id}: ID={subscription_id}")
+            
+            return JSONResponse(
+                content=result,
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+            )
+            
+        finally:
+            # Закрываем соединение
+            await conn.close()
+            
+    except ValueError as ve:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Invalid user_id format: {str(ve)}"},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+    except Exception as e:
+        logger.error(f"Error in debug_create_premium: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error creating debug subscription: {str(e)}"},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+
 # --- Добавьте сюда ВСЕ остальные ваши API-эндпоинты ---
-# @app.get("/ideas", ...)
-# @app.post("/save-suggested-ideas", ...)
-# @app.get("/channel-analysis", ...)
-# @app.get("/images", ...)
-# @app.post("/save-image", ...)
-# @app.get("/images/{image_id}", ...)
-# @app.get("/post-images/{post_id}", ...)
-# @app.get("/image-proxy/{image_id}", ...)
-# @app.get("/fix-schema", ...)
-# @app.get("/check-schema", ...)
-# @app.get("/recreate-schema", ...)
-# @app.post("/telegram/webhook", ...)
-# @app.post("/bot/webhook", ...)
-# @app.post("/payment/confirm", ...)
-# @app.post("/payment/webhook", ...)
-# @app.get("/health", ...)
 
 # ===========================================
-# === КОНЕЦ ОПРЕДЕЛЕНИЙ API МАРШРУТОВ ===
+# === МОНТИРОВАНИЕ СТАТИЧЕСКИХ ФАЙЛОВ И SPA ===
 # ===========================================
-
-
-# --- МОНТИРОВАНИЕ СТАТИЧЕСКИХ ФАЙЛОВ И SPA ---
 # (Этот блок должен идти ПОСЛЕ всех API-маршрутов)
 
 # Путь к статическим файлам фронтенда (например, frontend/dist)
@@ -251,62 +690,46 @@ static_files_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fr
 # Проверка существования папки
 if os.path.exists(static_files_path) and os.path.isdir(static_files_path):
     logger.info(f"Монтирование статических файлов SPA из: {static_files_path}")
+    
     # Монтируем статические файлы, включая index.html как корень
     app.mount("/", StaticFiles(directory=static_files_path, html=True), name="spa-static")
 
     # Обработчик для корня, если StaticFiles(html=True) не сработает (на всякий случай)
     @app.get("/", include_in_schema=False)
     async def serve_index_explicitly():
+        # Проверяем, является ли это API-запросом (например, Ajax)
+        if hasattr(request.state, 'is_api_request') and request.state.is_api_request:
+            # Если это API запрос, отдаем 404
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+        
+        # Иначе сервим HTML
         index_path = os.path.join(static_files_path, "index.html")
         if os.path.exists(index_path):
             return FileResponse(index_path)
         else:
-             logger.error(f"Файл index.html не найден в {static_files_path}")
-             raise HTTPException(status_code=404, detail="Index file not found")
-
-    # ВАЖНО: Список API-путей должен быть точным и актуальным!
-    # Это предотвратит перехват API-запросов SPA-обработчиком
-    api_paths = [
-        "/api/",
-        "/docs",
-        "/openapi.json",
-        "/subscription/",
-        "/direct_premium_check",
-        "/posts",
-        "/analyze",
-        "/generate-",
-        "/images",
-        "/ideas",
-        "/telegram/",
-        "/bot/",
-        "/payment/",
-        "/health"
-    ]
-
-    # Middleware для корректной обработки API-запросов
-    @app.middleware("http")
-    async def api_priority_middleware(request: Request, call_next):
-        # Проверяем, является ли путь API-запросом
-        path = request.url.path
-        is_api_request = any(path.startswith(api_prefix) for api_prefix in api_paths)
-        
-        # Если это API-запрос, пропускаем его через основной обработчик
-        if is_api_request:
-            logger.debug(f"API запрос: {path}")
-            return await call_next(request)
-        
-        # Для других путей - стандартное поведение
-        response = await call_next(request)
-        return response
+            logger.error(f"Файл index.html не найден в {static_files_path}")
+            raise HTTPException(status_code=404, detail="Index file not found")
 
     # Перехват всех остальных путей для SPA-роутинга
     # Этот обработчик должен быть САМЫМ ПОСЛЕДНИМ
     @app.get("/{rest_of_path:path}", include_in_schema=False)
     async def serve_spa_catch_all(request: Request, rest_of_path: str):
-        # Проверка api_paths уже в middleware, здесь для дополнительной защиты
-        if any(rest_of_path.startswith(prefix.lstrip('/')) for prefix in api_paths):
-             logger.warning(f"Путь '{rest_of_path}' похож на API, но не обработан. Возврат 404.")
-             raise HTTPException(status_code=404, detail="API endpoint not found")
+        # Если запрос помечен middleware как API-запрос, не обрабатываем его как SPA
+        if hasattr(request.state, 'is_api_request') and request.state.is_api_request:
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+            
+        # Список путей, которые не должны обрабатываться SPA
+        api_paths = [
+            "api", "subscription", "direct_premium_check", "force-premium-status",
+            "posts", "analyze", "generate-", "images", "ideas", "telegram",
+            "bot", "payment", "health", "api-v2"
+        ]
+        
+        # Проверяем части пути
+        path_segments = rest_of_path.split('/')
+        if any(segment.startswith(prefix) for segment in path_segments for prefix in api_paths):
+            logger.warning(f"Путь '{rest_of_path}' похож на API, но не обработан. Возврат 404.")
+            raise HTTPException(status_code=404, detail="API endpoint not found")
 
         # Иначе, считаем, что это путь для SPA и отдаем index.html
         index_path = os.path.join(static_files_path, "index.html")
@@ -316,86 +739,6 @@ if os.path.exists(static_files_path) and os.path.isdir(static_files_path):
         else:
             logger.error(f"Файл index.html не найден в {static_files_path} для пути {rest_of_path}")
             raise HTTPException(status_code=404, detail="Index file not found")
-
-    # Принудительная проверка премиум
-    @app.get("/force-premium-status/{user_id}", include_in_schema=True)
-    async def force_premium_status(user_id: str):
-        """
-        Прямая проверка премиум-статуса по ID пользователя без использования ORM.
-        Этот метод имеет максимальный приоритет перед SPA-обработчиком.
-        """
-        try:
-            # Преобразование user_id в число
-            try:
-                user_id_int = int(user_id)
-            except ValueError:
-                return JSONResponse(
-                    content={"has_premium": False, "error": "Invalid user_id format"},
-                    headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
-                )
-            
-            # Получение данных из БД
-            db_url = os.getenv("DATABASE_URL")
-            if not db_url:
-                logger.error("DATABASE_URL не указан в переменных окружения")
-                return JSONResponse(
-                    content={"has_premium": False, "error": "DB connection error"},
-                    headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
-                )
-            
-            # Прямой запрос к базе данных
-            conn = await asyncpg.connect(db_url)
-            try:
-                # Проверяем наличие активной подписки
-                query = """
-                SELECT COUNT(*) 
-                FROM subscriptions 
-                WHERE user_id = $1 
-                  AND is_active = TRUE 
-                  AND end_date > NOW()
-                """
-                count = await conn.fetchval(query, user_id_int)
-                has_premium = count > 0
-                
-                # Получаем информацию о текущей/последней подписке
-                if has_premium:
-                    sub_query = """
-                    SELECT end_date 
-                    FROM subscriptions 
-                    WHERE user_id = $1 
-                      AND is_active = TRUE
-                      AND end_date > NOW()
-                    ORDER BY end_date DESC 
-                    LIMIT 1
-                    """
-                    end_date = await conn.fetchval(sub_query, user_id_int)
-                    end_date_str = end_date.isoformat() if end_date else None
-                else:
-                    end_date_str = None
-                    
-                result = {
-                    "has_premium": has_premium,
-                    "user_id": user_id,
-                    "error": None,
-                    "subscription_end_date": end_date_str,
-                    "analysis_count": 9999 if has_premium else 1,
-                    "post_generation_count": 9999 if has_premium else 1
-                }
-                
-                logger.info(f"Проверка премиума для пользователя {user_id}: {result}")
-                return JSONResponse(
-                    content=result,
-                    headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
-                )
-                
-            finally:
-                await conn.close()
-        except Exception as e:
-            logger.error(f"Error in force_premium_status: {e}")
-            return JSONResponse(
-                content={"has_premium": False, "error": str(e)},
-                headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
-            )
 
 else:
     logger.warning(f"Папка статических файлов SPA не найдена: {static_files_path}")
