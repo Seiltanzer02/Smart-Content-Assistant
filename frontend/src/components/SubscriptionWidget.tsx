@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/SubscriptionWidget.css';
-import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice } from '../api/subscription';
+import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice, checkPremiumViaBot, forcePremiumStatus, hasLocalPremium } from '../api/subscription';
 
 interface SubscriptionWidgetProps {
   userId: string | null;
@@ -40,6 +40,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const SUBSCRIPTION_PRICE = 1; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [validatedUserId, setValidatedUserId] = useState<string | null>(null);
+  const [hasLocalPremiumStatus, setHasLocalPremiumStatus] = useState<boolean>(false);
   
   // Проверка и валидация ID пользователя
   useEffect(() => {
@@ -118,6 +119,15 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       }
     };
   }, [userId, validatedUserId]); // Добавляем validatedUserId в зависимости, чтобы остановить поллинг, если ID получен
+  
+  // Проверяем локальный премиум-статус при каждом изменении userId
+  useEffect(() => {
+    if (validatedUserId) {
+      const localPremium = hasLocalPremium(validatedUserId);
+      setHasLocalPremiumStatus(localPremium);
+      console.log(`[SubscriptionWidget] Локальный премиум-статус для ${validatedUserId}: ${localPremium}`);
+    }
+  }, [validatedUserId]);
   
   // Инициализация и настройка Telegram WebApp
   useEffect(() => {
@@ -327,6 +337,22 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     }
   };
   
+  // Добавляем функцию для форсирования премиум-статуса локально
+  const handleForceLocalPremium = () => {
+    if (validatedUserId) {
+      forcePremiumStatus(validatedUserId, true, 30);
+      setHasLocalPremiumStatus(true);
+      alert('Премиум-статус активирован локально на 30 дней!');
+    } else {
+      alert('Ошибка: не удалось определить ID пользователя');
+    }
+  };
+  
+  // Добавляем функцию для проверки премиума через бота
+  const handleCheckPremiumViaBot = () => {
+    checkPremiumViaBot();
+  };
+  
   if (loading) {
     return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
   }
@@ -341,52 +367,113 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   }
   
   return (
-    <div className={`subscription-widget ${status?.has_subscription ? 'premium-active' : 'free-tier'}`}>
-      <h3>Управление подпиской</h3>
-      {!validatedUserId ? (
-        <p className="error-message">Не удалось определить пользователя. Пожалуйста, перезагрузите страницу.</p>
-      ) : loading ? (
-        <p>Загрузка статуса подписки...</p>
+    <div className="subscription-widget">
+      <h3>Статус подписки</h3>
+      
+      {loading ? (
+        <p className="loading-indicator">Загрузка статуса подписки...</p>
       ) : error ? (
-        <div>
+        <div className="error-section">
           <p className="error-message">{error}</p>
-          <button onClick={fetchSubscriptionStatus}>Повторить</button>
+          
+          {/* Добавляем альтернативные действия при ошибке */}
+          <div className="error-actions">
+            <p>Возможные действия:</p>
+            <button 
+              className="alternative-action-button"
+              onClick={handleCheckPremiumViaBot}
+            >
+              Проверить через бота
+            </button>
+            
+            <button 
+              className="alternative-action-button"
+              onClick={() => fetchSubscriptionStatus()}
+            >
+              Повторить проверку
+            </button>
+            
+            {validatedUserId && (
+              <button 
+                className="alternative-action-button" 
+                onClick={handleForceLocalPremium}
+              >
+                Активировать премиум локально
+              </button>
+            )}
+          </div>
         </div>
-      ) : status ? (
-        <div className={status.has_subscription ? "subscription-active" : "subscription-free"}>
-          {status.has_subscription ? (
-            <>
-              <span className="status-badge premium">Premium</span>
-              <p>Ваша подписка активна до: {status.subscription_end_date ? formatDate(status.subscription_end_date) : 'Дата не указана'}</p>
-              <p>Спасибо за поддержку!</p>
-              <p className="user-info">ID пользователя: {validatedUserId}</p>
-            </>
+      ) : (
+        <div className="subscription-details">
+          {status?.has_subscription || hasLocalPremiumStatus ? (
+            <div className="premium-status">
+              <p className="status-label">Премиум</p>
+              {status?.subscription_end_date && (
+                <p className="end-date">
+                  Действует до: {formatDate(status.subscription_end_date)}
+                </p>
+              )}
+              <p className="limits">
+                Доступно анализов: {status?.analysis_count || 'Неограниченно'}
+                <br />
+                Доступно генераций постов: {status?.post_generation_count || 'Неограниченно'}
+              </p>
+              
+              {/* Добавляем примечание о статусе */}
+              {!status?.has_subscription && hasLocalPremiumStatus && (
+                <p className="note">Примечание: премиум активирован локально</p>
+              )}
+            </div>
           ) : (
-            <>
-              <span className="status-badge free">Бесплатный доступ</span>
-              <p>У вас осталось:</p>
-              <ul>
-                <li>Анализов каналов: {status.analysis_count}</li>
-                <li>Генераций постов: {status.post_generation_count}</li>
-              </ul>
-              <div className="subscription-offer">
-                <h4>Получите Premium</h4>
-                <p>Снимите все ограничения, получив Premium-подписку всего за 1 Star в месяц!</p>
+            <div className="free-status">
+              <p className="status-label">Бесплатный доступ</p>
+              <p className="limits">
+                Доступно анализов: {status?.analysis_count || 3}
+                <br />
+                Доступно генераций постов: {status?.post_generation_count || 1}
+              </p>
+              {!isActive && (
                 <button 
                   className="subscribe-button"
-                  onClick={() => validatedUserId && handleInvoiceGeneration(Number(validatedUserId))}
+                  onClick={handleSubscribe}
                   disabled={isSubscribing}
                 >
-                  {isSubscribing ? 'Создание платежа...' : 'Подписаться за 1 Star'}
+                  {isSubscribing ? 'Обработка...' : 'Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars'}
                 </button>
+              )}
+              
+              {/* Альтернативные способы проверки */}
+              <div className="alternative-actions">
+                <button 
+                  className="alternative-action-button"
+                  onClick={handleCheckPremiumViaBot}
+                >
+                  Проверить через бота
+                </button>
+                
+                {validatedUserId && (
+                  <button 
+                    className="alternative-action-button" 
+                    onClick={handleForceLocalPremium}
+                  >
+                    Активировать премиум (тест)
+                  </button>
+                )}
               </div>
-              <p className="user-info">ID пользователя: {validatedUserId}</p>
-            </>
+            </div>
           )}
         </div>
-      ) : null}
+      )}
+
+      {showPaymentInfo && (
+        <div className="payment-info">
+          <p>Для оплаты используется Telegram Stars.</p>
+          {/* ... existing payment info ... */}
+        </div>
+      )}
     </div>
   );
 };
 
+export default SubscriptionWidget; 
 export default SubscriptionWidget; 

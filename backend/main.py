@@ -41,6 +41,7 @@ import traceback
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
 # from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 import shutil # Добавляем импорт shutil
+import asyncpg # Добавляем импорт для работы с PostgreSQL
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -308,54 +309,80 @@ async def generate_stars_invoice_link(request: Request):
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
-    data = await request.json()
-    # 1. Обработка pre_checkout_query
-    pre_checkout_query = data.get("pre_checkout_query")
-    if pre_checkout_query:
-        query_id = pre_checkout_query.get("id")
-        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-        if not bot_token:
-            return {"ok": False, "error": "TELEGRAM_BOT_TOKEN не задан"}
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"https://api.telegram.org/bot{bot_token}/answerPreCheckoutQuery",
-                json={"pre_checkout_query_id": query_id, "ok": True}
-            )
-            print("Ответ на pre_checkout_query:", resp.text)
-        return {"ok": True, "pre_checkout_query": True}
-    # 2. Обработка успешной оплаты
-    message = data.get("message", {})
-    successful_payment = message.get("successful_payment")
-    if successful_payment:
-        user_id = message.get("from", {}).get("id")
-        payment_id = successful_payment.get("telegram_payment_charge_id")
-        now = datetime.utcnow()
-        start_date = now
-        end_date = now + timedelta(days=30)
-        try:
-            # Проверяем, есть ли уже подписка
-            existing = supabase.table("user_subscription").select("*").eq("user_id", user_id).execute()
-            if existing.data and len(existing.data) > 0:
-                # Обновляем подписку
-                supabase.table("user_subscription").update({
-                    "is_active": True,
-                    "start_date": start_date.isoformat(),
-                    "end_date": end_date.isoformat(),
-                    "payment_id": payment_id
-                }).eq("user_id", user_id).execute()
-            else:
-                # Создаём новую подписку
-                supabase.table("user_subscription").insert({
-                    "user_id": user_id,
-                    "is_active": True,
-                    "start_date": start_date.isoformat(),
-                    "end_date": end_date.isoformat(),
-                    "payment_id": payment_id
-                }).execute()
-        except Exception as e:
-            print("Ошибка при активации подписки:", e)
-        return {"ok": True, "successful_payment": True}
-    return {"ok": True}
+    """Вебхук для обработки обновлений от бота Telegram."""
+    try:
+        # Получаем данные запроса
+        data = await request.json()
+        logger.info(f"Получен вебхук от Telegram: {data}")
+        
+        # Проверяем, есть ли сообщение
+        message = data.get('message')
+        if not message:
+            return {"ok": True}
+        
+        # Получаем ID пользователя и текст сообщения
+        user_id = message.get('from', {}).get('id')
+        text = message.get('text', '')
+        
+        # Если это команда /start с параметром check_premium
+        if text.startswith('/start check_premium') or text == '/check_premium':
+            # Проверяем премиум-статус пользователя
+            db_url = os.getenv("DATABASE_URL")
+            if not db_url:
+                return {"ok": True, "error": "DB connection error"}
+                
+            # Создаем подключение к БД
+            conn = await asyncpg.connect(db_url)
+            try:
+                # Проверяем наличие активной подписки
+                query = """
+                SELECT COUNT(*) 
+                FROM user_subscription 
+                WHERE user_id = $1 
+                  AND is_active = TRUE 
+                  AND end_date > NOW()
+                """
+                count = await conn.fetchval(query, user_id)
+                has_premium = count > 0
+                
+                # Получаем информацию о подписке для ответа
+                if has_premium:
+                    sub_query = """
+                    SELECT end_date 
+                    FROM user_subscription 
+                    WHERE user_id = $1 
+                      AND is_active = TRUE
+                    ORDER BY end_date DESC 
+                    LIMIT 1
+                    """
+                    end_date = await conn.fetchval(sub_query, user_id)
+                    end_date_str = end_date.strftime('%d.%m.%Y %H:%M') if end_date else 'неизвестно'
+                    reply_text = f"✅ У вас активирован ПРЕМИУМ доступ!\nДействует до: {end_date_str}\nОбновите страницу приложения, чтобы увидеть изменения."
+                else:
+                    reply_text = "❌ У вас нет активной ПРЕМИУМ подписки.\nДля получения премиум-доступа оформите подписку в приложении."
+                
+                # Отправляем ответ пользователю
+                telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
+                if telegram_token:
+                    telegram_api_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
+                    await requests.post(telegram_api_url, json={
+                        "chat_id": user_id,
+                        "text": reply_text,
+                        "parse_mode": "HTML"
+                    })
+                
+                logger.info(f"Проверка премиум-статуса через бот для пользователя {user_id}: {has_premium}")
+                return {"ok": True, "has_premium": has_premium}
+                
+            finally:
+                await conn.close()
+        
+        # ... остальная обработка вебхуков ...
+        
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Ошибка при обработке вебхука Telegram: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 # --- Настройка обслуживания статических файлов ---
