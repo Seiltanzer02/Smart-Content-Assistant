@@ -1,289 +1,339 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
+"""
+Скрипт для мониторинга и проверки статуса системы подписок.
+Проверяет соединение с базой данных, статус API и общее состояние системы.
+"""
 
 import os
 import sys
+import json
 import asyncio
 import logging
 import asyncpg
-import aiohttp
-import json
-import time
-import psutil
-from datetime import datetime
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from dotenv import load_dotenv
-
-# Загрузка переменных окружения
-load_dotenv()
+import requests
+from datetime import datetime, timezone
+from typing import Dict, Any, List, Optional
 
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("monitoring.log"),
-        logging.StreamHandler()
-    ]
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("monitoring")
+logger = logging.getLogger(__name__)
 
-# Настройки мониторинга
-MONITOR_INTERVAL = int(os.getenv("MONITOR_INTERVAL", "300"))  # 5 минут по умолчанию
-MAX_RETRIES = 3
-NOTIFY_EMAILS = os.getenv("NOTIFY_EMAILS", "").split(",")
-SMTP_SERVER = os.getenv("SMTP_SERVER", "")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-API_URL = os.getenv("API_URL", "http://localhost:8000")
-
-async def check_database():
-    """Проверяет подключение к базе данных и её состояние"""
-    logger.info("Проверка подключения к базе данных...")
-    conn_string = os.getenv("DATABASE_URL")
-    
-    if not conn_string:
-        logger.error("Переменная окружения DATABASE_URL не установлена")
-        return False, "DATABASE_URL не установлена"
-    
-    try:
-        # Подключение к базе данных
-        conn = await asyncpg.connect(conn_string)
+class SystemMonitor:
+    def __init__(self, db_url=None, api_url=None, test_user_id=None):
+        self.db_url = db_url or os.getenv("DATABASE_URL")
+        self.api_url = api_url or os.getenv("API_URL") or "http://localhost:8000"
+        self.test_user_id = test_user_id or os.getenv("TEST_USER_ID") or "427032240"  # ID пользователя со скриншота
         
-        # Проверка состояния базы данных
-        server_time = await conn.fetchval("SELECT NOW()")
-        db_size = await conn.fetchval("SELECT pg_database_size(current_database())")
+        if not self.db_url:
+            raise ValueError("DATABASE_URL не указан в переменных окружения")
+            
+        self.pool = None
         
-        # Получаем статистику по таблицам
-        tables_stats = await conn.fetch("""
-            SELECT 
-                relname as table_name, 
-                n_live_tup as row_count,
-                pg_size_pretty(pg_total_relation_size(relid)) as total_size
-            FROM pg_stat_user_tables 
-            ORDER BY n_live_tup DESC
-        """)
-        
-        # Проверка замедленных запросов
-        slow_queries = await conn.fetch("""
-            SELECT pid, now() - query_start as duration, query 
-            FROM pg_stat_activity 
-            WHERE state = 'active' AND now() - query_start > '5 seconds'::interval 
-            ORDER BY duration DESC
-        """)
-        
-        await conn.close()
-        
-        # Формируем отчет
-        report = {
-            "status": "ok",
-            "server_time": server_time.isoformat(),
-            "db_size_bytes": db_size,
-            "tables": [dict(t) for t in tables_stats],
-            "slow_queries_count": len(slow_queries),
-            "slow_queries": [dict(q) for q in slow_queries],
-        }
-        
-        return True, report
-    
-    except Exception as e:
-        logger.error(f"Ошибка при проверке базы данных: {e}")
-        return False, str(e)
-
-async def check_api_endpoints():
-    """Проверяет API-эндпоинты"""
-    logger.info("Проверка API-эндпоинтов...")
-    
-    endpoints = [
-        "/health",
-        "/subscription/status"  # будет ошибка 401, но проверит доступность
-    ]
-    
-    results = {}
-    
-    async with aiohttp.ClientSession() as session:
-        for endpoint in endpoints:
-            url = f"{API_URL}{endpoint}"
-            try:
-                start_time = time.time()
-                async with session.get(url) as response:
-                    response_time = time.time() - start_time
-                    status = response.status
-                    
-                    # Для эндпоинта подписки ожидаем 401 (требуется аутентификация)
-                    expected_status = 401 if endpoint == "/subscription/status" else 200
-                    is_success = status == expected_status
-                    
-                    results[endpoint] = {
-                        "status": status,
-                        "response_time_ms": round(response_time * 1000, 2),
-                        "is_success": is_success
-                    }
-            except Exception as e:
-                results[endpoint] = {
-                    "status": "error",
-                    "error": str(e),
-                    "is_success": False
-                }
-    
-    # Общий результат
-    all_success = all(result.get("is_success", False) for result in results.values())
-    
-    return all_success, results
-
-async def check_system_resources():
-    """Проверяет системные ресурсы"""
-    logger.info("Проверка системных ресурсов...")
-    
-    try:
-        # Использование CPU
-        cpu_percent = psutil.cpu_percent(interval=1)
-        
-        # Использование памяти
-        memory = psutil.virtual_memory()
-        
-        # Использование диска
-        disk = psutil.disk_usage('/')
-        
-        # Проверяем процесс сервера, если он запущен на той же машине
-        server_process = None
-        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-            if 'python' in proc.info['name'].lower() and any('main.py' in cmd for cmd in proc.info['cmdline'] if cmd):
-                server_process = {
-                    "pid": proc.info['pid'],
-                    "cpu_percent": proc.cpu_percent(interval=0.1),
-                    "memory_percent": proc.memory_percent(),
-                    "create_time": datetime.fromtimestamp(proc.create_time()).isoformat()
-                }
-                break
-        
-        report = {
-            "cpu_percent": cpu_percent,
-            "memory_percent": memory.percent,
-            "memory_available_mb": round(memory.available / (1024 * 1024), 2),
-            "disk_percent": disk.percent,
-            "disk_free_gb": round(disk.free / (1024 * 1024 * 1024), 2),
-            "server_process": server_process
-        }
-        
-        # Определяем успешность проверки
-        is_success = (
-            cpu_percent < 90 and 
-            memory.percent < 90 and 
-            disk.percent < 90
-        )
-        
-        return is_success, report
-    
-    except Exception as e:
-        logger.error(f"Ошибка при проверке системных ресурсов: {e}")
-        return False, str(e)
-
-def send_email_alert(subject, message):
-    """Отправляет оповещение по email"""
-    if not SMTP_SERVER or not SMTP_USER or not SMTP_PASSWORD or not NOTIFY_EMAILS:
-        logger.warning("Настройки SMTP не заданы, оповещение не отправлено")
-        return False
-    
-    try:
-        # Создаем сообщение
-        msg = MIMEMultipart()
-        msg['From'] = SMTP_USER
-        msg['To'] = ", ".join(NOTIFY_EMAILS)
-        msg['Subject'] = subject
-        
-        # Добавляем текст
-        msg.attach(MIMEText(message, 'plain'))
-        
-        # Подключаемся к серверу и отправляем
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.send_message(msg)
-        
-        logger.info(f"Оповещение отправлено: {subject}")
-        return True
-    
-    except Exception as e:
-        logger.error(f"Ошибка при отправке оповещения: {e}")
-        return False
-
-async def run_monitoring():
-    """Запускает все проверки и формирует отчет"""
-    logger.info("Запуск мониторинга...")
-    
-    report = {
-        "timestamp": datetime.now().isoformat(),
-        "checks": {}
-    }
-    
-    # Проверка базы данных
-    db_success, db_result = await check_database()
-    report["checks"]["database"] = {
-        "success": db_success,
-        "result": db_result
-    }
-    
-    # Проверка API
-    api_success, api_result = await check_api_endpoints()
-    report["checks"]["api"] = {
-        "success": api_success,
-        "result": api_result
-    }
-    
-    # Проверка системных ресурсов
-    system_success, system_result = await check_system_resources()
-    report["checks"]["system"] = {
-        "success": system_success,
-        "result": system_result
-    }
-    
-    # Общий результат
-    all_success = db_success and api_success and system_success
-    report["overall_success"] = all_success
-    
-    # Записываем отчет в файл
-    with open(f"monitoring_report_{int(time.time())}.json", "w") as f:
-        json.dump(report, f, indent=2)
-    
-    # Если есть проблемы, отправляем оповещение
-    if not all_success:
-        subject = "ВНИМАНИЕ: Проблемы с сервисом Content Manager"
-        message = f"Обнаружены проблемы при мониторинге:\n\n"
-        
-        if not db_success:
-            message += f"- Проблемы с базой данных: {db_result}\n"
-        if not api_success:
-            message += f"- Проблемы с API: {json.dumps(api_result, indent=2)}\n"
-        if not system_success:
-            message += f"- Проблемы с системными ресурсами: {json.dumps(system_result, indent=2)}\n"
-        
-        send_email_alert(subject, message)
-    
-    return report
-
-async def continuous_monitoring():
-    """Запускает мониторинг с заданной периодичностью"""
-    while True:
+    async def connect_db(self):
+        """Устанавливает соединение с базой данных"""
         try:
-            report = await run_monitoring()
-            logger.info(f"Мониторинг завершен: общий статус = {report['overall_success']}")
+            self.pool = await asyncpg.create_pool(self.db_url)
+            logger.info("Успешное подключение к базе данных")
+            return True
         except Exception as e:
-            logger.error(f"Ошибка при выполнении мониторинга: {e}")
+            logger.error(f"Ошибка подключения к базе данных: {e}")
+            return False
+            
+    async def close_db(self):
+        """Закрывает соединение с базой данных"""
+        if self.pool:
+            await self.pool.close()
+            logger.info("Соединение с базой данных закрыто")
+            
+    async def check_db_connection(self):
+        """Проверяет соединение с базой данных"""
+        if not self.pool:
+            await self.connect_db()
+            
+        try:
+            # Проверяем, что соединение работает
+            server_time = await self.pool.fetchval("SELECT NOW()")
+            return {
+                "status": "ok",
+                "server_time": server_time.isoformat() if server_time else None,
+                "message": "Соединение с базой данных работает"
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Ошибка соединения с базой данных: {str(e)}"
+            }
+            
+    async def check_subscriptions_table(self):
+        """Проверяет таблицу subscriptions в базе данных"""
+        if not self.pool:
+            await self.connect_db()
+            
+        try:
+            # Проверяем наличие таблицы subscriptions и ее структуру
+            table_exists = await self.pool.fetchval("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'subscriptions'
+                )
+            """)
+            
+            if not table_exists:
+                return {
+                    "status": "error",
+                    "message": "Таблица subscriptions не существует"
+                }
+                
+            # Проверяем количество записей
+            count = await self.pool.fetchval("SELECT COUNT(*) FROM subscriptions")
+            
+            # Проверяем схему таблицы
+            columns = await self.pool.fetch("""
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_name = 'subscriptions'
+            """)
+            
+            columns_info = [{"name": col["column_name"], "type": col["data_type"]} for col in columns]
+            
+            # Проверяем необходимые индексы
+            indexes = await self.pool.fetch("""
+                SELECT indexname, indexdef
+                FROM pg_indexes
+                WHERE tablename = 'subscriptions'
+            """)
+            
+            indexes_info = [{"name": idx["indexname"], "definition": idx["indexdef"]} for idx in indexes]
+            
+            return {
+                "status": "ok",
+                "table_exists": True,
+                "records_count": count,
+                "columns": columns_info,
+                "indexes": indexes_info,
+                "message": f"Таблица subscriptions существует и содержит {count} записей"
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Ошибка при проверке таблицы subscriptions: {str(e)}"
+            }
+            
+    async def check_active_subscriptions(self):
+        """Проверяет активные подписки"""
+        if not self.pool:
+            await self.connect_db()
+            
+        try:
+            # Проверяем количество активных подписок
+            now = datetime.now(timezone.utc)
+            active_count = await self.pool.fetchval("""
+                SELECT COUNT(*) 
+                FROM subscriptions 
+                WHERE is_active = TRUE AND end_date > $1
+            """, now)
+            
+            # Получаем примеры активных подписок
+            active_subscriptions = await self.pool.fetch("""
+                SELECT id, user_id, start_date, end_date, payment_id, is_active, created_at, updated_at
+                FROM subscriptions 
+                WHERE is_active = TRUE AND end_date > $1
+                ORDER BY end_date DESC
+                LIMIT 5
+            """, now)
+            
+            examples = []
+            for sub in active_subscriptions:
+                examples.append({
+                    "id": sub["id"],
+                    "user_id": sub["user_id"],
+                    "start_date": sub["start_date"].isoformat() if sub["start_date"] else None,
+                    "end_date": sub["end_date"].isoformat() if sub["end_date"] else None,
+                    "is_active": sub["is_active"],
+                    "time_left_days": (sub["end_date"] - now).days if sub["end_date"] else None
+                })
+            
+            return {
+                "status": "ok",
+                "active_count": active_count,
+                "examples": examples,
+                "current_time": now.isoformat(),
+                "message": f"Найдено {active_count} активных подписок"
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Ошибка при проверке активных подписок: {str(e)}"
+            }
+            
+    def check_api_endpoint(self, endpoint: str, params: Optional[Dict[str, Any]] = None):
+        """Проверяет API-эндпоинт"""
+        try:
+            url = f"{self.api_url}{endpoint}"
+            if params:
+                url += "?" + "&".join([f"{k}={v}" for k, v in params.items()])
+                
+            # Добавляем заголовки для предотвращения кэширования
+            headers = {
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "x-telegram-user-id": self.test_user_id
+            }
+            
+            response = requests.get(url, headers=headers, timeout=10)
+            
+            try:
+                data = response.json()
+            except:
+                data = {"html": response.text[:500] + "..." if len(response.text) > 500 else response.text}
+                
+            return {
+                "status": "ok" if response.status_code == 200 else "error",
+                "status_code": response.status_code,
+                "response": data,
+                "message": f"API-запрос к {endpoint} выполнен со статусом {response.status_code}"
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Ошибка при проверке API-эндпоинта {endpoint}: {str(e)}"
+            }
+    
+    async def check_specific_user(self, user_id: str):
+        """Проверяет данные конкретного пользователя в БД"""
+        if not self.pool:
+            await self.connect_db()
+            
+        try:
+            # Получаем подписки пользователя
+            subscriptions = await self.pool.fetch("""
+                SELECT id, user_id, start_date, end_date, payment_id, is_active, created_at, updated_at
+                FROM subscriptions
+                WHERE user_id = $1
+                ORDER BY end_date DESC
+            """, int(user_id))
+            
+            now = datetime.now(timezone.utc)
+            
+            results = []
+            for sub in subscriptions:
+                is_active_by_date = sub["end_date"] > now if sub["end_date"] else False
+                results.append({
+                    "id": sub["id"],
+                    "user_id": sub["user_id"],
+                    "start_date": sub["start_date"].isoformat() if sub["start_date"] else None,
+                    "end_date": sub["end_date"].isoformat() if sub["end_date"] else None,
+                    "payment_id": sub["payment_id"],
+                    "is_active_in_db": sub["is_active"],
+                    "is_active_by_date": is_active_by_date,
+                    "is_truly_active": sub["is_active"] and is_active_by_date,
+                    "created_at": sub["created_at"].isoformat() if sub["created_at"] else None,
+                    "updated_at": sub["updated_at"].isoformat() if sub["updated_at"] else None,
+                    "time_left_days": (sub["end_date"] - now).days if sub["end_date"] else None
+                })
+            
+            # Проверяем данные пользователя через API
+            api_result = self.check_api_endpoint("/subscription/status", {"user_id": user_id})
+            
+            return {
+                "status": "ok",
+                "user_id": user_id,
+                "subscriptions_in_db": results,
+                "subscriptions_count": len(results),
+                "has_active_subscription": any(sub["is_truly_active"] for sub in results),
+                "api_check": api_result,
+                "current_time": now.isoformat(),
+                "message": f"Проверка пользователя {user_id} выполнена, найдено {len(results)} подписок"
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Ошибка при проверке пользователя {user_id}: {str(e)}"
+            }
+    
+    async def run_full_check(self):
+        """Запускает полную проверку системы"""
+        results = {}
         
-        # Ждем до следующей проверки
-        logger.info(f"Следующая проверка через {MONITOR_INTERVAL} секунд")
-        await asyncio.sleep(MONITOR_INTERVAL)
+        # Проверка соединения с БД
+        results["db_connection"] = await self.check_db_connection()
+        
+        # Проверка таблицы подписок
+        results["subscriptions_table"] = await self.check_subscriptions_table()
+        
+        # Проверка активных подписок
+        results["active_subscriptions"] = await self.check_active_subscriptions()
+        
+        # Проверка API
+        results["api_status"] = self.check_api_endpoint("/subscription/status", {"user_id": self.test_user_id})
+        results["api_direct_check"] = self.check_api_endpoint("/direct_premium_check", {"user_id": self.test_user_id})
+        
+        # Проверка тестового пользователя
+        results["test_user_check"] = await self.check_specific_user(self.test_user_id)
+        
+        # Формирование общего статуса
+        issues = []
+        for key, value in results.items():
+            if value.get("status") == "error":
+                issues.append(f"{key}: {value.get('message')}")
+                
+        if issues:
+            results["overall_status"] = {
+                "status": "error",
+                "issues": issues,
+                "message": f"Обнаружены проблемы: {len(issues)}"
+            }
+        else:
+            results["overall_status"] = {
+                "status": "ok",
+                "message": "Все системы работают нормально"
+            }
+            
+        return results
+
+async def main():
+    """Основная функция скрипта"""
+    # Проверка наличия аргументов
+    if len(sys.argv) > 1:
+        user_id = sys.argv[1]
+        check_type = "user"
+    else:
+        user_id = None
+        check_type = "full"
+        
+    try:
+        monitor = SystemMonitor()
+        
+        if check_type == "user":
+            result = await monitor.check_specific_user(user_id)
+        else:
+            result = await monitor.run_full_check()
+            
+        # Вывод результата
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        
+        # Закрытие соединения
+        await monitor.close_db()
+        
+        # Выход с кодом ошибки, если есть проблемы
+        if check_type == "full" and result["overall_status"]["status"] == "error":
+            sys.exit(1)
+            
+    except Exception as e:
+        logger.error(f"Ошибка при выполнении проверки: {e}")
+        print(json.dumps({
+            "status": "error",
+            "message": f"Критическая ошибка: {str(e)}"
+        }, indent=2, ensure_ascii=False))
+        sys.exit(1)
 
 if __name__ == "__main__":
-    logger.info("Запуск системы мониторинга...")
-    
-    # Если передан аргумент --once, выполняем мониторинг один раз
-    if len(sys.argv) > 1 and sys.argv[1] == "--once":
-        asyncio.run(run_monitoring())
-    else:
-        # Запускаем непрерывный мониторинг
-        asyncio.run(continuous_monitoring()) 
+    asyncio.run(main()) 
