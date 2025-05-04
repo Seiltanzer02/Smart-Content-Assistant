@@ -95,20 +95,27 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       // Используем функцию из API вместо прямого запроса
       const subscriptionData = await getUserSubscriptionStatus(userId);
       console.log('SubscriptionWidget: получен статус подписки:', subscriptionData);
-      setStatus(subscriptionData);
       
-      // Показываем/скрываем главную кнопку в зависимости от статуса подписки
-      if (window.Telegram?.WebApp?.MainButton) {
-        if (!subscriptionData.has_subscription && !isActive) {
-          window.Telegram.WebApp.MainButton.show();
-          console.log('SubscriptionWidget: Показана главная кнопка (нет подписки)');
-        } else {
-          window.Telegram.WebApp.MainButton.hide();
-          console.log('SubscriptionWidget: Скрыта главная кнопка (есть подписка)');
+      // Добавляем проверку на null и undefined перед установкой состояния
+      if (subscriptionData) {
+        setStatus(subscriptionData);
+        
+        // Показываем/скрываем главную кнопку в зависимости от статуса подписки
+        if (window.Telegram?.WebApp?.MainButton) {
+          if (!subscriptionData.has_subscription && !isActive) {
+            window.Telegram.WebApp.MainButton.show();
+            console.log('SubscriptionWidget: Показана главная кнопка (нет подписки)');
+          } else {
+            window.Telegram.WebApp.MainButton.hide();
+            console.log('SubscriptionWidget: Скрыта главная кнопка (есть подписка)');
+          }
         }
+        
+        return subscriptionData.has_subscription;
+      } else {
+        console.error('SubscriptionWidget: полученные данные подписки null или undefined');
+        return false;
       }
-      
-      return subscriptionData.has_subscription;
     } catch (err: any) {
       console.error('Ошибка при получении статуса подписки:', err);
       setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке статуса подписки');
@@ -239,11 +246,15 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   
   console.log('SubscriptionWidget: рендеринг с данными статуса:', status);
   
+  // Улучшенный метод проверки наличия подписки
+  const hasActiveSubscription = status && status.has_subscription === true;
+  console.log('SubscriptionWidget: hasActiveSubscription =', hasActiveSubscription);
+  
   return (
     <div className="subscription-widget">
       <h3>Статус подписки</h3>
       
-      {status?.has_subscription ? (
+      {hasActiveSubscription ? (
         <div className="subscription-active">
           <div className="status-badge premium">Premium</div>
           <p>У вас активная подписка{status.subscription_end_date ? ` до ${new Date(status.subscription_end_date).toLocaleDateString()}` : ''}</p>

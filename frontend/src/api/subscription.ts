@@ -27,11 +27,15 @@ export async function getUserSubscriptionStatus(userId: string | null): Promise<
       };
     }
     
+    // Добавляем логирование заголовков
+    const headers = { 'X-Telegram-User-Id': userId };
+    console.log('Отправляем запрос с заголовками:', headers);
+    
     const response = await fetch('/subscription/status', {
-      headers: {
-        'X-Telegram-User-Id': userId
-      }
+      headers
     });
+    
+    console.log(`Получен ответ от /subscription/status: статус ${response.status}`);
     
     if (!response.ok) {
       const errorText = await response.text();
@@ -42,12 +46,16 @@ export async function getUserSubscriptionStatus(userId: string | null): Promise<
     const data = await response.json();
     console.log(`Получен ответ от /subscription/status:`, data);
     
-    return {
+    // Явно создаем объект с правильной типизацией
+    const subscriptionStatus: SubscriptionStatus = {
       has_subscription: Boolean(data.has_subscription),
       subscription_end_date: data.subscription_end_date,
       analysis_count: data.analysis_count || 0,
       post_generation_count: data.post_generation_count || 0
     };
+    
+    console.log('Преобразованный статус подписки:', subscriptionStatus);
+    return subscriptionStatus;
   } catch (error) {
     console.error('Ошибка при получении статуса подписки:', error);
     // Возвращаем базовый статус при ошибке
