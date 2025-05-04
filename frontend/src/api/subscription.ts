@@ -21,11 +21,23 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
     throw new Error('ID пользователя не предоставлен');
   }
 
+  console.log(`[API] Запрос статуса подписки для пользователя ID: ${userId}`);
+  
   try {
-    const response = await axios.get(`${API_URL}/subscription/status`, {
-      headers: { 'x-telegram-user-id': userId }
+    // Добавляем случайный параметр для предотвращения кэширования
+    const nocache = new Date().getTime();
+    
+    const response = await axios.get(`${API_URL}/subscription/status?nocache=${nocache}`, {
+      headers: { 
+        'x-telegram-user-id': userId,
+        // Отключаем кэширование
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
     });
     
+    console.log(`[API] Получен ответ о подписке:`, response.data);
     return response.data;
   } catch (error) {
     console.error('Ошибка при получении статуса подписки:', error);
