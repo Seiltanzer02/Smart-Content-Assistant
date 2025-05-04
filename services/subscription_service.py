@@ -80,67 +80,29 @@ class SubscriptionService:
         return stats
         
     async def get_subscription(self, user_id: int):
-        """Получает активную подписку пользователя"""
-        # Используем транзакцию для атомарных операций
-        async with self.db.pool.acquire() as conn:
-            async with conn.transaction():
-                # Сначала запросим подписки только с проверкой is_active
-                query_active = """
-                SELECT * FROM user_subscription 
-                WHERE user_id = $1 AND is_active = TRUE
-                ORDER BY end_date DESC
-                LIMIT 1
-                FOR UPDATE  -- блокировка строки на время транзакции
-                """
-                
-                active_subscription = await conn.fetchrow(query_active, user_id)
-                
-                # Если нашли активную подписку по флагу, проверим её срок
-                if active_subscription:
-                    # Просто выведем отладочную информацию
-                    print(f"[DEBUG] Найдена подписка с is_active=TRUE: ID={active_subscription['id']}, end_date={active_subscription['end_date']}")
-                    
-                    # Проверим, не истек ли срок
-                    current_time = await conn.fetchval("SELECT NOW()")
-                    if active_subscription['end_date'] > current_time:
-                        print(f"[DEBUG] Подписка активна, end_date > NOW(): {active_subscription['end_date']} > {current_time}")
-                        return active_subscription
-                    else:
-                        print(f"[DEBUG] Подписка неактивна (истек срок), end_date <= NOW(): {active_subscription['end_date']} <= {current_time}")
-                        # Деактивируем подписку, так как она истекла
-                        update_query = """
-                        UPDATE user_subscription 
-                        SET is_active = FALSE, updated_at = NOW()
-                        WHERE id = $1
-                        """
-                        await conn.execute(update_query, active_subscription['id'])
-                        return None
-                
-                # Если не нашли подписку с is_active=TRUE, проверим наличие подписок, у которых срок не истек
-                # Это может исправить ситуацию, когда флаг is_active=FALSE, но срок подписки не истек
-                query_valid = """
-                SELECT * FROM user_subscription 
-                WHERE user_id = $1 AND end_date > NOW()
-                ORDER BY end_date DESC
-                LIMIT 1
-                FOR UPDATE  -- блокировка строки на время транзакции
-                """
-                
-                valid_subscription = await conn.fetchrow(query_valid, user_id)
-                
-                if valid_subscription and not valid_subscription['is_active']:
-                    print(f"[DEBUG] Найдена подписка с end_date > NOW(), но is_active=FALSE: ID={valid_subscription['id']}")
-                    # Активируем подписку, так как срок не истек
-                    update_query = """
-                    UPDATE user_subscription 
-                    SET is_active = TRUE, updated_at = NOW()
-                    WHERE id = $1
-                    RETURNING *
-                    """
-                    return await conn.fetchrow(update_query, valid_subscription['id'])
-                
-                # Возвращаем valid_subscription (который может быть None)
-                return valid_subscription
+        """Получает активную подписку пользователя (упрощенная версия)"""
+        # Прямой запрос на активную подписку
+        query = """
+        SELECT * FROM user_subscription 
+        WHERE user_id = $1 AND is_active = TRUE AND end_date > NOW()
+        ORDER BY end_date DESC
+        LIMIT 1
+        """
+        try:
+            # Используем DBService, который теперь должен работать с asyncpg pool
+            subscription = await self.db.fetchrow(query, user_id)
+            if subscription:
+                print(f"[DEBUG SubService] Найдена активная подписка для {user_id}: ID={subscription['id']}, end_date={subscription['end_date']}")
+            else:
+                print(f"[DEBUG SubService] Активная подписка для {user_id} не найдена.")
+            return subscription
+        except Exception as e:
+            # Логируем ошибку, но не прерываем работу полностью, просто возвращаем None
+            print(f"[ERROR SubService] Ошибка при получении подписки для {user_id}: {e}")
+            # Возможно, стоит добавить более детальное логирование
+            # import traceback
+            # print(traceback.format_exc())
+            return None
         
     async def create_subscription(self, user_id: int, payment_id: str = None):
         """Создает новую подписку"""
