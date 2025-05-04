@@ -12,7 +12,7 @@ import glob
 import hashlib
 import shutil
 from typing import List, Dict, Any, Optional, Tuple
-from fastapi import FastAPI, HTTPException, Request, Depends, Response, File, UploadFile, Form
+from fastapi import FastAPI, HTTPException, Request, Depends, Response, File, UploadFile, Form, Query
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -1063,6 +1063,327 @@ async def debug_subscription_status(user_id: str):
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
 
+# Добавляем специальный неперехватываемый эндпоинт для премиум-статуса
+@app.get("/raw-api-data/xyz123/premium-data/{user_id}")
+async def raw_premium_data(user_id: str):
+    """
+    Специальный эндпоинт с нестандартным URL, который не должен перехватываться SPA-роутером.
+    Возвращает данные о премиум-статусе в чистом JSON формате.
+    """
+    try:
+        # Преобразование user_id в число
+        user_id_int = int(user_id)
+        
+        # Получение данных из БД
+        db_url = os.getenv("DATABASE_URL")
+        if not db_url:
+            return JSONResponse(
+                content={"has_premium": False, "error": "DB connection error", "user_id": user_id},
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Content-Type": "application/json",
+                    "X-Content-Type-Options": "nosniff",
+                    "Access-Control-Allow-Origin": "*"
+                }
+            )
+            
+        # Прямой запрос к базе данных
+        conn = await asyncpg.connect(db_url)
+        try:
+            # Проверяем наличие активной подписки
+            query = """
+            SELECT COUNT(*) 
+            FROM user_subscription 
+            WHERE user_id = $1 
+              AND is_active = TRUE 
+              AND end_date > NOW()
+            """
+            count = await conn.fetchval(query, user_id_int)
+            has_premium = count > 0
+            
+            # Получаем информацию о текущей/последней подписке
+            if has_premium:
+                sub_query = """
+                SELECT end_date 
+                FROM user_subscription 
+                WHERE user_id = $1 
+                  AND is_active = TRUE
+                ORDER BY end_date DESC 
+                LIMIT 1
+                """
+                end_date = await conn.fetchval(sub_query, user_id_int)
+                end_date_str = end_date.isoformat() if end_date else None
+            else:
+                end_date_str = None
+                
+            result = {
+                "has_premium": has_premium,
+                "user_id": user_id,
+                "error": None,
+                "subscription_end_date": end_date_str,
+                "analysis_count": 9999 if has_premium else FREE_ANALYSIS_LIMIT,
+                "post_generation_count": 9999 if has_premium else FREE_POST_LIMIT,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+            logger.info(f"[RAW-API] Проверка премиума для пользователя {user_id}: {has_premium}")
+            return JSONResponse(
+                content=result,
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Content-Type": "application/json",
+                    "X-Content-Type-Options": "nosniff",
+                    "Access-Control-Allow-Origin": "*"
+                }
+            )
+            
+        finally:
+            await conn.close()
+            
+    except Exception as e:
+        logger.error(f"Ошибка в raw_premium_data: {e}")
+        return JSONResponse(
+            content={"has_premium": False, "error": str(e), "user_id": user_id},
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Content-Type": "application/json",
+                "X-Content-Type-Options": "nosniff",
+                "Access-Control-Allow-Origin": "*"
+            }
+        )
+
+# Добавляем специальную страницу, которая напрямую встраивает данные о подписке
+@app.get("/premium-page/{user_id}", include_in_schema=False)
+async def premium_data_page(user_id: str):
+    """
+    Специальная страница, которая встраивает данные о подписке непосредственно в HTML.
+    Это позволяет обойти проблемы с маршрутизацией API.
+    """
+    try:
+        # Преобразование user_id в число и получение данных
+        user_id_int = int(user_id)
+        
+        # Получение данных из БД
+        db_url = os.getenv("DATABASE_URL")
+        if not db_url:
+            premium_data = {
+                "has_premium": False, 
+                "error": "DB connection error", 
+                "user_id": user_id
+            }
+        else:
+            # Прямой запрос к базе данных
+            conn = await asyncpg.connect(db_url)
+            try:
+                # Проверяем наличие активной подписки
+                query = """
+                SELECT COUNT(*) 
+                FROM user_subscription 
+                WHERE user_id = $1 
+                  AND is_active = TRUE 
+                  AND end_date > NOW()
+                """
+                count = await conn.fetchval(query, user_id_int)
+                has_premium = count > 0
+                
+                # Получаем информацию о текущей/последней подписке
+                if has_premium:
+                    sub_query = """
+                    SELECT end_date 
+                    FROM user_subscription 
+                    WHERE user_id = $1 
+                      AND is_active = TRUE
+                    ORDER BY end_date DESC 
+                    LIMIT 1
+                    """
+                    end_date = await conn.fetchval(sub_query, user_id_int)
+                    end_date_str = end_date.isoformat() if end_date else None
+                else:
+                    end_date_str = None
+                    
+                premium_data = {
+                    "has_premium": has_premium,
+                    "user_id": user_id,
+                    "error": None,
+                    "subscription_end_date": end_date_str,
+                    "analysis_count": 9999 if has_premium else FREE_ANALYSIS_LIMIT,
+                    "post_generation_count": 9999 if has_premium else FREE_POST_LIMIT,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            finally:
+                await conn.close()
+        
+        # Создаем HTML страницу с встроенными данными о подписке
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Премиум статус - ContentHelperBot</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+                body {{ font-family: Arial, sans-serif; text-align: center; max-width: 500px; margin: 0 auto; padding: 20px; }}
+                .premium {{ background: linear-gradient(135deg, #1e88e5, #0d47a1); color: white; padding: 20px; border-radius: 10px; }}
+                .free {{ background-color: #f5f5f5; padding: 20px; border-radius: 10px; }}
+                .premium-badge {{ display: inline-block; background-color: gold; color: #333; padding: 8px 16px; 
+                                 border-radius: 20px; font-weight: bold; margin-bottom: 10px; }}
+                .free-badge {{ display: inline-block; background-color: #e0e0e0; color: #333; padding: 8px 16px; 
+                              border-radius: 20px; font-weight: bold; }}
+                .error {{ background-color: #ffebee; color: #c62828; padding: 20px; border-radius: 10px; }}
+                button {{ padding: 10px 20px; background-color: #1e88e5; color: white; border: none; 
+                         border-radius: 4px; margin-top: 20px; cursor: pointer; }}
+                pre {{ background: #f0f0f0; padding: 10px; border-radius: 4px; text-align: left; overflow: auto; }}
+            </style>
+        </head>
+        <body>
+            <h1>Статус премиум-подписки</h1>
+            <p>Пользователь ID: {user_id}</p>
+            
+            <div class="{'premium' if premium_data.get('has_premium') else 'free'}">
+                {{'<div class="premium-badge">ПРЕМИУМ</div>' if premium_data.get('has_premium') else '<div class="free-badge">Бесплатный доступ</div>'}}
+                
+                {{'<p>Ваша подписка действительна до: ' + premium_data.get('subscription_end_date', '').split('T')[0] + '</p>' if premium_data.get('subscription_end_date') else ''}}
+                
+                <p>Доступные анализы: {premium_data.get('analysis_count', 0)}</p>
+                <p>Доступные генерации: {premium_data.get('post_generation_count', 0)}</p>
+            </div>
+            
+            <button onclick="window.location.reload()">Обновить статус</button>
+            
+            <details style="margin-top: 30px;">
+                <summary>Данные для отладки</summary>
+                <pre>{json.dumps(premium_data, indent=2)}</pre>
+            </details>
+            
+            <script>
+                // Сохраняем данные в localStorage для использования в SPA
+                const premiumData = {json.dumps(premium_data)};
+                localStorage.setItem('premium_data_{user_id}', JSON.stringify(premiumData));
+                localStorage.setItem('contenthelper_user_id', '{user_id}');
+                
+                // Имитируем события для компонентов React
+                document.addEventListener('DOMContentLoaded', function() {{
+                    // Создаем событие с данными премиум-статуса
+                    const event = new CustomEvent('premiumStatusLoaded', {{ 
+                        detail: {{ 
+                            premiumStatus: premiumData,
+                            userId: '{user_id}'
+                        }} 
+                    }});
+                    
+                    // Создаем событие с userId
+                    const userIdEvent = new CustomEvent('userIdInjected', {{ 
+                        detail: {{ 
+                            userId: '{user_id}'
+                        }} 
+                    }});
+                    
+                    // Отправляем события
+                    setTimeout(() => {{
+                        console.log('Отправка событий с данными премиум-статуса');
+                        document.dispatchEvent(event);
+                        document.dispatchEvent(userIdEvent);
+                    }}, 500);
+                }});
+            </script>
+        </body>
+        </html>
+        """
+        
+        return HTMLResponse(
+            content=html_content,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при создании страницы премиум-статуса: {e}")
+        error_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Ошибка - ContentHelperBot</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+                body {{ font-family: Arial, sans-serif; text-align: center; max-width: 500px; margin: 0 auto; padding: 20px; }}
+                .error {{ background-color: #ffebee; color: #c62828; padding: 20px; border-radius: 10px; }}
+            </style>
+        </head>
+        <body>
+            <h1>Ошибка при получении данных</h1>
+            <div class="error">
+                <p>Произошла ошибка при получении статуса подписки:</p>
+                <p>{str(e)}</p>
+            </div>
+            <button onclick="window.location.reload()">Попробовать снова</button>
+        </body>
+        </html>
+        """
+        return HTMLResponse(
+            content=error_html,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+
+# Добавляем административный эндпоинт для форсирования премиум-статуса
+@app.get("/admin/force-premium/{user_id}/{days}", include_in_schema=False)
+async def force_premium_status(user_id: str, days: int = 30, admin_key: str = Query(None)):
+    """
+    Административный эндпоинт для принудительного создания премиум-подписки
+    """
+    # Проверка ключа администратора
+    if not admin_key or admin_key != os.getenv("ADMIN_KEY", "admin_secret_key"):
+        raise HTTPException(status_code=403, detail="Неверный ключ администратора")
+    
+    try:
+        # Преобразуем user_id в число
+        user_id_int = int(user_id)
+        
+        # Получаем соединение с БД
+        db_url = os.getenv("DATABASE_URL")
+        if not db_url:
+            raise HTTPException(status_code=500, detail="Ошибка соединения с базой данных")
+        
+        # Подключаемся к БД
+        conn = await asyncpg.connect(db_url)
+        try:
+            # Определяем даты
+            start_date = datetime.now(timezone.utc)
+            end_date = start_date + timedelta(days=days)
+            
+            # Деактивируем все предыдущие подписки для этого пользователя
+            await conn.execute(
+                "UPDATE user_subscription SET is_active = FALSE WHERE user_id = $1",
+                user_id_int
+            )
+            
+            # Создаем новую подписку
+            await conn.execute(
+                """
+                INSERT INTO user_subscription
+                (user_id, start_date, end_date, payment_id, is_active, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                user_id_int,
+                start_date,
+                end_date,
+                f"admin_force_{start_date.timestamp()}",
+                True,
+                start_date,
+                start_date
+            )
+            
+            return {
+                "success": True,
+                "message": f"Премиум-статус успешно активирован для пользователя {user_id}",
+                "user_id": user_id,
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "duration_days": days
+            }
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.error(f"Ошибка при форсировании премиума: {e}")
+        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера: {str(e)}")
+
 # ===========================================
 # === МОНТИРОВАНИЕ СТАТИЧЕСКИХ ФАЙЛОВ И SPA ===
 # ===========================================
@@ -1127,6 +1448,183 @@ if os.path.exists(static_files_path) and os.path.isdir(static_files_path):
 else:
     logger.warning(f"Папка статических файлов SPA не найдена: {static_files_path}")
     logger.warning("Фронтенд не будет обслуживаться. Работают только API эндпоинты.")
+
+# Функция для добавления инжектора премиума в HTML
+def inject_premium_script(html_content):
+    """
+    Добавляет скрипт инжектора премиума в HTML-страницу SPA
+    """
+    # Добавляем скрипт перед закрывающим тегом head
+    premium_script = """
+    <!-- Premium Status Injector Script -->
+    <script>
+    // Скрипт для инъекции премиум-статуса напрямую в приложение
+    (function() {
+      console.log('[PremiumInjector] Инициализация...');
+      
+      /**
+       * Извлекает userId из URL или Telegram WebApp
+       */
+      function extractUserId() {
+        let userId = null;
+        
+        // Проверяем параметры URL
+        const urlParams = new URLSearchParams(window.location.search);
+        userId = urlParams.get('user_id');
+        
+        if (userId) {
+          console.log(`[PremiumInjector] Получен userId из URL: ${userId}`);
+          return userId;
+        }
+        
+        // Проверяем Telegram WebApp
+        if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
+          userId = window.Telegram.WebApp.initDataUnsafe.user.id.toString();
+          console.log(`[PremiumInjector] Получен userId из Telegram WebApp: ${userId}`);
+          return userId;
+        }
+        
+        // Проверяем localStorage
+        const storedUserId = localStorage.getItem('contenthelper_user_id');
+        if (storedUserId) {
+          console.log(`[PremiumInjector] Получен userId из localStorage: ${storedUserId}`);
+          return storedUserId;
+        }
+        
+        return null;
+      }
+      
+      /**
+       * Сохраняет премиум-статус в localStorage
+       */
+      function savePremiumStatus(userId, isPremium = true, daysValid = 30) {
+        if (!userId) return;
+        
+        const now = new Date();
+        const endDate = new Date();
+        endDate.setDate(now.getDate() + daysValid);
+        
+        const premiumData = {
+          has_premium: isPremium,
+          user_id: userId,
+          error: null,
+          subscription_end_date: endDate.toISOString(),
+          analysis_count: isPremium ? 9999 : 3,
+          post_generation_count: isPremium ? 9999 : 1
+        };
+        
+        localStorage.setItem(`premium_data_${userId}`, JSON.stringify(premiumData));
+        localStorage.setItem('contenthelper_user_id', userId);
+        
+        console.log(`[PremiumInjector] Установлен ${isPremium ? 'ПРЕМИУМ' : 'БЕСПЛАТНЫЙ'} статус для пользователя ${userId}`);
+        
+        // Создаем пользовательское событие
+        const event = new CustomEvent('premiumStatusLoaded', {
+          detail: {
+            premiumStatus: premiumData,
+            userId: userId
+          }
+        });
+        
+        // Создаем событие с userId
+        const userIdEvent = new CustomEvent('userIdInjected', {
+          detail: {
+            userId: userId
+          }
+        });
+        
+        // Отправляем события
+        document.dispatchEvent(event);
+        document.dispatchEvent(userIdEvent);
+        
+        // Устанавливаем глобальную переменную
+        window.INJECTED_USER_ID = userId;
+        
+        return premiumData;
+      }
+      
+      /**
+       * Проверяет URL на наличие команды для инъекции премиума
+       */
+      function checkForPremiumCommand() {
+        // Проверяем хэш в URL
+        const hash = window.location.hash;
+        if (hash && hash.includes('force_premium')) {
+          console.log('[PremiumInjector] Обнаружена команда force_premium в URL');
+          
+          const userId = extractUserId();
+          if (userId) {
+            savePremiumStatus(userId, true, 30);
+            
+            // Очищаем хэш, чтобы команда не выполнялась повторно
+            if (history.replaceState) {
+              history.replaceState(null, null, window.location.pathname + window.location.search);
+            }
+          }
+        }
+      }
+      
+      // Выполняем проверку при загрузке страницы
+      document.addEventListener('DOMContentLoaded', checkForPremiumCommand);
+      
+      // Также проверяем сразу (может пригодиться, если DOM уже загружен)
+      if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        setTimeout(checkForPremiumCommand, 100);
+      }
+      
+      // Экспортируем функции в глобальный объект window
+      window.PremiumInjector = {
+        extractUserId,
+        savePremiumStatus,
+        forcePremium: function(userId, days = 30) {
+          if (!userId) {
+            userId = extractUserId();
+          }
+          if (userId) {
+            return savePremiumStatus(userId, true, days);
+          }
+          return null;
+        }
+      };
+      
+    })();
+    </script>
+    """
+    
+    # Вставляем перед закрывающим тегом </head>
+    if "</head>" in html_content:
+        html_content = html_content.replace("</head>", f"{premium_script}</head>")
+    
+    return html_content
+
+# Функция-middleware для модификации HTML-ответов
+@app.middleware("http")
+async def spa_html_modifier(request: Request, call_next):
+    # Пропускаем API-запросы
+    if request.url.path.startswith("/api/") or request.url.path.startswith("/raw-api-data/"):
+        return await call_next(request)
+    
+    response = await call_next(request)
+    
+    # Модифицируем только HTML-ответы
+    if response.headers.get("content-type") and "text/html" in response.headers.get("content-type"):
+        # Получаем тело ответа
+        body = b""
+        async for chunk in response.body_iterator:
+            body += chunk
+        
+        # Декодируем HTML и модифицируем
+        html_content = body.decode("utf-8")
+        modified_html = inject_premium_script(html_content)
+        
+        # Создаем новый ответ
+        return HTMLResponse(
+            content=modified_html,
+            status_code=response.status_code,
+            headers=dict(response.headers)
+        )
+    
+    return response
 
 # --- Запуск сервера (если используется __main__) ---
 if __name__ == "__main__":

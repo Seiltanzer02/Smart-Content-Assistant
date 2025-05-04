@@ -184,6 +184,44 @@
   background-color: #357abd;
 }
 
+.status-page-button {
+  margin-top: 10px;
+  padding: 5px 10px;
+  background-color: #2ecc71;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 10px;
+}
+
+.status-page-button:hover {
+  background-color: #27ae60;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.force-premium-button {
+  margin-top: 5px;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, #f39c12, #e67e22);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.force-premium-button:hover {
+  background: linear-gradient(135deg, #e67e22, #d35400);
+}
+
 /* Telegram Mini App темная тема */
 body.dark-theme .direct-status.loading {
   background-color: #333;

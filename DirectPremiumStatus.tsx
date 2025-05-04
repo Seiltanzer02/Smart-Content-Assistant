@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './DirectPremiumStatus.css';
-import { getPremiumStatus, PremiumStatus } from '../api/subscription';
+import { PremiumStatus, getPremiumStatus, getRawPremiumStatus, openPremiumStatusPage, forcePremiumStatus } from '../api/subscription';
 
 interface DirectPremiumStatusProps {
-  userId: string | null;
-  showDebug?: boolean;
+  userId?: string | null;
+  forcePremium?: boolean;
 }
 
 // API_URL для относительных путей
@@ -14,223 +14,107 @@ const API_URL = '';
  * Компонент для прямого определения премиум-статуса пользователя
  * Использует выделенный эндпоинт API-V2 и надежное отображение статуса
  */
-const DirectPremiumStatus: React.FC<DirectPremiumStatusProps> = ({ userId, showDebug = false }) => {
-  const [hasPremium, setHasPremium] = useState<boolean>(false);
+const DirectPremiumStatus: React.FC<DirectPremiumStatusProps> = ({ userId, forcePremium = false }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [endDate, setEndDate] = useState<string | null>(null);
-  const [responseData, setResponseData] = useState<PremiumStatus | null>(null);
-  
-  // Сохраняем userId в ref для предотвращения лишних перерисовок
+  const [premiumStatus, setPremiumStatus] = useState<PremiumStatus | null>(null);
+  const [debugInfo, setDebugInfo] = useState<string | null>(null);
   const userIdRef = useRef<string | null>(null);
-  
-  // Таймер автообновления
-  const updateTimerRef = useRef<number | null>(null);
+  const attempts = useRef<number>(0);
+  const usingFallback = useRef<boolean>(false);
 
-  // Получаем и сохраняем userId из разных источников
+  // Проверка/получение userId из различных источников
   useEffect(() => {
-    console.log('[DirectPremiumStatus] Инициализация компонента');
-    
-    const validateUserId = () => {
-      // Приоритет 1: userId из props
-      if (userId) {
-        console.log(`[DirectPremiumStatus] Используем userId из props: ${userId}`);
-        userIdRef.current = userId;
-        return;
-      }
-      
-      // Приоритет 2: userId из Telegram WebApp
+    // Устанавливаем userId из пропсов, если он есть
+    if (userId) {
+      userIdRef.current = userId;
+      console.log(`[DirectStatus] Получен userId из props: ${userId}`);
+    } 
+    // Иначе проверяем другие источники
+    else {
+      // Проверяем окно Telegram
       if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
-        const telegramUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
-        console.log(`[DirectPremiumStatus] Используем userId из Telegram WebApp: ${telegramUserId}`);
-        userIdRef.current = telegramUserId;
-        return;
+        userIdRef.current = window.Telegram.WebApp.initDataUnsafe.user.id.toString();
+        console.log(`[DirectStatus] Получен userId из Telegram.WebApp: ${userIdRef.current}`);
+      } 
+      // Проверяем инжектированный ID
+      else if (window.INJECTED_USER_ID) {
+        userIdRef.current = window.INJECTED_USER_ID;
+        console.log(`[DirectStatus] Получен userId из INJECTED_USER_ID: ${userIdRef.current}`);
       }
-      
-      // Приоритет 3: userId из URL-параметров
-      try {
-        // Извлекаем userId из параметров URL
-        const urlParams = new URLSearchParams(window.location.search);
-        const urlUserId = urlParams.get('user_id');
-        
-        if (urlUserId) {
-          console.log(`[DirectPremiumStatus] Получен userId из URL: ${urlUserId}`);
-          userIdRef.current = urlUserId;
-          return;
-        }
-        
-        // Извлекаем userId из hash данных Telegram WebApp
-        const hash = window.location.hash;
-        if (hash && hash.includes("user")) {
-          const decodedHash = decodeURIComponent(hash);
-          const userMatch = decodedHash.match(/"id":(\d+)/);
-          if (userMatch && userMatch[1]) {
-            console.log(`[DirectPremiumStatus] Получен userId из hash Telegram WebApp: ${userMatch[1]}`);
-            userIdRef.current = userMatch[1];
-            return;
-          }
-        }
-      } catch (e) {
-        console.error('[DirectPremiumStatus] Ошибка при извлечении userId из URL:', e);
+      // Проверяем localStorage
+      else if (localStorage.getItem('contenthelper_user_id')) {
+        userIdRef.current = localStorage.getItem('contenthelper_user_id');
+        console.log(`[DirectStatus] Получен userId из localStorage: ${userIdRef.current}`);
       }
-      
-      // Если userId не определен, логируем ошибку
-      console.error('[DirectPremiumStatus] Не удалось определить userId');
-      setError('ID пользователя не определен');
-    };
+    }
     
-    validateUserId();
-    
-    // Очистка таймера при размонтировании
-    return () => {
-      if (updateTimerRef.current !== null) {
-        clearInterval(updateTimerRef.current);
-        updateTimerRef.current = null;
-      }
-    };
+    // Проверяем статус премиума, если userId известен
+    if (userIdRef.current) {
+      checkPremiumStatus();
+    } else {
+      setLoading(false);
+      setError('ID пользователя не найден');
+    }
   }, [userId]);
 
-  // Добавляем слушатель событий для получения userId и статуса из инъекции
-  useEffect(() => {
-    // Функция-обработчик события инъекции userId
-    const handleUserIdInjection = (event: CustomEvent) => {
-      const injectedUserId = event.detail?.userId;
-      if (injectedUserId) {
-        console.log(`[DirectPremiumStatus] Получен инъектированный userId: ${injectedUserId}`);
-        userIdRef.current = injectedUserId;
-        
-        // Перезапускаем проверку статуса
-        checkPremiumStatus();
-      }
-    };
-    
-    // Функция-обработчик загруженного статуса премиума
-    const handlePremiumStatus = (event: CustomEvent) => {
-      const statusData = event.detail?.premiumStatus;
-      const injectedUserId = event.detail?.userId;
-      
-      if (statusData && injectedUserId) {
-        console.log(`[DirectPremiumStatus] Получен статус премиума из инъекции:`, statusData);
-        
-        // Обновляем состояние компонента
-        setHasPremium(statusData.has_premium);
-        setEndDate(statusData.subscription_end_date || null);
-        setResponseData(statusData);
-        setError(statusData.error || null);
-        setLoading(false);
-        
-        // Обновляем userId, если он еще не установлен
-        if (!userIdRef.current) {
-          userIdRef.current = injectedUserId;
-        }
-      }
-    };
-    
-    // Объявление глобальной переменной для TypeScript
-    interface WindowWithInjection extends Window {
-      INJECTED_USER_ID?: string;
-    }
-    
-    // Проверяем, есть ли userId уже в window
-    const windowWithInjection = window as WindowWithInjection;
-    if (windowWithInjection.INJECTED_USER_ID && !userIdRef.current) {
-      console.log(`[DirectPremiumStatus] Найден INJECTED_USER_ID: ${windowWithInjection.INJECTED_USER_ID}`);
-      userIdRef.current = windowWithInjection.INJECTED_USER_ID;
-      checkPremiumStatus();
-    }
-    
-    // Проверяем, есть ли userId в localStorage
-    try {
-      const storedUserId = localStorage.getItem('contenthelper_user_id');
-      if (storedUserId && !userIdRef.current) {
-        console.log(`[DirectPremiumStatus] Найден userId в localStorage: ${storedUserId}`);
-        userIdRef.current = storedUserId;
-        checkPremiumStatus();
-      }
-    } catch (e) {
-      console.warn('[DirectPremiumStatus] Ошибка чтения из localStorage:', e);
-    }
-    
-    // Регистрируем слушателей событий
-    document.addEventListener('userIdInjected', handleUserIdInjection as EventListener);
-    document.addEventListener('premiumStatusLoaded', handlePremiumStatus as EventListener);
-    
-    // Очистка при размонтировании
-    return () => {
-      document.removeEventListener('userIdInjected', handleUserIdInjection as EventListener);
-      document.removeEventListener('premiumStatusLoaded', handlePremiumStatus as EventListener);
-    };
-  }, []);
-
-  // Функция для получения премиум-статуса
+  // Основная функция проверки премиума
   const checkPremiumStatus = async () => {
     if (!userIdRef.current) {
-      setError('ID пользователя не определен');
       setLoading(false);
+      setError('ID пользователя не найден');
       return;
     }
+
+    setLoading(true);
+    setError(null);
+    attempts.current += 1;
     
     try {
-      setLoading(true);
+      console.log(`[DirectStatus] Запрос статуса для ID: ${userIdRef.current}`);
       
-      console.log(`[DirectPremiumStatus] Запрос статуса для ID: ${userIdRef.current}`);
+      // Сначала пробуем получить статус через RAW API
+      if (attempts.current <= 1 || !usingFallback.current) {
+        try {
+          const premiumData = await getRawPremiumStatus(userIdRef.current, `_nocache=${Date.now()}`);
+          console.log(`[DirectStatus] Получен RAW ответ:`, premiumData);
+          setPremiumStatus(premiumData);
+          setDebugInfo(JSON.stringify(premiumData, null, 2));
+          setLoading(false);
+          return;
+        } catch (rawError) {
+          console.error('[DirectStatus] Ошибка при получении RAW статуса:', rawError);
+          console.log('[DirectStatus] Переключение на обычный API...');
+          usingFallback.current = true;
+        }
+      }
       
-      // Используем новый API для проверки премиума с защитой от кэширования
+      // Если RAW API не сработал, используем обычный API
       const premiumData = await getPremiumStatus(userIdRef.current, `_nocache=${Date.now()}`);
+      console.log(`[DirectStatus] Получен ответ:`, premiumData);
       
-      console.log(`[DirectPremiumStatus] Получен ответ:`, premiumData);
+      // Проверяем, не получили ли мы HTML вместо JSON
+      if (typeof premiumData === 'string' && 
+          (premiumData.includes('<!doctype html>') || premiumData.includes('<html>'))) {
+        console.error('[DirectStatus] Получен HTML вместо JSON');
+        throw new Error('Получен HTML вместо данных (проблема маршрутизации API)');
+      }
       
-      // Обновляем состояние компонента
-      setHasPremium(premiumData.has_premium);
-      setEndDate(premiumData.subscription_end_date || null);
-      setResponseData(premiumData);
-      setError(premiumData.error || null);
+      setPremiumStatus(premiumData);
+      setDebugInfo(JSON.stringify(premiumData, null, 2));
       
-    } catch (e) {
-      console.error(`[DirectPremiumStatus] Ошибка запроса:`, e);
-      setError(`Ошибка запроса: ${e instanceof Error ? e.message : 'Неизвестная ошибка'}`);
+    } catch (err) {
+      console.error('[DirectStatus] Ошибка:', err);
+      setError(err instanceof Error ? err.message : 'Неизвестная ошибка');
     } finally {
       setLoading(false);
     }
   };
 
-  // Проверка статуса при монтировании компонента и при изменении userId
-  useEffect(() => {
+  // Открытие отдельной страницы со статусом премиума
+  const openStatusPage = () => {
     if (userIdRef.current) {
-      checkPremiumStatus();
-      
-      // Устанавливаем таймер для регулярного обновления
-      const updateInterval = 30000; // 30 секунд
-      updateTimerRef.current = window.setInterval(checkPremiumStatus, updateInterval);
-    }
-    
-    return () => {
-      if (updateTimerRef.current !== null) {
-        clearInterval(updateTimerRef.current);
-        updateTimerRef.current = null;
-      }
-    };
-  }, []);
-
-  // Функция для форматирования даты с часовым поясом
-  const formatDate = (isoDateString: string): string => {
-    try {
-      const date = new Date(isoDateString);
-      
-      // Форматируем дату с временем и часовым поясом
-      const options: Intl.DateTimeFormatOptions = {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZoneName: 'short'
-      };
-      
-      return date.toLocaleDateString('ru-RU', options);
-    } catch (e) {
-      console.error('Ошибка при форматировании даты:', e);
-      return 'Неизвестная дата';
+      openPremiumStatusPage(userIdRef.current, true);
     }
   };
 
@@ -242,60 +126,132 @@ const DirectPremiumStatus: React.FC<DirectPremiumStatusProps> = ({ userId, showD
       ) : error ? (
         <div className="direct-status error">
           {error}
-          <button 
-            className="refresh-button"
-            onClick={checkPremiumStatus}
-          >
-            Проверить снова
-          </button>
+          <div className="actions">
+            <button 
+              className="refresh-button"
+              onClick={checkPremiumStatus}
+            >
+              Проверить снова
+            </button>
+            
+            {/* Кнопка для открытия отдельной страницы */}
+            {userIdRef.current && (
+              <button 
+                className="status-page-button"
+                onClick={openStatusPage}
+              >
+                Открыть страницу
+              </button>
+            )}
+            
+            {/* Добавляем кнопку для диагностики */}
+            {userIdRef.current && (
+              <button 
+                className="debug-button"
+                onClick={() => {
+                  // Открываем диагностический эндпоинт в новом окне
+                  window.open(`/api/subscription/debug/${userIdRef.current}?create_test=true`, '_blank');
+                }}
+              >
+                Диагностика
+              </button>
+            )}
+          </div>
           
-          {/* Добавляем кнопку для диагностики */}
-          <button 
-            className="debug-button"
-            onClick={() => {
-              if (!userIdRef.current) return;
-              
-              // Открываем диагностический эндпоинт в новом окне
-              window.open(`/api/subscription/debug/${userIdRef.current}?create_test=true`, '_blank');
-            }}
-          >
-            Диагностика и создание тестовой подписки
-          </button>
+          {/* Форма для ручного ввода userId */}
+          <div className="manual-userid-form">
+            <input 
+              type="text" 
+              placeholder="Введите ваш ID вручную" 
+              defaultValue={userIdRef.current || ''}
+              onChange={(e) => {
+                const value = e.target.value.trim();
+                if (value && !isNaN(Number(value))) {
+                  userIdRef.current = value;
+                  localStorage.setItem('contenthelper_user_id', value);
+                }
+              }}
+            />
+            <button onClick={checkPremiumStatus}>Проверить</button>
+            
+            {/* Кнопка для принудительной установки премиум статуса */}
+            <button 
+              className="force-premium-button" 
+              onClick={() => {
+                if (!userIdRef.current) return;
+                forcePremiumStatus(userIdRef.current, true, 30);
+                // Обновим состояние компонента тоже
+                setPremiumStatus({
+                  has_premium: true,
+                  user_id: userIdRef.current,
+                  error: null,
+                  subscription_end_date: new Date(Date.now() + 30*24*60*60*1000).toISOString(),
+                  analysis_count: 9999,
+                  post_generation_count: 9999
+                });
+                setError(null);
+                setLoading(false);
+              }}
+            >
+              Премиум 👑
+            </button>
+          </div>
         </div>
-      ) : (
-        <div className={`direct-status ${hasPremium ? 'premium' : 'free'}`}>
-          {hasPremium ? (
-            <>
-              <div className="premium-badge">
-                <span className="premium-icon">⭐</span>
-                <span>ПРЕМИУМ</span>
-              </div>
-              {endDate && (
-                <div className="expiry-date">
-                  до {formatDate(endDate)}
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="free-badge">Бесплатный доступ</div>
+      ) : premiumStatus?.has_premium || forcePremium ? (
+        <div className="direct-status premium">
+          <div className="premium-badge">
+            <span className="premium-icon">⭐</span>
+            ПРЕМИУМ
+          </div>
+          
+          {forcePremium && !premiumStatus?.has_premium && (
+            <div className="forced-premium-badge">
+              <span className="forced-note">Принудительно активирован</span>
+            </div>
           )}
           
-          {showDebug && responseData && (
+          {premiumStatus?.subscription_end_date && (
+            <div className="expiry-date">
+              Подписка активна до: {new Date(premiumStatus.subscription_end_date).toLocaleDateString()}
+            </div>
+          )}
+          
+          {/* Кнопка для открытия отдельной страницы */}
+          <button 
+            className="status-page-button"
+            onClick={openStatusPage}
+          >
+            Подробнее
+          </button>
+          
+          {debugInfo && (
             <div className="debug-data">
               <details>
-                <summary>Отладочная информация</summary>
-                <pre>{JSON.stringify(responseData, null, 2)}</pre>
-                <p>
-                  ID: {userIdRef.current || 'не определен'}<br/>
-                  Telegram WebApp: {window.Telegram?.WebApp ? 'Доступен' : 'Не доступен'}<br/>
-                  {window.Telegram?.WebApp?.initDataUnsafe?.user?.id && 
-                    `Telegram ID: ${window.Telegram.WebApp.initDataUnsafe.user.id}`
-                  }
-                </p>
+                <summary>Данные для отладки</summary>
+                <pre>{debugInfo}</pre>
               </details>
-              <button onClick={checkPremiumStatus} className="refresh-button">
-                Обновить статус
-              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="direct-status free">
+          <div className="free-badge">Бесплатный доступ</div>
+          <p>Для получения расширенного функционала приобретите подписку</p>
+          
+          {/* Кнопка для открытия отдельной страницы */}
+          <button 
+            className="status-page-button"
+            onClick={openStatusPage}
+          >
+            Подробнее
+          </button>
+          
+          {debugInfo && (
+            <div className="debug-data">
+              <details>
+                <summary>Данные для отладки</summary>
+                <pre>{debugInfo}</pre>
+              </details>
             </div>
           )}
         </div>

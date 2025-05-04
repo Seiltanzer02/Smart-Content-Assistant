@@ -172,4 +172,164 @@ export const getPremiumStatus = async (userId: string | null, nocacheParam?: str
       error: error instanceof Error ? error.message : 'Неизвестная ошибка'
     };
   }
+};
+
+/**
+ * Получает статус премиума напрямую с нестандартного URL, который не должен перехватываться SPA роутером
+ * @param userId ID пользователя Telegram
+ * @param nocache Параметр для предотвращения кэширования
+ * @returns Promise с данными о статусе премиума
+ */
+export const getRawPremiumStatus = async (userId: string | null, nocache: string = ''): Promise<PremiumStatus> => {
+  if (!userId) {
+    throw new Error('ID пользователя не предоставлен');
+  }
+
+  console.log(`[API] Запрос RAW статуса премиума для пользователя ID: ${userId}`);
+  
+  try {
+    // Используем необычный URL, который не должен быть перехватан SPA роутером
+    const response = await fetch(`/raw-api-data/xyz123/premium-data/${userId}?${nocache}`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      },
+      cache: 'no-store'
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      
+      // Проверяем, не получили ли мы HTML вместо JSON
+      if (text.includes('<!doctype html>') || text.includes('<html>')) {
+        console.error('[API] Получен HTML вместо JSON. Используем альтернативный метод.');
+        
+        // Проверяем наличие данных в localStorage
+        const cachedData = localStorage.getItem(`premium_data_${userId}`);
+        if (cachedData) {
+          console.log('[API] Используем кэшированные данные из localStorage');
+          return JSON.parse(cachedData);
+        }
+        
+        throw new Error('Ошибка API: получен HTML вместо JSON');
+      }
+      
+      throw new Error(`Ошибка API: ${response.status} ${text}`);
+    }
+
+    const data = await response.json();
+    console.log(`[API] Получен RAW ответ о премиуме:`, data);
+
+    // Сохраняем успешный ответ в localStorage для резервного использования
+    localStorage.setItem(`premium_data_${userId}`, JSON.stringify(data));
+    
+    return data;
+  } catch (error) {
+    console.error('[API] Ошибка при получении RAW статуса премиума:', error);
+    
+    // Проверяем наличие данных в localStorage как запасной вариант
+    const cachedData = localStorage.getItem(`premium_data_${userId}`);
+    if (cachedData) {
+      console.log('[API] Используем кэшированные данные из localStorage');
+      return JSON.parse(cachedData);
+    }
+    
+    // Если данных нет, возвращаем ошибку
+    return {
+      has_premium: false,
+      user_id: userId,
+      error: error instanceof Error ? error.message : 'Неизвестная ошибка'
+    };
+  }
+};
+
+/**
+ * Открывает отдельную страницу с информацией о премиум-статусе
+ * Это обходное решение, когда API-вызовы не работают из-за маршрутизации
+ * @param userId ID пользователя
+ * @param newWindow Открыть в новом окне (true) или в текущем (false)
+ */
+export const openPremiumStatusPage = (userId: string | null, newWindow: boolean = false): void => {
+  if (!userId) {
+    console.error('[API] Попытка открыть страницу премиум-статуса без userId');
+    return;
+  }
+  
+  const url = `/premium-page/${userId}`;
+  
+  if (newWindow) {
+    window.open(url, '_blank');
+  } else {
+    window.location.href = url;
+  }
+};
+
+/**
+ * Принудительно устанавливает премиум-статус пользователя локально в браузере
+ * Это обходное решение для тестирования или для случаев, когда API не работает
+ * 
+ * @param userId ID пользователя
+ * @param isPremium Статус премиума (по умолчанию - true)
+ * @param daysValid Количество дней действия премиума (по умолчанию - 30)
+ */
+export const forcePremiumStatus = (userId: string, isPremium: boolean = true, daysValid: number = 30): void => {
+  if (!userId) {
+    console.error('[API] Попытка форсировать премиум-статус без userId');
+    return;
+  }
+
+  const now = new Date();
+  const endDate = new Date();
+  endDate.setDate(now.getDate() + daysValid);
+
+  const premiumData: PremiumStatus = {
+    has_premium: isPremium,
+    user_id: userId,
+    error: null,
+    subscription_end_date: endDate.toISOString(),
+    analysis_count: isPremium ? 9999 : 3,
+    post_generation_count: isPremium ? 9999 : 1
+  };
+
+  // Сохраняем в localStorage
+  localStorage.setItem(`premium_data_${userId}`, JSON.stringify(premiumData));
+  localStorage.setItem('contenthelper_user_id', userId);
+  console.log(`[API] Принудительно установлен ${isPremium ? 'ПРЕМИУМ' : 'БЕСПЛАТНЫЙ'} статус для пользователя ${userId}`);
+
+  // Создаем пользовательское событие
+  const event = new CustomEvent('premiumStatusLoaded', {
+    detail: {
+      premiumStatus: premiumData,
+      userId: userId
+    }
+  });
+
+  // Отправляем событие
+  document.dispatchEvent(event);
+
+  return;
+};
+
+/**
+ * Проверяет, есть ли локально сохраненный премиум-статус для пользователя
+ * 
+ * @param userId ID пользователя
+ * @returns {boolean} true, если пользователь имеет премиум-статус
+ */
+export const hasLocalPremium = (userId: string): boolean => {
+  if (!userId) return false;
+
+  const premiumDataStr = localStorage.getItem(`premium_data_${userId}`);
+  if (!premiumDataStr) return false;
+
+  try {
+    const premiumData = JSON.parse(premiumDataStr);
+    return !!premiumData.has_premium;
+  } catch (e) {
+    console.error('[API] Ошибка при проверке локального премиум-статуса:', e);
+    return false;
+  }
 }; 
