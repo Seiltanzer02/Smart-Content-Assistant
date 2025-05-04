@@ -476,4 +476,3 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
 };
 
 export default SubscriptionWidget; 
-export default SubscriptionWidget; 
