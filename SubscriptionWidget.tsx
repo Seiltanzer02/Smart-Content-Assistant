@@ -242,6 +242,76 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     }
   };
   
+  // Добавляем слушатель событий для получения userId из инъекции
+  useEffect(() => {
+    // Функция-обработчик события инъекции userId
+    const handleUserIdInjection = (event: CustomEvent) => {
+      const injectedUserId = event.detail?.userId;
+      if (injectedUserId) {
+        console.log(`[SubscriptionWidget] Получен инъектированный userId: ${injectedUserId}`);
+        userIdRef.current = injectedUserId;
+        
+        // Перезапускаем проверку подписки
+        checkPremiumDirectly();
+      }
+    };
+    
+    // Функция-обработчик загруженного статуса премиума
+    const handlePremiumStatus = (event: CustomEvent) => {
+      const statusData = event.detail?.premiumStatus;
+      const injectedUserId = event.detail?.userId;
+      
+      if (statusData && injectedUserId) {
+        console.log(`[SubscriptionWidget] Получен статус премиума из инъекции:`, statusData);
+        
+        // Преобразуем формат премиум-статуса в формат подписки
+        setStatus({
+          has_subscription: statusData.has_premium,
+          analysis_count: statusData.analysis_count || 1,
+          post_generation_count: statusData.post_generation_count || 1,
+          subscription_end_date: statusData.subscription_end_date
+        });
+        
+        setLoading(false);
+        setError(null);
+        
+        // Обновляем userId, если он еще не установлен
+        if (!userIdRef.current) {
+          userIdRef.current = injectedUserId;
+        }
+      }
+    };
+    
+    // Проверяем, есть ли userId уже в window
+    if (window.INJECTED_USER_ID && !userIdRef.current) {
+      console.log(`[SubscriptionWidget] Найден INJECTED_USER_ID: ${window.INJECTED_USER_ID}`);
+      userIdRef.current = window.INJECTED_USER_ID;
+      checkPremiumDirectly();
+    }
+    
+    // Проверяем, есть ли userId в localStorage
+    try {
+      const storedUserId = localStorage.getItem('contenthelper_user_id');
+      if (storedUserId && !userIdRef.current) {
+        console.log(`[SubscriptionWidget] Найден userId в localStorage: ${storedUserId}`);
+        userIdRef.current = storedUserId;
+        checkPremiumDirectly();
+      }
+    } catch (e) {
+      console.warn('[SubscriptionWidget] Ошибка чтения из localStorage:', e);
+    }
+    
+    // Регистрируем слушателей событий
+    document.addEventListener('userIdInjected', handleUserIdInjection as EventListener);
+    document.addEventListener('premiumStatusLoaded', handlePremiumStatus as EventListener);
+    
+    // Очистка при размонтировании
+    return () => {
+      document.removeEventListener('userIdInjected', handleUserIdInjection as EventListener);
+      document.removeEventListener('premiumStatusLoaded', handlePremiumStatus as EventListener);
+    };
+  }, []);
+  
   // Рендеринг виджета подписки
   return (
     <div className="subscription-widget">

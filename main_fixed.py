@@ -13,7 +13,7 @@ import hashlib
 import shutil
 from typing import List, Dict, Any, Optional, Tuple
 from fastapi import FastAPI, HTTPException, Request, Depends, Response, File, UploadFile, Form
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -677,7 +677,218 @@ async def debug_create_premium(user_id: str, request: Request):
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
         )
 
-# --- Добавьте сюда ВСЕ остальные ваши API-эндпоинты ---
+# Добавляем эндпоинт инъекции userID в SPA-приложение
+@app.get("/inject-user-id/{user_id}", include_in_schema=False)
+async def inject_user_id(user_id: str, request: Request):
+    """
+    Специальный эндпоинт для инъекции userId в SPA приложение.
+    Встраивает JavaScript с userId прямо в HTML страницу.
+    """
+    try:
+        # Проверяем корректность user_id
+        user_id_int = int(user_id)
+        
+        # Получаем путь к index.html
+        static_files_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
+        index_path = os.path.join(static_files_path, "index.html")
+        
+        # Проверяем, существует ли файл
+        if not os.path.exists(index_path):
+            logger.error(f"Файл index.html не найден в {static_files_path}")
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Index file not found"},
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+            )
+        
+        # Читаем содержимое файла
+        with open(index_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        
+        # Формируем JavaScript для инъекции userId
+        inject_script = f"""
+        <script>
+        // Инъекция userId = {user_id}
+        window.INJECTED_USER_ID = "{user_id}";
+        window.addEventListener('load', function() {{
+            console.log("[RENDER-USER-ID] Инъекция userId = {user_id}");
+            
+            // Устанавливаем user_id в localStorage
+            try {{
+                localStorage.setItem('contenthelper_user_id', '{user_id}');
+                console.log("[RENDER-USER-ID] userId сохранен в localStorage");
+            }} catch(e) {{
+                console.warn("[RENDER-USER-ID] Не удалось сохранить в localStorage:", e);
+            }}
+            
+            // Диспатчим событие для оповещения компонентов
+            const event = new CustomEvent('userIdInjected', {{ detail: {{ userId: '{user_id}' }} }});
+            document.dispatchEvent(event);
+            console.log("[RENDER-USER-ID] Отправлено событие userIdInjected");
+            
+            // Проверяем статус подписки через прямой API-вызов
+            fetch('/api-v2/premium/check?user_id={user_id}&nocache=' + new Date().getTime(), {{
+                headers: {{
+                    'Accept': 'application/json',
+                    'Cache-Control': 'no-cache, no-store, must-revalidate'
+                }}
+            }})
+            .then(response => response.json())
+            .then(data => {{
+                console.log("[RENDER-USER-ID] Статус премиума:", data);
+                
+                // Диспатчим событие со статусом подписки
+                const statusEvent = new CustomEvent('premiumStatusLoaded', {{ 
+                    detail: {{ 
+                        premiumStatus: data,
+                        userId: '{user_id}'
+                    }} 
+                }});
+                document.dispatchEvent(statusEvent);
+            }})
+            .catch(error => {{
+                console.error("[RENDER-USER-ID] Ошибка проверки премиума:", error);
+            }});
+        }});
+        </script>
+        """
+        
+        # Вставляем скрипт перед закрывающим тегом </head>
+        modified_html = html_content.replace('</head>', f'{inject_script}</head>')
+        
+        # Возвращаем измененный HTML
+        return HTMLResponse(
+            content=modified_html,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+        
+    except ValueError as ve:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Invalid user_id format: {str(ve)}"},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+    except Exception as e:
+        logger.error(f"Error in inject_user_id: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error injecting user_id: {str(e)}"},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+
+# Редирект с прямой ссылки телеграма на инъектор user_id
+@app.get("/telegram-redirect")
+async def telegram_redirect(request: Request):
+    """
+    Перенаправляет с прямой ссылки телеграма на специальный инъектор user_id.
+    Анализирует initData телеграма для получения userId.
+    """
+    try:
+        # Получаем полный URL с параметрами
+        full_url = str(request.url)
+        
+        # Если URL содержит tgWebAppData, извлекаем user_id
+        if "tgWebAppData" in full_url:
+            # Попытка извлечь userId из данных Telegram WebApp
+            try:
+                # Находим блок с данными пользователя
+                user_match = re.search(r'"user"%3A%7B[^}]*?"id"%3A(\d+)', full_url)
+                if user_match:
+                    user_id = user_match.group(1)
+                    logger.info(f"Извлечен user_id={user_id} из tgWebAppData")
+                    
+                    # Перенаправляем на инъектор с найденным userId
+                    return RedirectResponse(
+                        url=f"/inject-user-id/{user_id}", 
+                        status_code=302
+                    )
+            except Exception as extract_e:
+                logger.error(f"Ошибка при извлечении userId из tgWebAppData: {extract_e}")
+        
+        # Если не удалось извлечь userId, ищем его в параметрах запроса
+        user_id = request.query_params.get('user_id')
+        if user_id:
+            logger.info(f"Получен user_id={user_id} из query params")
+            # Перенаправляем на инъектор с найденным userId
+            return RedirectResponse(
+                url=f"/inject-user-id/{user_id}", 
+                status_code=302
+            )
+            
+        # Если user_id все еще не найден, возвращаем страницу с запросом ID
+        logger.warning("Не удалось определить user_id, возвращаем страницу запроса ID")
+        return HTMLResponse(content="""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>ContentHelperBot - Введите ID</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+                body { 
+                    font-family: Arial, sans-serif; 
+                    text-align: center; 
+                    max-width: 500px; 
+                    margin: 0 auto; 
+                    padding: 20px;
+                }
+                .container { margin-top: 50px; }
+                input {
+                    padding: 10px;
+                    width: 100%;
+                    font-size: 16px;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                    margin-bottom: 20px;
+                }
+                button {
+                    padding: 10px 20px;
+                    background-color: #1e88e5;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    font-size: 16px;
+                    cursor: pointer;
+                }
+                h1 { color: #1e88e5; }
+                p { margin-bottom: 20px; color: #666; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>ContentHelperBot</h1>
+                <p>Введите ваш Telegram ID для продолжения:</p>
+                <input type="text" id="userId" placeholder="Например: 427032240">
+                <button onclick="redirectToApp()">Продолжить</button>
+            </div>
+
+            <script>
+                function redirectToApp() {
+                    const userId = document.getElementById('userId').value.trim();
+                    if (userId && !isNaN(userId)) {
+                        window.location.href = '/inject-user-id/' + userId;
+                    } else {
+                        alert('Пожалуйста, введите корректный Telegram ID (только цифры)');
+                    }
+                }
+                
+                // Также можно нажать Enter для отправки формы
+                document.getElementById('userId').addEventListener('keyup', function(event) {
+                    if (event.key === 'Enter') {
+                        redirectToApp();
+                    }
+                });
+            </script>
+        </body>
+        </html>
+        """)
+            
+    except Exception as e:
+        logger.error(f"Error in telegram_redirect: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error in redirect: {str(e)}"},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
 
 # ===========================================
 # === МОНТИРОВАНИЕ СТАТИЧЕСКИХ ФАЙЛОВ И SPA ===
