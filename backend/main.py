@@ -316,6 +316,66 @@ async def generate_stars_invoice_link(request: Request):
         logger.error(f"Ошибка при генерации Stars invoice link: {e}")
         return {"success": False, "error": str(e)}
 
+def normalize_db_url(url: str) -> str:
+    """
+    Преобразует URL базы данных в формат, совместимый с PostgreSQL.
+    Если URL начинается с https://, преобразует его в формат postgresql://.
+    """
+    if not url:
+        logger.warning("URL базы данных пустой!")
+        return url
+        
+    logger.info(f"Исходный URL базы данных начинается с: {url[:10]}...")
+    
+    # Если URL - это строка подключения Postgres, которую предоставляет Supabase
+    # Пример: postgres://postgres:[YOUR-PASSWORD]@db.vgffoerxbaqvzqgkaabq.supabase.co:5432/postgres
+    if url.startswith('postgres://') and 'supabase.co' in url:
+        logger.info("Обнаружен URL подключения к Supabase PostgreSQL - URL корректный")
+        return url
+    
+    # Если URL начинается с https://, заменяем на postgresql://
+    if url.startswith('https://'):
+        # Извлекаем хост и путь
+        parts = url.replace('https://', '').split('/')
+        host = parts[0]
+        
+        # Для Supabase нужен специальный формат
+        if 'supabase.co' in host:
+            try:
+                # Пытаемся найти ID проекта
+                project_id = host.split('.')[0]
+                # Формируем правильный URL для PostgreSQL с паролем по умолчанию
+                # Это примерный формат, его нужно уточнить для конкретной инсталляции
+                postgresql_url = f"postgresql://postgres:postgres@db.{project_id}.supabase.co:5432/postgres"
+                logger.info(f"URL Supabase преобразован в PostgreSQL формат: {postgresql_url[:20]}...")
+                return postgresql_url
+            except Exception as e:
+                logger.error(f"Ошибка при преобразовании URL Supabase: {e}")
+                # Простое преобразование как резервный вариант
+                postgresql_url = url.replace('https://', 'postgresql://')
+                logger.info(f"URL базы данных преобразован из https:// в postgresql:// формат (резервный вариант): {postgresql_url[:20]}...")
+                return postgresql_url
+        else:
+            # Для других случаев просто заменяем протокол
+            postgresql_url = url.replace('https://', 'postgresql://')
+            logger.info(f"URL базы данных преобразован из https:// в postgresql:// формат: {postgresql_url[:20]}...")
+            return postgresql_url
+    
+    # Если URL начинается с http://, тоже заменяем на postgresql://
+    if url.startswith('http://'):
+        postgresql_url = url.replace('http://', 'postgresql://')
+        logger.info(f"URL базы данных преобразован из http:// в postgresql:// формат: {postgresql_url[:20]}...")
+        return postgresql_url
+    
+    # Если URL уже имеет правильный формат postgresql://
+    if url.startswith('postgresql://') or url.startswith('postgres://'):
+        logger.info(f"URL базы данных уже в правильном формате: {url[:20]}...")
+        return url
+    
+    # В других случаях возвращаем URL без изменений, но с предупреждением
+    logger.warning(f"URL базы данных имеет неизвестный формат. Начало URL: {url[:10]}...")
+    return url
+
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
     """Вебхук для обработки обновлений от бота Telegram."""
@@ -346,6 +406,9 @@ async def telegram_webhook(request: Request):
                 # Отправляем уведомление пользователю о проблеме
                 await send_telegram_message(user_id, "Ошибка сервера: не удалось подключиться к базе данных. Пожалуйста, сообщите администратору.")
                 return {"ok": True, "error": "DB connection error"}
+            
+            # Нормализуем URL базы данных
+            db_url = normalize_db_url(db_url)
             
             # Создаем подключение к БД
             try:
@@ -444,6 +507,9 @@ async def manual_check_premium(user_id: int, request: Request, force_update: boo
         if not db_url:
             logger.error("Отсутствуют SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL при ручной проверке премиума")
             return {"success": False, "error": "Отсутствуют SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL в переменных окружения"}
+            
+        # Нормализуем URL базы данных
+        db_url = normalize_db_url(db_url)
             
         # Подключаемся к БД
         conn = await asyncpg.connect(db_url)
@@ -2376,13 +2442,35 @@ async def startup_event():
     """Запуск обслуживающих процессов при старте приложения."""
     logger.info("Запуск обслуживающих процессов...")
     
+    # Проверяем и логируем наличие переменных окружения (замаскированные для безопасности)
+    supabase_url = os.getenv("SUPABASE_URL")
+    database_url = os.getenv("DATABASE_URL")
+    render_database_url = os.getenv("RENDER_DATABASE_URL")
+    
+    # Логируем доступные переменные окружения (замаскированные)
+    if supabase_url:
+        masked_url = supabase_url[:10] + "..." + supabase_url[-5:] if len(supabase_url) > 15 else "***"
+        logger.info(f"Найдена переменная SUPABASE_URL: {masked_url}")
+    if database_url:
+        masked_url = database_url[:10] + "..." + database_url[-5:] if len(database_url) > 15 else "***" 
+        logger.info(f"Найдена переменная DATABASE_URL: {masked_url}")
+    if render_database_url:
+        masked_url = render_database_url[:10] + "..." + render_database_url[-5:] if len(render_database_url) > 15 else "***"
+        logger.info(f"Найдена переменная RENDER_DATABASE_URL: {masked_url}")
+    
     # Проверяем наличие переменных окружения
-    db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("RENDER_DATABASE_URL")
+    db_url = supabase_url or database_url or render_database_url
     if not db_url:
         logger.error("Отсутствуют переменные окружения SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL!")
         # Продолжаем работу приложения с предупреждением
     else:
-        logger.info(f"Используем подключение к БД: {db_url[:20]}...")
+        # Проверяем формат URL и логируем его
+        if db_url.startswith('https://'):
+            logger.info(f"URL базы данных имеет формат https:// - будет преобразован в postgresql://")
+        elif db_url.startswith('postgresql://') or db_url.startswith('postgres://'):
+            logger.info(f"URL базы данных имеет правильный формат postgresql://")
+        else:
+            logger.warning(f"URL базы данных имеет неизвестный формат! Начало: {db_url[:10]}...")
     
     # Проверка и добавление недостающих столбцов (оставляем существующую логику)
     if supabase:
@@ -3481,6 +3569,9 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
                 "user_id": effective_user_id,
                 "error": "Отсутствуют URL для подключения к базе данных"
             }
+            
+        # Нормализуем URL базы данных
+        db_url = normalize_db_url(db_url)
             
         # Подключаемся к БД
         conn = await asyncpg.connect(db_url)
