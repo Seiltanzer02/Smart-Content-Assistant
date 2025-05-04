@@ -237,38 +237,23 @@ class SubscriptionStatusResponse(BaseModel):
     post_generation_count: int
     subscription_end_date: Optional[str] = None
 
-# ��������� ������� ��������
-async def get_subscription_service():
-    """����������� ��� ��������� ������� ��������"""
-    if not supabase:
-        raise HTTPException(status_code=500, detail="���� ������ �� ����������������")
-        
-    try:
-        # ���������� ������������ ����������� � ���� ������ �� supabase
-        pool = supabase.connection()
-        subscription_service = SubscriptionService(pool)
-        return subscription_service
-    except Exception as e:
-        logger.error(f"������ ��� �������� ������� ��������: {e}")
-        raise HTTPException(status_code=500, detail=f"������ ��� ������������� ������� ��������: {str(e)}")
-
-# --- ��������� ������������ ����������� ������ ---
+# ---     ---
 import os
 from fastapi.staticfiles import StaticFiles
 
-# ���� � ����� �� ������������ �������
+#     
 static_folder = os.path.join(os.path.dirname(__file__), "static")
 
-# ���� ��� ������������ ������� � ����� �����
+#      
 SHOULD_MOUNT_STATIC = os.path.exists(static_folder)
-# ����� ����, �����������, ��� �� ��� ��������� �������� SPA
+#  , ,      SPA
 SPA_ROUTES_CONFIGURED = False
 
 if SHOULD_MOUNT_STATIC:
-    logger.info(f"����������� ����� ����� ������������� �� �����: {static_folder} (������������ � ����� �����)")
+    logger.info(f"     : {static_folder} (  )")
 else:
-    logger.warning(f"����� ����������� ������ �� �������: {static_folder}")
-    logger.warning("����������� ����� �� ����� �������������. ������ API endpoints ��������.")
+    logger.warning(f"    : {static_folder}")
+    logger.warning("    .  API endpoints .")
 
 class AnalyzeRequest(BaseModel):
     username: str
@@ -277,10 +262,10 @@ class AnalysisResult(BaseModel):
     themes: List[str]
     styles: List[str]
     analyzed_posts_sample: List[str]
-    best_posting_time: str # ���� ������
+    best_posting_time: str # 
     analyzed_posts_count: int
     
-# ��������� ����������� ����������� ������ AnalyzeResponse
+#     AnalyzeResponse
 class AnalyzeResponse(BaseModel):
     themes: List[str]
     styles: List[str]
@@ -290,89 +275,90 @@ class AnalyzeResponse(BaseModel):
     message: Optional[str] = None
     error: Optional[str] = None
     
-# --- ��������� ����������� ������ PlanGenerationRequest ---
+# ---     ---
 class PlanGenerationRequest(BaseModel):
     themes: List[str]
     styles: List[str]
-    period_days: int = Field(7, gt=0, le=30) # �� ��������� 7 ����, � �������������
-    channel_name: str # ��������� ������������ ��� ������
+    period_days: int = Field(7, gt=0, le=30) # 
+    channel_name: str # 
 
-# ������ ��� ������ �������� ����� (��� ������������������ ������)
+#      (  )
 class PlanItem(BaseModel):
-    day: int # ���� �� ������ ������� (1, 2, ...)
-    topic_idea: str # ������������ ����/���� �����
-    format_style: str # ������������ ������/�����
+    day: int # 
+    topic_idea: str # 
+    format_style: str # 
 
-# --- ����� ������ ��� ����������� ����� --- 
+# ---     ---
 class GeneratePostDetailsRequest(BaseModel):
-    topic_idea: str = Field(..., description="���� ����� �� �����")
-    format_style: str = Field(..., description="������/����� ����� �� �����")
-    keywords: Optional[List[str]] = Field(None, description="(�����������) �������� ����� ��� ������ ����������� � ��������� ������") 
-    post_samples: Optional[List[str]] = Field(None, description="������� ������ ������ ��� �������� �����")
+    topic_idea: str = Field(..., description=" ")
+    format_style: str = Field(..., description=" ")
+    keywords: Optional[List[str]] = Field(None, description="( )  ( )  ( )") 
+    post_samples: Optional[List[str]] = Field(None, description=" ")
 
-# --- ����� ��� ��� ���������� ����������� --- 
+# ---     ---
 class FoundImage(BaseModel):
     id: str
-    source: str # �������� (unsplash, pexels, openverse)
-    preview_url: str # URL ���������
-    regular_url: str # URL ��������� �����������
+    source: str # 
+    preview_url: str # URL 
+    regular_url: str # URL 
     description: Optional[str] = None
     author_name: Optional[str] = None
     author_url: Optional[str] = None
 
-# --- ����������� PostImage ����� ��� �������������� --- 
+# ---     PostImage     ---
 class PostImage(BaseModel):
     url: str
     id: Optional[str] = None
     preview_url: Optional[str] = None
     alt: Optional[str] = None
-    author: Optional[str] = None # ������������� author_name � ��
+    author: Optional[str] = None # 
     author_url: Optional[str] = None
     source: Optional[str] = None
 
-# --- ������ ������ ��� ����������� ����� --- 
+# ---     PostDetailsResponse     ---
 class PostDetailsResponse(BaseModel):
-    generated_text: str = Field(..., description="��������������� ����� �����")
-    found_images: List[FoundImage] = Field([], description="������ ��������� ����������� �� ������ ����������") 
-    message: str = Field("", description="�������������� ���������")
-    channel_name: Optional[str] = Field(None, description="��� ������, � �������� ��������� ����")
-    # ������ PostImage ��������� ����
-    selected_image_data: Optional[PostImage] = Field(None, description="������ ���������� �����������")
+    generated_text: str = Field(..., description=" ")
+    found_images: List[FoundImage] = Field([], description=" ") 
+    message: str = Field("", description=" ")
+    channel_name: Optional[str] = Field(None, description=" ,  ")
+    #     PostImage 
+    selected_image_data: Optional[PostImage] = Field(None, description=" ")
 
-# --- ������ ��� ��������/���������� ����� --- 
+# ---     PostData     ---
 class PostData(BaseModel):
-    target_date: str = Field(..., description="���� ����� YYYY-MM-DD")
+    target_date: str = Field(..., description="YYYY-MM-DD")
     topic_idea: str
     format_style: str
     final_text: str
-    image_url: Optional[str] = Field(None, description="URL ����������� (�����������)") # ��������� ��� ������ ������? ����� ������� �����.
-    images_ids: Optional[List[str]] = Field(None, description="������ ID ����������� (��������)") # �������� ��� ����������
-    channel_name: Optional[str] = Field(None, description="��� ������, � �������� ��������� ����")
-    # PostImage ��������� ����
-    selected_image_data: Optional[PostImage] = Field(None, description="������ ���������� �����������")
+    image_url: Optional[str] = Field(None, description="URL  ( )") # 
+    images_ids: Optional[List[str]] = Field(None, description=" ") # 
+    channel_name: Optional[str] = Field(None, description=" ,  ")
+    # PostImage 
+    selected_image_data: Optional[PostImage] = Field(None, description=" ")
 
-# --- ������ ��� ������������ ����� (��� ������ GET /posts) --- 
+# ---     SavedPostResponse     ---
 class SavedPostResponse(PostData):
     id: str 
-    # ������� ����������� ���� �� PostData
+    #     PostData
     # created_at: str 
     # updated_at: str
-    # image_url: Optional[str] = Field(None, description="URL ����������� (�����������)")
-    # images_ids: Optional[List[str]] = Field(None, description="������ ID �����������")
-    # channel_name: Optional[str] = Field(None, description="��� ������, � �������� ��������� ����")
-    # ��������� ����, ����������� ��� ������
-    created_at: str = Field(..., description="����� �������� �����")
-    updated_at: str = Field(..., description="����� ���������� ���������� �����")
+    # image_url: Optional[str] = Field(None, description="URL  ( )")
+    # images_ids: Optional[List[str]] = Field(None, description=" ")
+    # channel_name: Optional[str] = Field(None, description=" ,  ")
+    #      , 
+    created_at: str = Field(..., description=" ")
+    updated_at: str = Field(..., description=" ")
 
-# --- ������� ��� ��������� ������ Telegram ����� HTTP ������� ---
+# ---     Telegram HTTP     ---
 async def get_telegram_posts_via_http(username: str) -> List[str]:
-    """��������� ������ ������ Telegram ����� HTTP �������."""
+    """     Telegram HTTP ."""
     try:
         url = f"https://t.me/s/{username}"
-        logger.info(f"������ HTTP �������� ��� ������ @{username}: {url}")
+        logger.info(f"HTTP  @: {url}")
         
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(url)
+            
             
         if response.status_code != 200:
             logger.warning(f"HTTP ������-��� ��� @{username}: {response.status_code}")
@@ -3195,3 +3181,11 @@ async def payment_webhook(
 # ����� �������� ��� ������ ��������� ������� ����� Bot API
 # ������������ ���� ��������� /generate-invoice ������
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+# --- НОВЫЙ ЭНДПОИНТ ДЛЯ ПРЯМОЙ ПРОВЕРКИ ПРЕМИУМА ---\nclass DirectPremiumStatusResponse(BaseModel):\n    is_premium: bool\n    end_date: Optional[str] = None\n    error: Optional[str] = None\n\n@app.get(\"/direct_premium_check\", response_model=DirectPremiumStatusResponse)\nasync def direct_premium_check(request: Request):\n    \"\"\"(Новый) Прямая проверка премиум статуса пользователя в БД\"\"\"\n    user_id_str = request.headers.get(\"x-telegram-user-id\")\n    init_data = request.headers.get(\"x-telegram-init-data\")\n    user_id = None\n\n    # Валидация user_id (можно скопировать логику из /subscription/status)\n    if init_data:\n        # Предполагаем, что функция get_user_id_from_init_data существует и импортирована\n        # from utils.telegram_auth import get_user_id_from_init_data\n        try:\n           validated_user_id = get_user_id_from_init_data(init_data)\n           if validated_user_id:\n               user_id = validated_user_id\n               logger.info(f\"[Direct Check] Пользователь {user_id} идентифицирован через initData\")\n        except NameError: # Если функция не импортирована\            logger.warning(\"[Direct Check] Функция get_user_id_from_init_data не найдена\")\n            pass # Продолжаем без валидации initData, если функция не найдена\n\n    if not user_id and user_id_str:\n        try:\n            user_id = int(user_id_str)\n            logger.info(f\"[Direct Check] Пользователь {user_id} идентифицирован через заголовок\")\n        except ValueError:\n             return DirectPremiumStatusResponse(is_premium=False, error=\"Некорректный user_id в заголовке\")\n\n    if not user_id:\n        return DirectPremiumStatusResponse(is_premium=False, error=\"ID пользователя не определен\")\n\n    logger.info(f\"[Direct Check] Проверка статуса для user_id: {user_id}\")\n\n    # Прямой запрос к Supabase\n    if not supabase:\n        logger.error(\"[Direct Check] Supabase client не инициализирован.\")\n        return DirectPremiumStatusResponse(is_premium=False, error=\"Ошибка подключения к БД\")\n\n    try:\n        # Прямой запрос к таблице user_subscription\n        # Используем PostgREST синтаксис для фильтрации\n        # eq = equals, gt = greater than, is = IS (для TRUE)\n        response = supabase.table(\"user_subscription\") \\\n            .select(\"id, end_date, is_active\") \\\n            .eq(\"user_id\", user_id) \\\n            .eq(\"is_active\", True) \\\
+            .gt(\"end_date\", datetime.now(timezone.utc).isoformat()) \\\
+            .order(\"end_date\", desc=True) \\\
+            .limit(1) \\\
+            .execute()\n\n        if response.data and len(response.data) > 0:\n            subscription = response.data[0]\n            end_date_str = subscription.get(\"end_date\")\n            logger.info(f\"[Direct Check] Найдена активная подписка для user_id {user_id}. ID: {subscription.get('id')}, End: {end_date_str}\")\n            return DirectPremiumStatusResponse(is_premium=True, end_date=end_date_str)\n        else:\n            # Проверим, есть ли вообще записи, но неактивные\n            all_subs_resp = supabase.table(\"user_subscription\") \\\n                .select(\"id, end_date, is_active\") \\\n                .eq(\"user_id\", user_id) \\\
+                .limit(5) \\\
+                .execute()\n            logger.info(f\"[Direct Check] Активная подписка не найдена для user_id {user_id}. Response: {response.data}. Все подписки: {all_subs_resp.data}\")\n            return DirectPremiumStatusResponse(is_premium=False)\n\n    except APIError as api_err:\n        logger.error(f\"[Direct Check] Ошибка API Supabase: {api_err.message}\")\n        return DirectPremiumStatusResponse(is_premium=False, error=f\"Ошибка API: {api_err.message}\")\n    except Exception as e:\n        logger.error(f\"[Direct Check] Непредвиденная ошибка: {e}\", exc_info=True)\n        return DirectPremiumStatusResponse(is_premium=False, error=\"Внутренняя ошибка сервера\")\n\n# --- КОНЕЦ НОВОГО ЭНДПОИНТА ---\n\n# ... остальной код ...

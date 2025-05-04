@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Toaster, toast } from 'react-hot-toast';
 import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
+import DirectPremiumStatus from './components/DirectPremiumStatus'; // <-- Импортируем новый компонент
 
 // Определяем базовый URL API
 // Так как фронтенд и API на одном домене, используем пустую строку
@@ -1318,7 +1319,10 @@ function App() {
       
       {/* Блок подписки */}
       {showSubscription && (
-        <SubscriptionWidget userId={userId} isActive={true} />
+        <>
+          <SubscriptionWidget userId={userId} isActive={true}/> {/* Передаем isActive в старый виджет */} 
+          <DirectPremiumStatus userId={userId} /> {/* <-- Добавляем новый компонент */} 
+        </>
       )}
 
       <main className="app-main">

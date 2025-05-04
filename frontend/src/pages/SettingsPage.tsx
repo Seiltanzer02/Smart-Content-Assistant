@@ -1,8 +1,13 @@
 import React from 'react';
 import { Box, Container, Typography, Paper, Divider } from '@mui/material';
 import SubscriptionWidget from '../components/SubscriptionWidget';
+import DirectPremiumStatus from '../components/DirectPremiumStatus';
 
-const SettingsPage: React.FC = () => {
+interface SettingsPageProps {
+  userId: string | null;
+}
+
+const SettingsPage: React.FC<SettingsPageProps> = ({ userId }) => {
   return (
     <Container maxWidth="md">
       <Box sx={{ my: 4 }}>
@@ -11,7 +16,8 @@ const SettingsPage: React.FC = () => {
         </Typography>
         
         <Paper sx={{ p: 3, mb: 4 }}>
-          <SubscriptionWidget />
+          <SubscriptionWidget userId={userId} />
+          <DirectPremiumStatus userId={userId} />
           <Divider sx={{ my: 3 }} />
           <Typography variant="body2" color="text.secondary">
             Подписка дает вам неограниченный доступ ко всем функциям сервиса.
