@@ -12,5 +12,7 @@ python-multipart
 beautifulsoup4
 python-unsplash
 gunicorn
-python-telegram-bot
-aiogram
+python-telegram-bot>=20.0
+aiogram>=3.0
+dateutils # Добавляем dateutils, если он используется
+asyncpg # <-- ДОБАВЛЕНА НЕДОСТАЮЩАЯ ЗАВИСИМОСТЬ
