@@ -35,7 +35,8 @@ import telethon
 import aiohttp
 from telegram_utils import get_telegram_posts, get_mock_telegram_posts
 import move_temp_files
-from datetime import datetime, timedelta, relativedelta
+from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 import traceback
 # Убираем неиспользуемые импорты psycopg2
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
