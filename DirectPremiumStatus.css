@@ -155,18 +155,33 @@
 }
 
 .refresh-button {
-  background-color: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: inherit;
+  margin-top: 10px;
   padding: 5px 10px;
+  background-color: #4a90e2;
+  color: white;
+  border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.8em;
-  transition: background-color 0.2s;
+}
+
+.debug-button {
+  margin-top: 10px;
+  margin-left: 10px;
+  padding: 5px 10px;
+  background-color: #e74c3c;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.debug-button:hover {
+  background-color: #c0392b;
 }
 
 .refresh-button:hover {
-  background-color: rgba(255, 255, 255, 0.3);
+  background-color: #357abd;
 }
 
 /* Telegram Mini App темная тема */

@@ -890,6 +890,179 @@ async def telegram_redirect(request: Request):
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
         )
 
+# Добавляем специальный диагностический эндпоинт для проверки проблем с подпиской
+@app.get("/api/subscription/debug/{user_id}", include_in_schema=False)
+async def debug_subscription_status(user_id: str):
+    """
+    Полный диагностический эндпоинт для проверки подписок,
+    который возвращает максимум информации для отладки.
+    """
+    result = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "user_id": user_id,
+        "database_status": "unknown",
+        "tables_status": {},
+        "subscription_records": [],
+        "user_subscription_count": 0,
+        "subscriptions_count": 0,
+        "has_valid_subscription": False,
+        "subscription_end_date": None,
+        "errors": []
+    }
+    
+    try:
+        # Проверяем соединение с базой данных
+        db_url = os.getenv("DATABASE_URL")
+        if not db_url:
+            result["errors"].append("DATABASE_URL не задан в переменных окружения")
+            return JSONResponse(content=result)
+        
+        # Подключаемся к базе данных
+        conn = await asyncpg.connect(db_url)
+        result["database_status"] = "connected"
+        
+        try:
+            # Проверяем наличие нужных таблиц
+            tables_query = """
+            SELECT tablename FROM pg_tables 
+            WHERE schemaname = 'public' 
+            AND tablename IN ('user_subscription', 'subscriptions', 'user_usage_stats')
+            """
+            tables = await conn.fetch(tables_query)
+            
+            # Заполняем статус таблиц
+            found_tables = [t["tablename"] for t in tables]
+            result["tables_status"]["user_subscription_exists"] = "user_subscription" in found_tables
+            result["tables_status"]["subscriptions_exists"] = "subscriptions" in found_tables
+            result["tables_status"]["user_usage_stats_exists"] = "user_usage_stats" in found_tables
+            result["tables_status"]["found_tables"] = found_tables
+            
+            # Если таблица user_subscription существует, проверяем её структуру
+            if result["tables_status"]["user_subscription_exists"]:
+                # Получаем структуру таблицы
+                schema_query = """
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_name = 'user_subscription' 
+                ORDER BY ordinal_position
+                """
+                columns = await conn.fetch(schema_query)
+                result["tables_status"]["user_subscription_columns"] = [
+                    {"name": c["column_name"], "type": c["data_type"]} for c in columns
+                ]
+                
+                # Проверяем записи для пользователя в user_subscription
+                user_subs_query = """
+                SELECT id, user_id, start_date, end_date, is_active, 
+                       payment_id, created_at, updated_at,
+                       CASE WHEN end_date > NOW() AND is_active = TRUE 
+                           THEN TRUE ELSE FALSE END as is_valid
+                FROM user_subscription 
+                WHERE user_id = $1 
+                ORDER BY end_date DESC
+                """
+                
+                user_id_int = int(user_id)
+                user_subs = await conn.fetch(user_subs_query, user_id_int)
+                
+                # Преобразуем результаты запроса в JSON
+                for sub in user_subs:
+                    sub_dict = dict(sub)
+                    for key, value in sub_dict.items():
+                        if isinstance(value, datetime):
+                            sub_dict[key] = value.isoformat()
+                    result["subscription_records"].append(sub_dict)
+                
+                result["user_subscription_count"] = len(user_subs)
+                result["has_valid_subscription"] = any(sub["is_valid"] for sub in result["subscription_records"])
+                
+                # Если есть действительная подписка, запоминаем дату окончания
+                if result["has_valid_subscription"]:
+                    valid_sub = next((sub for sub in result["subscription_records"] if sub["is_valid"]), None)
+                    if valid_sub:
+                        result["subscription_end_date"] = valid_sub["end_date"]
+            
+            # Если существует устаревшая таблица subscriptions, тоже проверяем её
+            if result["tables_status"]["subscriptions_exists"]:
+                subs_count_query = "SELECT COUNT(*) FROM subscriptions WHERE user_id = $1"
+                count = await conn.fetchval(subs_count_query, int(user_id))
+                result["subscriptions_count"] = count
+            
+            # Информация о таблице пользовательской статистики
+            if result["tables_status"]["user_usage_stats_exists"]:
+                stats_query = "SELECT * FROM user_usage_stats WHERE user_id = $1"
+                user_stats = await conn.fetchrow(stats_query, int(user_id))
+                if user_stats:
+                    stats_dict = dict(user_stats)
+                    for key, value in stats_dict.items():
+                        if isinstance(value, datetime):
+                            stats_dict[key] = value.isoformat()
+                    result["user_stats"] = stats_dict
+                else:
+                    result["user_stats"] = None
+            
+            # Проверяем, есть ли активная подписка
+            premium_query = """
+            SELECT COUNT(*) 
+            FROM user_subscription 
+            WHERE user_id = $1 
+              AND is_active = TRUE 
+              AND end_date > NOW()
+            """
+            premium_count = await conn.fetchval(premium_query, int(user_id))
+            result["has_premium"] = premium_count > 0
+            result["premium_count"] = premium_count
+            
+            # Создаем представление для совместимости, если таблица user_subscription существует
+            if result["tables_status"]["user_subscription_exists"] and not result["tables_status"]["subscriptions_exists"]:
+                try:
+                    view_query = "CREATE VIEW IF NOT EXISTS subscriptions AS SELECT * FROM user_subscription"
+                    await conn.execute(view_query)
+                    result["tables_status"]["created_view"] = True
+                except Exception as view_error:
+                    result["errors"].append(f"Ошибка создания представления: {str(view_error)}")
+            
+            # Если нет активной подписки, создаем тестовую
+            if not result["has_premium"] and "create_test" in request.query_params:
+                now = datetime.now(timezone.utc)
+                end_date = now + timedelta(days=30)
+                test_payment_id = f"debug_payment_{now.strftime('%Y%m%d%H%M%S')}"
+                
+                # Создаем новую тестовую подписку
+                try:
+                    new_sub_query = """
+                    INSERT INTO user_subscription 
+                        (user_id, start_date, end_date, payment_id, is_active, created_at, updated_at)
+                    VALUES 
+                        ($1, $2, $3, $4, TRUE, NOW(), NOW())
+                    RETURNING id
+                    """
+                    new_id = await conn.fetchval(new_sub_query, int(user_id), now, end_date, test_payment_id)
+                    result["created_test_subscription"] = {
+                        "id": new_id,
+                        "start_date": now.isoformat(),
+                        "end_date": end_date.isoformat(),
+                        "payment_id": test_payment_id
+                    }
+                    result["has_premium"] = True
+                except Exception as sub_error:
+                    result["errors"].append(f"Ошибка создания тестовой подписки: {str(sub_error)}")
+            
+        except Exception as e:
+            result["errors"].append(f"Ошибка при проверке таблиц: {str(e)}")
+        finally:
+            # Закрываем соединение с базой данных
+            await conn.close()
+            
+    except Exception as e:
+        result["errors"].append(f"Ошибка при подключении к базе данных: {str(e)}")
+    
+    # Возвращаем результаты диагностики
+    return JSONResponse(
+        content=result,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
+
 # ===========================================
 # === МОНТИРОВАНИЕ СТАТИЧЕСКИХ ФАЙЛОВ И SPA ===
 # ===========================================
