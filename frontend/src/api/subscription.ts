@@ -1,71 +1,37 @@
 import axios from 'axios';
 
-// Интерфейс для статуса подписки
+// Определение интерфейса для статуса подписки
 export interface SubscriptionStatus {
   has_subscription: boolean;
-  subscription_end_date?: string;
   analysis_count: number;
   post_generation_count: number;
+  subscription_end_date?: string;
 }
 
 // API_URL пустая строка для относительных путей
 const API_URL = '';
 
 /**
- * Получение статуса подписки пользователя
+ * Получает статус подписки пользователя
+ * @param userId ID пользователя Telegram
+ * @returns Promise с данными о статусе подписки
  */
-export async function getUserSubscriptionStatus(userId: string | null): Promise<SubscriptionStatus> {
+export const getUserSubscriptionStatus = async (userId: string | null): Promise<SubscriptionStatus> => {
+  if (!userId) {
+    throw new Error('ID пользователя не предоставлен');
+  }
+
   try {
-    console.log(`Запрашиваем статус подписки для userId: ${userId}`);
-    
-    if (!userId) {
-      console.warn('getUserSubscriptionStatus вызван с пустым userId');
-      return {
-        has_subscription: false,
-        analysis_count: 0,
-        post_generation_count: 0
-      };
-    }
-    
-    // Добавляем логирование заголовков
-    const headers = { 'X-Telegram-User-Id': userId };
-    console.log('Отправляем запрос с заголовками:', headers);
-    
-    const response = await fetch('/subscription/status', {
-      headers
+    const response = await axios.get(`${API_URL}/subscription/status`, {
+      headers: { 'x-telegram-user-id': userId }
     });
     
-    console.log(`Получен ответ от /subscription/status: статус ${response.status}`);
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`Ошибка при получении статуса подписки. Статус: ${response.status}, Текст: ${errorText}`);
-      throw new Error(`Ошибка при получении статуса подписки: ${errorText}`);
-    }
-    
-    const data = await response.json();
-    console.log(`Получен ответ от /subscription/status:`, data);
-    
-    // Явно создаем объект с правильной типизацией
-    const subscriptionStatus: SubscriptionStatus = {
-      has_subscription: Boolean(data.has_subscription),
-      subscription_end_date: data.subscription_end_date,
-      analysis_count: data.analysis_count || 0,
-      post_generation_count: data.post_generation_count || 0
-    };
-    
-    console.log('Преобразованный статус подписки:', subscriptionStatus);
-    return subscriptionStatus;
+    return response.data;
   } catch (error) {
     console.error('Ошибка при получении статуса подписки:', error);
-    // Возвращаем базовый статус при ошибке
-    return {
-      has_subscription: false,
-      analysis_count: 0,
-      post_generation_count: 0
-    };
+    throw error;
   }
-}
+};
 
 /**
  * Создает подписку для пользователя
@@ -92,23 +58,21 @@ export const createSubscription = async (userId: string | null, paymentId?: stri
 };
 
 /**
- * Генерация ссылки на инвойс для оплаты подписки
+ * Генерирует инвойс для оплаты через Telegram
+ * @param userId ID пользователя Telegram
+ * @param amount Сумма платежа в Stars
+ * @returns Promise с данными инвойса, включая URL
  */
-export async function generateInvoice(userId: number) {
+export const generateInvoice = async (userId: number, amount: number = 70) => {
   try {
-    const response = await fetch('/generate-invoice', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, amount: 70 })
+    const response = await axios.post(`${API_URL}/generate-invoice`, {
+      user_id: userId,
+      amount
     });
     
-    if (!response.ok) {
-      throw new Error(`Ошибка при создании инвойса: ${response.status}`);
-    }
-    
-    return await response.json();
+    return response.data;
   } catch (error) {
     console.error('Ошибка при генерации инвойса:', error);
     throw error;
   }
-} 
+}; 
