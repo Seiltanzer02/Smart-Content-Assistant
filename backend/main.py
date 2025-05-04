@@ -399,68 +399,156 @@ async def telegram_webhook(request: Request):
         # Если это команда /start с параметром check_premium или команда /check_premium
         if text.startswith('/start check_premium') or text == '/check_premium':
             logger.info(f"Получена команда проверки премиума от пользователя {user_id}")
-            # Проверяем премиум-статус пользователя
-            db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("RENDER_DATABASE_URL")
-            if not db_url:
-                logger.error("Отсутствуют SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL при проверке премиума")
-                # Отправляем уведомление пользователю о проблеме
-                await send_telegram_message(user_id, "Ошибка сервера: не удалось подключиться к базе данных. Пожалуйста, сообщите администратору.")
-                return {"ok": True, "error": "DB connection error"}
             
-            # Нормализуем URL базы данных
-            db_url = normalize_db_url(db_url)
+            # Проверяем премиум-статус пользователя через REST API вместо прямого подключения к БД
+            try:
+                # Проверяем, инициализирован ли Supabase клиент
+                if not supabase:
+                    logger.error("Supabase клиент не инициализирован")
+                    await send_telegram_message(user_id, "Ошибка сервера: не удалось подключиться к базе данных. Пожалуйста, сообщите администратору.")
+                    return {"ok": True, "error": "Supabase client not initialized"}
+                
+                # Запрашиваем активные подписки для пользователя через REST API
+                try:
+                    subscription_query = supabase.table("user_subscription").select("*").eq("user_id", user_id).eq("is_active", True).execute()
+                    
+                    logger.info(f"Результат запроса подписки через REST API: {subscription_query}")
+                    
+                    has_premium = False
+                    end_date_str = 'неизвестно'
+                    
+                    # Проверяем результаты запроса
+                    if hasattr(subscription_query, 'data') and subscription_query.data:
+                        from datetime import datetime
+                        
+                        # Проверяем подписки на активность и срок
+                        current_date = datetime.now()
+                        active_subscriptions = []
+                        
+                        for subscription in subscription_query.data:
+                            end_date = subscription.get("end_date")
+                            if end_date:
+                                try:
+                                    # Преобразуем дату из строки в объект datetime
+                                    if isinstance(end_date, str):
+                                        end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                                    
+                                    # Если дата окончания в будущем, добавляем в активные
+                                    if end_date > current_date:
+                                        active_subscriptions.append(subscription)
+                                except Exception as e:
+                                    logger.error(f"Ошибка при обработке даты подписки {end_date}: {e}")
+                        
+                        # Если есть активные подписки, устанавливаем has_premium = True
+                        if active_subscriptions:
+                            has_premium = True
+                            # Берем самую позднюю дату окончания
+                            latest_subscription = max(active_subscriptions, key=lambda x: x.get("end_date"))
+                            end_date = latest_subscription.get("end_date")
+                            if isinstance(end_date, str):
+                                end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                            end_date_str = end_date.strftime('%d.%m.%Y %H:%M')
+                    
+                    logger.info(f"Результат проверки подписки для {user_id}: has_premium={has_premium}, end_date={end_date_str}")
+                    
+                    # Формируем текст ответа
+                    if has_premium:
+                        reply_text = f"✅ У вас активирован ПРЕМИУМ доступ!\nДействует до: {end_date_str}\nОбновите страницу приложения, чтобы увидеть изменения."
+                    else:
+                        reply_text = "❌ У вас нет активной ПРЕМИУМ подписки.\nДля получения премиум-доступа оформите подписку в приложении."
+                    
+                    # Отправляем ответ пользователю
+                    await send_telegram_message(user_id, reply_text)
+                    
+                    return {"ok": True, "has_premium": has_premium}
+                    
+                except Exception as api_error:
+                    logger.error(f"Ошибка при проверке премиум-статуса через REST API: {api_error}")
+                    # Попробуем альтернативный способ проверки, используя REST API напрямую через httpx
+                    try:
+                        supabase_url = os.getenv("SUPABASE_URL")
+                        supabase_key = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+                        
+                        if not supabase_url or not supabase_key:
+                            raise ValueError("Отсутствуют SUPABASE_URL или SUPABASE_KEY")
+                        
+                        # Формируем запрос к REST API Supabase
+                        headers = {
+                            "apikey": supabase_key,
+                            "Authorization": f"Bearer {supabase_key}",
+                            "Content-Type": "application/json"
+                        }
+                        
+                        async with httpx.AsyncClient() as client:
+                            response = await client.get(
+                                f"{supabase_url}/rest/v1/user_subscription",
+                                headers=headers,
+                                params={
+                                    "select": "*",
+                                    "user_id": f"eq.{user_id}",
+                                    "is_active": "eq.true"
+                                }
+                            )
+                            
+                            if response.status_code == 200:
+                                subscriptions = response.json()
+                                
+                                # Проверяем подписки на активность и срок
+                                from datetime import datetime
+                                current_date = datetime.now()
+                                active_subscriptions = []
+                                
+                                for subscription in subscriptions:
+                                    end_date = subscription.get("end_date")
+                                    if end_date:
+                                        try:
+                                            # Преобразуем дату из строки в объект datetime
+                                            if isinstance(end_date, str):
+                                                end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                                            
+                                            # Если дата окончания в будущем, добавляем в активные
+                                            if end_date > current_date:
+                                                active_subscriptions.append(subscription)
+                                        except Exception as e:
+                                            logger.error(f"Ошибка при обработке даты подписки {end_date}: {e}")
+                                
+                                # Если есть активные подписки, устанавливаем has_premium = True
+                                has_premium = bool(active_subscriptions)
+                                end_date_str = 'неизвестно'
+                                
+                                if active_subscriptions:
+                                    # Берем самую позднюю дату окончания
+                                    latest_subscription = max(active_subscriptions, key=lambda x: x.get("end_date"))
+                                    end_date = latest_subscription.get("end_date")
+                                    if isinstance(end_date, str):
+                                        end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                                    end_date_str = end_date.strftime('%d.%m.%Y %H:%M')
+                                
+                                logger.info(f"Результат проверки подписки через httpx для {user_id}: has_premium={has_premium}, end_date={end_date_str}")
+                                
+                                # Формируем текст ответа
+                                if has_premium:
+                                    reply_text = f"✅ У вас активирован ПРЕМИУМ доступ!\nДействует до: {end_date_str}\nОбновите страницу приложения, чтобы увидеть изменения."
+                                else:
+                                    reply_text = "❌ У вас нет активной ПРЕМИУМ подписки.\nДля получения премиум-доступа оформите подписку в приложении."
+                                
+                                # Отправляем ответ пользователю
+                                await send_telegram_message(user_id, reply_text)
+                                
+                                return {"ok": True, "has_premium": has_premium}
+                            else:
+                                logger.error(f"Ошибка при запросе к Supabase REST API: {response.status_code} - {response.text}")
+                                raise Exception(f"HTTP Error: {response.status_code}")
+                    
+                    except Exception as httpx_error:
+                        logger.error(f"Ошибка при проверке премиум-статуса через httpx: {httpx_error}")
+                        await send_telegram_message(user_id, "Ошибка подключения к базе данных. Пожалуйста, попробуйте позже.")
+                        return {"ok": False, "error": str(httpx_error)}
             
-            # Создаем подключение к БД
-            try:
-                conn = await asyncpg.connect(db_url)
-            except Exception as e:
-                logger.error(f"Ошибка подключения к БД: {e}")
-                await send_telegram_message(user_id, "Ошибка подключения к базе данных. Пожалуйста, попробуйте позже.")
-                return {"ok": False, "error": str(e)}
-                
-            try:
-                # Проверяем наличие активной подписки
-                query = """
-                SELECT COUNT(*) 
-                FROM user_subscription 
-                WHERE user_id = $1 
-                  AND is_active = TRUE 
-                  AND end_date > NOW()
-                """
-                count = await conn.fetchval(query, user_id)
-                has_premium = count > 0
-                
-                logger.info(f"Результат проверки подписки для {user_id}: count={count}, has_premium={has_premium}")
-                
-                # Получаем информацию о подписке для ответа
-                if has_premium:
-                    sub_query = """
-                    SELECT end_date 
-                    FROM user_subscription 
-                    WHERE user_id = $1 
-                      AND is_active = TRUE
-                    ORDER BY end_date DESC 
-                    LIMIT 1
-                    """
-                    end_date = await conn.fetchval(sub_query, user_id)
-                    end_date_str = end_date.strftime('%d.%m.%Y %H:%M') if end_date else 'неизвестно'
-                    reply_text = f"✅ У вас активирован ПРЕМИУМ доступ!\nДействует до: {end_date_str}\nОбновите страницу приложения, чтобы увидеть изменения."
-                else:
-                    reply_text = "❌ У вас нет активной ПРЕМИУМ подписки.\nДля получения премиум-доступа оформите подписку в приложении."
-                
-                # Отправляем ответ пользователю с выделенной функцией
-                await send_telegram_message(user_id, reply_text)
-                
-                logger.info(f"Проверка премиум-статуса через бот для пользователя {user_id}: {has_premium}")
-                return {"ok": True, "has_premium": has_premium}
-                
             except Exception as e:
                 logger.error(f"Ошибка при проверке премиум-статуса: {e}")
                 await send_telegram_message(user_id, f"Произошла ошибка при проверке статуса подписки. Пожалуйста, попробуйте позже.")
                 return {"ok": False, "error": str(e)}
-            
-            finally:
-                await conn.close()
         
         # ... остальная обработка вебхуков ...
         
@@ -3560,77 +3648,175 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
                 "message": "Не удалось определить ID пользователя"
             }
             
-        # Подключаемся к БД и проверяем статус подписки
-        db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("RENDER_DATABASE_URL")
-        if not db_url:
-            logger.error("Отсутствуют SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL при прямой проверке премиума")
-            return {
-                "has_premium": False,
-                "user_id": effective_user_id,
-                "error": "Отсутствуют URL для подключения к базе данных"
-            }
-            
-        # Нормализуем URL базы данных
-        db_url = normalize_db_url(db_url)
-            
-        # Подключаемся к БД
-        conn = await asyncpg.connect(db_url)
+        # Проверяем премиум-статус через REST API
         try:
-            # Проверяем наличие активной подписки
-            query = """
-            SELECT COUNT(*) 
-            FROM user_subscription 
-            WHERE user_id = $1 
-              AND is_active = TRUE 
-              AND end_date > NOW()
-            """
-            count = await conn.fetchval(query, effective_user_id)
-            has_premium = count > 0
+            # Проверяем, инициализирован ли Supabase клиент
+            if not supabase:
+                logger.error("Supabase клиент не инициализирован")
+                return {
+                    "has_premium": False,
+                    "user_id": effective_user_id,
+                    "error": "Supabase client not initialized"
+                }
             
-            logger.info(f"Прямая проверка премиума для {effective_user_id}: count={count}, has_premium={has_premium}")
+            # Запрашиваем активные подписки для пользователя через REST API
+            subscription_query = supabase.table("user_subscription").select("*").eq("user_id", effective_user_id).eq("is_active", True).execute()
             
-            # Получаем детали подписки
-            subscription_details = {}
-            if has_premium:
-                details_query = """
-                SELECT 
-                    end_date,
-                    created_at,
-                    updated_at
-                FROM user_subscription 
-                WHERE user_id = $1 
-                  AND is_active = TRUE
-                ORDER BY end_date DESC 
-                LIMIT 1
-                """
-                record = await conn.fetchrow(details_query, effective_user_id)
-                if record:
-                    subscription_end_date = record["end_date"].strftime('%Y-%m-%d %H:%M:%S')
-                    
-                    # Получаем лимиты использования
-                    analysis_count = 9999  # Для премиум - неограниченно
-                    post_generation_count = 9999  # Для премиум - неограниченно
-                    
-                    return {
-                        "has_premium": True,
-                        "user_id": effective_user_id,
-                        "error": None,
-                        "subscription_end_date": subscription_end_date,
-                        "analysis_count": analysis_count,
-                        "post_generation_count": post_generation_count
-                    }
+            logger.info(f"Результат запроса подписки через REST API: {subscription_query}")
             
-            # Если подписки нет, или не получили детали
-            return {
-                "has_premium": False,
+            has_premium = False
+            subscription_end_date = None
+            
+            # Проверяем результаты запроса
+            if hasattr(subscription_query, 'data') and subscription_query.data:
+                from datetime import datetime
+                
+                # Проверяем подписки на активность и срок
+                current_date = datetime.now()
+                active_subscriptions = []
+                
+                for subscription in subscription_query.data:
+                    end_date = subscription.get("end_date")
+                    if end_date:
+                        try:
+                            # Преобразуем дату из строки в объект datetime
+                            if isinstance(end_date, str):
+                                end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                            
+                            # Если дата окончания в будущем, добавляем в активные
+                            if end_date > current_date:
+                                active_subscriptions.append(subscription)
+                        except Exception as e:
+                            logger.error(f"Ошибка при обработке даты подписки {end_date}: {e}")
+                
+                # Если есть активные подписки, устанавливаем has_premium = True
+                if active_subscriptions:
+                    has_premium = True
+                    # Берем самую позднюю дату окончания
+                    latest_subscription = max(active_subscriptions, key=lambda x: x.get("end_date"))
+                    end_date = latest_subscription.get("end_date")
+                    if isinstance(end_date, str):
+                        end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                    subscription_end_date = end_date.strftime('%Y-%m-%d %H:%M:%S')
+            
+            logger.info(f"Прямая проверка премиума для {effective_user_id}: has_premium={has_premium}")
+            
+            # Получаем лимиты использования в зависимости от статуса
+            analysis_count = 9999 if has_premium else 3  # Для премиум - неограниченно, для бесплатного - 3
+            post_generation_count = 9999 if has_premium else 1  # Для премиум - неограниченно, для бесплатного - 1
+            
+            # Формируем ответ
+            response_data = {
+                "has_premium": has_premium,
                 "user_id": effective_user_id,
                 "error": None,
-                "analysis_count": 3,  # Значения по умолчанию для бесплатного режима
-                "post_generation_count": 1  # Значения по умолчанию для бесплатного режима
+                "analysis_count": analysis_count,
+                "post_generation_count": post_generation_count
             }
+            
+            # Добавляем дату окончания подписки, если есть
+            if subscription_end_date:
+                response_data["subscription_end_date"] = subscription_end_date
+            
+            return response_data
+            
+        except Exception as e:
+            logger.error(f"Ошибка при прямой проверке премиум-статуса через REST API: {e}")
+            
+            # Альтернативный способ с использованием httpx
+            try:
+                supabase_url = os.getenv("SUPABASE_URL")
+                supabase_key = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_ANON_KEY")
                 
-        finally:
-            await conn.close()
+                if not supabase_url or not supabase_key:
+                    raise ValueError("Отсутствуют SUPABASE_URL или SUPABASE_KEY")
+                
+                # Формируем запрос к REST API Supabase
+                headers = {
+                    "apikey": supabase_key,
+                    "Authorization": f"Bearer {supabase_key}",
+                    "Content-Type": "application/json"
+                }
+                
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(
+                        f"{supabase_url}/rest/v1/user_subscription",
+                        headers=headers,
+                        params={
+                            "select": "*",
+                            "user_id": f"eq.{effective_user_id}",
+                            "is_active": "eq.true"
+                        }
+                    )
+                    
+                    if response.status_code == 200:
+                        subscriptions = response.json()
+                        
+                        # Проверяем подписки на активность и срок
+                        from datetime import datetime
+                        current_date = datetime.now()
+                        active_subscriptions = []
+                        
+                        for subscription in subscriptions:
+                            end_date = subscription.get("end_date")
+                            if end_date:
+                                try:
+                                    # Преобразуем дату из строки в объект datetime
+                                    if isinstance(end_date, str):
+                                        end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                                    
+                                    # Если дата окончания в будущем, добавляем в активные
+                                    if end_date > current_date:
+                                        active_subscriptions.append(subscription)
+                                except Exception as e:
+                                    logger.error(f"Ошибка при обработке даты подписки {end_date}: {e}")
+                        
+                        # Если есть активные подписки, устанавливаем has_premium = True
+                        has_premium = bool(active_subscriptions)
+                        subscription_end_date = None
+                        
+                        if active_subscriptions:
+                            # Берем самую позднюю дату окончания
+                            latest_subscription = max(active_subscriptions, key=lambda x: x.get("end_date"))
+                            end_date = latest_subscription.get("end_date")
+                            if isinstance(end_date, str):
+                                end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                            subscription_end_date = end_date.strftime('%Y-%m-%d %H:%M:%S')
+                        
+                        # Получаем лимиты использования
+                        analysis_count = 9999 if has_premium else 3
+                        post_generation_count = 9999 if has_premium else 1
+                        
+                        # Формируем ответ
+                        response_data = {
+                            "has_premium": has_premium,
+                            "user_id": effective_user_id,
+                            "error": None,
+                            "analysis_count": analysis_count,
+                            "post_generation_count": post_generation_count
+                        }
+                        
+                        # Добавляем дату окончания подписки, если есть
+                        if subscription_end_date:
+                            response_data["subscription_end_date"] = subscription_end_date
+                        
+                        return response_data
+                    else:
+                        logger.error(f"Ошибка при запросе к Supabase REST API: {response.status_code} - {response.text}")
+                        return {
+                            "has_premium": False,
+                            "user_id": effective_user_id,
+                            "error": f"HTTP Error: {response.status_code}"
+                        }
+            
+            except Exception as httpx_error:
+                logger.error(f"Ошибка при проверке премиум-статуса через httpx: {httpx_error}")
+                return {
+                    "has_premium": False,
+                    "user_id": effective_user_id,
+                    "error": str(httpx_error)
+                }
+    
     except Exception as e:
         logger.error(f"Ошибка при прямой проверке премиум-статуса: {e}")
         return {
