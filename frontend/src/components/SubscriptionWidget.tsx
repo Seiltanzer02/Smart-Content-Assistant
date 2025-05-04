@@ -43,30 +43,81 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   
   // Проверка и валидация ID пользователя
   useEffect(() => {
+    let intervalId: number | null = null; // Используем number вместо NodeJS.Timeout
+    
     const validateUserId = () => {
+      console.log('[ValidateUserID] Starting validation...');
       // Проверяем userId из props
       if (userId) {
-        console.log(`Получен userId из props: ${userId}`);
+        console.log(`[ValidateUserID] Got userId from props: ${userId}`);
         setValidatedUserId(userId);
+        setError(null); // Очищаем предыдущие ошибки
+        if(intervalId !== null) clearInterval(intervalId); // Очищаем интервал, если он был запущен
+        intervalId = null;
         return;
       }
       
       // Если userId из props отсутствует, проверяем Telegram WebApp
       if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
         const telegramUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
-        console.log(`Получен userId из Telegram WebApp: ${telegramUserId}`);
+        console.log(`[ValidateUserID] Got userId from Telegram WebApp immediately: ${telegramUserId}`);
         setValidatedUserId(telegramUserId);
+        setError(null); // Очищаем предыдущие ошибки
+        if(intervalId !== null) clearInterval(intervalId); // Очищаем интервал
+        intervalId = null;
         return;
       }
       
-      // Если не удалось получить userId
-      console.error('Не удалось получить ID пользователя ни из props, ни из Telegram WebApp');
-      setError('Не удалось определить ID пользователя. Попробуйте перезагрузить страницу.');
-      setValidatedUserId(null);
+      // Если не удалось получить сразу, пробуем подождать
+      if (window.Telegram?.WebApp) {
+        console.log('[ValidateUserID] userId not found yet, waiting for Telegram WebApp.ready() and initData...');
+        window.Telegram.WebApp.ready(); // Убедимся, что ready() вызван
+        
+        // Если интервал уже запущен, не создаем новый
+        if (intervalId !== null) return;
+        
+        // Запускаем интервал для проверки initData
+        let attempts = 0;
+        // Используем window.setInterval для ясности, что это браузерный API
+        intervalId = window.setInterval(() => {
+          attempts++;
+          console.log(`[ValidateUserID] Polling for initData... Attempt: ${attempts}`);
+          if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
+            if(intervalId !== null) clearInterval(intervalId);
+            intervalId = null; // Сбрасываем ID интервала
+            const telegramUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
+            console.log(`[ValidateUserID] Got userId from Telegram WebApp after waiting: ${telegramUserId}`);
+            setValidatedUserId(telegramUserId);
+            setError(null); // Очищаем ошибку, если она была установлена ранее
+          } else if (attempts >= 10) { // Останавливаемся после ~5 секунд
+            if(intervalId !== null) clearInterval(intervalId);
+            intervalId = null; // Сбрасываем ID интервала
+            // Проверяем еще раз, чтобы избежать гонки состояний
+            if (!validatedUserId) { // Проверяем validatedUserId, чтобы не перезаписать ошибку, если ID уже получен
+              console.error('[ValidateUserID] Failed to get userId from Telegram WebApp after multiple attempts.');
+              setError('Не удалось определить ID пользователя. Попробуйте перезагрузить страницу.');
+              setValidatedUserId(null);
+            }
+          }
+        }, 500); // Проверяем каждые 500мс
+      } else {
+        // Если Telegram WebApp вообще недоступен
+        console.error('[ValidateUserID] window.Telegram.WebApp not found.');
+        setError('Ошибка: Приложение не запущено в среде Telegram.');
+        setValidatedUserId(null);
+      }
     };
     
     validateUserId();
-  }, [userId]);
+    
+    // Функция очистки для useEffect
+    return () => {
+      if (intervalId !== null) { // Используем number
+        console.log('[ValidateUserID] Cleaning up interval on unmount or prop change.');
+        clearInterval(intervalId);
+      }
+    };
+  }, [userId, validatedUserId]); // Добавляем validatedUserId в зависимости, чтобы остановить поллинг, если ID получен
   
   // Инициализация и настройка Telegram WebApp
   useEffect(() => {
