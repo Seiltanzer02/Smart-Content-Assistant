@@ -340,9 +340,9 @@ async def telegram_webhook(request: Request):
         if text.startswith('/start check_premium') or text == '/check_premium':
             logger.info(f"Получена команда проверки премиума от пользователя {user_id}")
             # Проверяем премиум-статус пользователя
-            db_url = os.getenv("DATABASE_URL")
+            db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("RENDER_DATABASE_URL")
             if not db_url:
-                logger.error("Отсутствует DATABASE_URL при проверке премиума")
+                logger.error("Отсутствуют SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL при проверке премиума")
                 # Отправляем уведомление пользователю о проблеме
                 await send_telegram_message(user_id, "Ошибка сервера: не удалось подключиться к базе данных. Пожалуйста, сообщите администратору.")
                 return {"ok": True, "error": "DB connection error"}
@@ -440,9 +440,10 @@ async def manual_check_premium(user_id: int, request: Request, force_update: boo
     Параметр force_update=true позволяет принудительно обновить кэш для пользователя.
     """
     try:
-        db_url = os.getenv("DATABASE_URL")
+        db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("RENDER_DATABASE_URL")
         if not db_url:
-            return {"success": False, "error": "DATABASE_URL не определен"}
+            logger.error("Отсутствуют SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL при ручной проверке премиума")
+            return {"success": False, "error": "Отсутствуют SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL в переменных окружения"}
             
         # Подключаемся к БД
         conn = await asyncpg.connect(db_url)
@@ -2375,6 +2376,14 @@ async def startup_event():
     """Запуск обслуживающих процессов при старте приложения."""
     logger.info("Запуск обслуживающих процессов...")
     
+    # Проверяем наличие переменных окружения
+    db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("RENDER_DATABASE_URL")
+    if not db_url:
+        logger.error("Отсутствуют переменные окружения SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL!")
+        # Продолжаем работу приложения с предупреждением
+    else:
+        logger.info(f"Используем подключение к БД: {db_url[:20]}...")
+    
     # Проверка и добавление недостающих столбцов (оставляем существующую логику)
     if supabase:
         if not await check_db_tables():
@@ -2707,11 +2716,26 @@ async def save_suggested_idea(idea_data: Dict[str, Any], request: Request):
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 async def check_db_tables():
-    """Проверка наличия необходимых таблиц в базе данных."""
+    """Проверка и создание необходимых таблиц в базе данных."""
     try:
-        # Проверка наличия таблицы suggested_ideas
-        result = supabase.table("suggested_ideas").select("id").limit(1).execute()
-        logger.info("Таблица suggested_ideas существует и доступна.")
+        # Получаем URL базы данных
+        db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL")
+        if not db_url:
+            logger.error("Отсутствуют SUPABASE_URL и DATABASE_URL в переменных окружения при проверке таблиц БД")
+            return False
+        
+        # Проверяем есть ли клиент Supabase
+        if not supabase:
+            logger.error("Клиент Supabase не инициализирован для проверки таблиц")
+            return False
+            
+        # Для проверки просто запрашиваем одну строку из таблицы, чтобы убедиться, что соединение работает
+        try:
+            result = supabase.table("suggested_ideas").select("id").limit(1).execute()
+            logger.info("Таблица suggested_ideas существует и доступна.")
+        except Exception as e:
+            logger.error(f"Ошибка при проверке соединения с Supabase: {e}")
+            return False
         
         # Автоматическое добавление недостающих столбцов
         try:
@@ -2721,8 +2745,8 @@ async def check_db_tables():
             # Явное добавление столбца updated_at в таблицу channel_analysis и обновление кэша схемы
             try:
                 # Получение URL и ключа Supabase
-                supabase_url = os.getenv('SUPABASE_URL')
-                supabase_key = os.getenv('SUPABASE_ANON_KEY')
+                supabase_url = os.getenv('SUPABASE_URL') or os.getenv('DATABASE_URL')
+                supabase_key = os.getenv('SUPABASE_KEY') or os.getenv('SUPABASE_ANON_KEY')
                 
                 if supabase_url and supabase_key:
                     # Прямой запрос через API
@@ -2755,7 +2779,7 @@ async def check_db_tables():
             
         return True
     except Exception as e:
-        logger.error(f"Ошибка при проверке таблиц: {str(e)}")
+        logger.error(f"Ошибка при проверке таблиц базы данных: {e}")
         return False
 
 async def fix_formatting_in_json_fields():
@@ -3263,58 +3287,6 @@ async def save_suggested_ideas_batch(payload: SaveIdeasRequest, request: Request
         logger.error(f"Исключение при батч-сохранении идей: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Исключение при батч-сохранении: {str(e)}")
 
-async def check_db_tables():
-    """Проверка наличия необходимых таблиц в базе данных."""
-    try:
-        # Проверка наличия таблицы suggested_ideas
-        result = supabase.table("suggested_ideas").select("id").limit(1).execute()
-        logger.info("Таблица suggested_ideas существует и доступна.")
-        
-        # Автоматическое добавление недостающих столбцов
-        try:
-            move_temp_files.add_missing_columns()
-            logger.info("Проверка и добавление недостающих столбцов выполнены.")
-            
-            # Явное добавление столбца updated_at в таблицу channel_analysis и обновление кэша схемы
-            try:
-                # Получение URL и ключа Supabase
-                supabase_url = os.getenv('SUPABASE_URL')
-                supabase_key = os.getenv('SUPABASE_ANON_KEY')
-                
-                if supabase_url and supabase_key:
-                    # Прямой запрос через API
-                    url = f"{supabase_url}/rest/v1/rpc/exec_sql_array_json"
-                    headers = {
-                        "apikey": supabase_key,
-                        "Authorization": f"Bearer {supabase_key}",
-                        "Content-Type": "application/json"
-                    }
-                    
-                    # SQL-команда для добавления столбца и обновления кэша
-                    sql_query = """
-                    ALTER TABLE channel_analysis 
-                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
-                    
-                    NOTIFY pgrst, 'reload schema';
-                    """
-                    
-                    response = requests.post(url, json={"query": sql_query}, headers=headers)
-                    
-                    if response.status_code in [200, 204]:
-                        logger.info("Столбец updated_at успешно добавлен и кэш схемы обновлен")
-                    else:
-                        logger.warning(f"Ошибка при добавлении столбца updated_at: {response.status_code} - {response.text}")
-            except Exception as column_e:
-                logger.warning(f"Ошибка при явном добавлении столбца updated_at: {str(column_e)}")
-            
-        except Exception as e:
-            logger.warning(f"Ошибка при добавлении недостающих столбцов: {str(e)}")
-            
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка при проверке таблиц: {str(e)}")
-        return False
-
 # --- Создаем папку для загрузок, если ее нет ---
 UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "uploads") # Используем относительный путь внутри backend
 os.makedirs(UPLOADS_DIR, exist_ok=True)
@@ -3501,12 +3473,13 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
             }
             
         # Подключаемся к БД и проверяем статус подписки
-        db_url = os.getenv("DATABASE_URL")
+        db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("RENDER_DATABASE_URL")
         if not db_url:
+            logger.error("Отсутствуют SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL при прямой проверке премиума")
             return {
                 "has_premium": False,
                 "user_id": effective_user_id,
-                "error": "DATABASE_URL не определен"
+                "error": "Отсутствуют URL для подключения к базе данных"
             }
             
         # Подключаемся к БД
