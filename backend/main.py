@@ -324,11 +324,12 @@ async def telegram_webhook(request: Request):
         user_id = message.get('from', {}).get('id')
         text = message.get('text', '')
         
-        # Если это команда /start с параметром check_premium
+        # Если это команда /start с параметром check_premium или команда /check_premium
         if text.startswith('/start check_premium') or text == '/check_premium':
             # Проверяем премиум-статус пользователя
             db_url = os.getenv("DATABASE_URL")
             if not db_url:
+                logger.error("Отсутствует DATABASE_URL при проверке премиума")
                 return {"ok": True, "error": "DB connection error"}
                 
             # Создаем подключение к БД
@@ -365,15 +366,21 @@ async def telegram_webhook(request: Request):
                 telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
                 if telegram_token:
                     telegram_api_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
-                    await requests.post(telegram_api_url, json={
-                        "chat_id": user_id,
-                        "text": reply_text,
-                        "parse_mode": "HTML"
-                    })
+                    async with httpx.AsyncClient() as client:
+                        response = await client.post(telegram_api_url, json={
+                            "chat_id": user_id,
+                            "text": reply_text,
+                            "parse_mode": "HTML"
+                        })
+                        logger.info(f"Отправлен ответ о премиум-статусе: {response.status_code} {response.text[:100]}...")
                 
                 logger.info(f"Проверка премиум-статуса через бот для пользователя {user_id}: {has_premium}")
                 return {"ok": True, "has_premium": has_premium}
                 
+            except Exception as e:
+                logger.error(f"Ошибка при проверке премиум-статуса: {e}")
+                return {"ok": False, "error": str(e)}
+            
             finally:
                 await conn.close()
         
