@@ -338,9 +338,9 @@ export const hasLocalPremium = (userId: string): boolean => {
  * Открывает чат с ботом и отправляет команду для проверки статуса подписки
  * Это альтернативный способ, когда другие методы не работают
  * 
- * @param botName имя бота без символа @ (например 'ContentHelperBot')
+ * @param botName имя бота без символа @ (например 'SmartContentHelperBot')
  */
-export const checkPremiumViaBot = (botName: string = 'ContentHelperBot'): void => {
+export const checkPremiumViaBot = (botName: string = 'SmartContentHelperBot'): void => {
   try {
     // Формируем URL для открытия чата с ботом и отправки команды
     const command = '/check_premium';

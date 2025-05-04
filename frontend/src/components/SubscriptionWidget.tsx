@@ -212,19 +212,55 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   }, [validatedUserId]);
   
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
-    if (!validatedUserId) {
-      console.error('Попытка запроса статуса подписки без валидного userId');
-      setError('ID пользователя не определен');
+    // Дополнительная проверка и получение userId из всех доступных источников
+    let effectiveUserId = validatedUserId;
+    
+    if (!effectiveUserId) {
+      console.log('[SubscriptionWidget] ValidatedUserId отсутствует, пробуем альтернативные источники...');
+      
+      // Попробуем получить из localStorage
+      const storedUserId = localStorage.getItem('contenthelper_user_id');
+      if (storedUserId) {
+        console.log(`[SubscriptionWidget] Найден userId в localStorage: ${storedUserId}`);
+        effectiveUserId = storedUserId;
+      }
+      
+      // Попробуем получить из URL (если страница содержит user_id в параметрах)
+      if (!effectiveUserId) {
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlUserId = urlParams.get('user_id');
+        if (urlUserId) {
+          console.log(`[SubscriptionWidget] Найден userId в параметрах URL: ${urlUserId}`);
+          effectiveUserId = urlUserId;
+        }
+      }
+      
+      // Попробуем получить из Telegram WebApp если доступен
+      if (!effectiveUserId && window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
+        const webAppUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
+        console.log(`[SubscriptionWidget] Найден userId в Telegram WebApp: ${webAppUserId}`);
+        effectiveUserId = webAppUserId;
+      }
+    }
+
+    if (!effectiveUserId) {
+      console.error('[SubscriptionWidget] Попытка запроса статуса подписки без валидного userId после всех проверок');
+      setError('ID пользователя не определен. Пожалуйста, перезапустите приложение.');
       return false;
     }
     
     setLoading(true);
     try {
-      console.log(`Запрос статуса подписки для ID: ${validatedUserId}`);
+      console.log(`[SubscriptionWidget] Запрос статуса подписки для ID: ${effectiveUserId}`);
       // Используем функцию из API вместо прямого запроса
-      const subscriptionData = await getUserSubscriptionStatus(validatedUserId);
-      console.log('Получен статус подписки:', subscriptionData);
+      const subscriptionData = await getUserSubscriptionStatus(effectiveUserId);
+      console.log('[SubscriptionWidget] Получен статус подписки:', subscriptionData);
       setStatus(subscriptionData);
+      
+      // Если userId найден альтернативным способом, сохраняем его как validatedUserId
+      if (effectiveUserId !== validatedUserId) {
+        setValidatedUserId(effectiveUserId);
+      }
       
       // Показываем/скрываем главную кнопку в зависимости от статуса подписки
       if (window.Telegram?.WebApp?.MainButton) {
@@ -237,7 +273,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       
       return subscriptionData.has_subscription;
     } catch (err: any) {
-      console.error('Ошибка при получении статуса подписки:', err);
+      console.error('[SubscriptionWidget] Ошибка при получении статуса подписки:', err);
       setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке статуса подписки');
       return false;
     } finally {
