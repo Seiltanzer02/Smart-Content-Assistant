@@ -90,6 +90,78 @@ const DirectPremiumStatus: React.FC<DirectPremiumStatusProps> = ({ userId, showD
     };
   }, [userId]);
 
+  // Добавляем слушатель событий для получения userId и статуса из инъекции
+  useEffect(() => {
+    // Функция-обработчик события инъекции userId
+    const handleUserIdInjection = (event: CustomEvent) => {
+      const injectedUserId = event.detail?.userId;
+      if (injectedUserId) {
+        console.log(`[DirectPremiumStatus] Получен инъектированный userId: ${injectedUserId}`);
+        userIdRef.current = injectedUserId;
+        
+        // Перезапускаем проверку статуса
+        checkPremiumStatus();
+      }
+    };
+    
+    // Функция-обработчик загруженного статуса премиума
+    const handlePremiumStatus = (event: CustomEvent) => {
+      const statusData = event.detail?.premiumStatus;
+      const injectedUserId = event.detail?.userId;
+      
+      if (statusData && injectedUserId) {
+        console.log(`[DirectPremiumStatus] Получен статус премиума из инъекции:`, statusData);
+        
+        // Обновляем состояние компонента
+        setHasPremium(statusData.has_premium);
+        setEndDate(statusData.subscription_end_date || null);
+        setResponseData(statusData);
+        setError(statusData.error || null);
+        setLoading(false);
+        
+        // Обновляем userId, если он еще не установлен
+        if (!userIdRef.current) {
+          userIdRef.current = injectedUserId;
+        }
+      }
+    };
+    
+    // Объявление глобальной переменной для TypeScript
+    interface WindowWithInjection extends Window {
+      INJECTED_USER_ID?: string;
+    }
+    
+    // Проверяем, есть ли userId уже в window
+    const windowWithInjection = window as WindowWithInjection;
+    if (windowWithInjection.INJECTED_USER_ID && !userIdRef.current) {
+      console.log(`[DirectPremiumStatus] Найден INJECTED_USER_ID: ${windowWithInjection.INJECTED_USER_ID}`);
+      userIdRef.current = windowWithInjection.INJECTED_USER_ID;
+      checkPremiumStatus();
+    }
+    
+    // Проверяем, есть ли userId в localStorage
+    try {
+      const storedUserId = localStorage.getItem('contenthelper_user_id');
+      if (storedUserId && !userIdRef.current) {
+        console.log(`[DirectPremiumStatus] Найден userId в localStorage: ${storedUserId}`);
+        userIdRef.current = storedUserId;
+        checkPremiumStatus();
+      }
+    } catch (e) {
+      console.warn('[DirectPremiumStatus] Ошибка чтения из localStorage:', e);
+    }
+    
+    // Регистрируем слушателей событий
+    document.addEventListener('userIdInjected', handleUserIdInjection as EventListener);
+    document.addEventListener('premiumStatusLoaded', handlePremiumStatus as EventListener);
+    
+    // Очистка при размонтировании
+    return () => {
+      document.removeEventListener('userIdInjected', handleUserIdInjection as EventListener);
+      document.removeEventListener('premiumStatusLoaded', handlePremiumStatus as EventListener);
+    };
+  }, []);
+
   // Функция для получения премиум-статуса
   const checkPremiumStatus = async () => {
     if (!userIdRef.current) {
