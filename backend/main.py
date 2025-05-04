@@ -419,10 +419,11 @@ async def telegram_webhook(request: Request):
                     
                     # Проверяем результаты запроса
                     if hasattr(subscription_query, 'data') and subscription_query.data:
-                        from datetime import datetime
+                        from datetime import datetime, timezone
                         
                         # Проверяем подписки на активность и срок
-                        current_date = datetime.now()
+                        # ИСПРАВЛЕНО: Создаем datetime с UTC timezone
+                        current_date = datetime.now(timezone.utc)
                         active_subscriptions = []
                         
                         for subscription in subscription_query.data:
@@ -494,8 +495,9 @@ async def telegram_webhook(request: Request):
                                 subscriptions = response.json()
                                 
                                 # Проверяем подписки на активность и срок
-                                from datetime import datetime
-                                current_date = datetime.now()
+                                from datetime import datetime, timezone
+                                # ИСПРАВЛЕНО: Создаем datetime с UTC timezone
+                                current_date = datetime.now(timezone.utc)
                                 active_subscriptions = []
                                 
                                 for subscription in subscriptions:
@@ -2907,8 +2909,8 @@ async def check_db_tables():
             
         # Для проверки просто запрашиваем одну строку из таблицы, чтобы убедиться, что соединение работает
         try:
-            result = supabase.table("suggested_ideas").select("id").limit(1).execute()
-            logger.info("Таблица suggested_ideas существует и доступна.")
+        result = supabase.table("suggested_ideas").select("id").limit(1).execute()
+        logger.info("Таблица suggested_ideas существует и доступна.")
         except Exception as e:
             logger.error(f"Ошибка при проверке соединения с Supabase: {e}")
             return False
@@ -3662,30 +3664,36 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
             # Запрашиваем активные подписки для пользователя через REST API
             subscription_query = supabase.table("user_subscription").select("*").eq("user_id", effective_user_id).eq("is_active", True).execute()
             
-            logger.info(f"Результат запроса подписки через REST API: {subscription_query}")
+            logger.info(f"Результат запроса подписки через REST API: data={subscription_query.data if hasattr(subscription_query, 'data') else None} count={len(subscription_query.data) if hasattr(subscription_query, 'data') else 0}")
             
             has_premium = False
             subscription_end_date = None
             
             # Проверяем результаты запроса
             if hasattr(subscription_query, 'data') and subscription_query.data:
-                from datetime import datetime
+                from datetime import datetime, timezone
                 
                 # Проверяем подписки на активность и срок
-                current_date = datetime.now()
+                # Создаем datetime с UTC timezone
+                current_date = datetime.now(timezone.utc)
+                logger.info(f"Текущая дата с timezone: {current_date.isoformat()}")
                 active_subscriptions = []
                 
                 for subscription in subscription_query.data:
                     end_date = subscription.get("end_date")
                     if end_date:
                         try:
-                            # Преобразуем дату из строки в объект datetime
+                            # Преобразуем дату из строки в объект datetime c timezone
                             if isinstance(end_date, str):
                                 end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
                             
                             # Если дата окончания в будущем, добавляем в активные
+                            logger.info(f"Сравнение дат: end_date={end_date.isoformat()}, current_date={current_date.isoformat()}")
                             if end_date > current_date:
                                 active_subscriptions.append(subscription)
+                                logger.info(f"Подписка активна: end_date позже текущей даты")
+                            else:
+                                logger.info(f"Подписка неактивна: end_date раньше текущей даты")
                         except Exception as e:
                             logger.error(f"Ошибка при обработке даты подписки {end_date}: {e}")
                 
@@ -3699,7 +3707,7 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
                         end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
                     subscription_end_date = end_date.strftime('%Y-%m-%d %H:%M:%S')
             
-            logger.info(f"Прямая проверка премиума для {effective_user_id}: has_premium={has_premium}")
+            logger.info(f"Результат проверки подписки для {effective_user_id}: has_premium={has_premium}, end_date={subscription_end_date}")
             
             # Получаем лимиты использования в зависимости от статуса
             analysis_count = 9999 if has_premium else 3  # Для премиум - неограниченно, для бесплатного - 3
@@ -3751,23 +3759,30 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
                     
                     if response.status_code == 200:
                         subscriptions = response.json()
+                        logger.info(f"Получены подписки через httpx: {subscriptions}")
                         
                         # Проверяем подписки на активность и срок
-                        from datetime import datetime
-                        current_date = datetime.now()
+                        from datetime import datetime, timezone
+                        # Создаем datetime с UTC timezone
+                        current_date = datetime.now(timezone.utc)
+                        logger.info(f"Текущая дата с timezone (httpx): {current_date.isoformat()}")
                         active_subscriptions = []
                         
                         for subscription in subscriptions:
                             end_date = subscription.get("end_date")
                             if end_date:
                                 try:
-                                    # Преобразуем дату из строки в объект datetime
+                                    # Преобразуем дату из строки в объект datetime c timezone
                                     if isinstance(end_date, str):
                                         end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
                                     
                                     # Если дата окончания в будущем, добавляем в активные
+                                    logger.info(f"Сравнение дат (httpx): end_date={end_date.isoformat()}, current_date={current_date.isoformat()}")
                                     if end_date > current_date:
                                         active_subscriptions.append(subscription)
+                                        logger.info(f"Подписка активна (httpx): end_date позже текущей даты")
+                                    else:
+                                        logger.info(f"Подписка неактивна (httpx): end_date раньше текущей даты")
                                 except Exception as e:
                                     logger.error(f"Ошибка при обработке даты подписки {end_date}: {e}")
                         
@@ -3782,6 +3797,8 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
                             if isinstance(end_date, str):
                                 end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
                             subscription_end_date = end_date.strftime('%Y-%m-%d %H:%M:%S')
+                        
+                        logger.info(f"Результат проверки подписки через httpx для {effective_user_id}: has_premium={has_premium}, end_date={subscription_end_date}")
                         
                         # Получаем лимиты использования
                         analysis_count = 9999 if has_premium else 3
