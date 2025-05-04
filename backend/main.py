@@ -41,7 +41,6 @@ import traceback
 # import psycopg2 # Добавляем импорт для прямого подключения (если нужно)
 # from psycopg2 import sql # Для безопасной вставки имен таблиц/колонок
 import shutil # Добавляем импорт shutil
-import asyncpg # Добавляем asyncpg для работы с базой данных
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
@@ -256,7 +255,7 @@ async def send_stars_invoice(request: Request):
             "payload": f"stars_invoice_{user_id}_{int(time.time())}",
             "provider_token": "",  # ПУСТОЙ для Stars
             "currency": "XTR",
-            "prices": [{"label": "XTR", "amount": 1}],  # <-- ИЗМЕНЕНО: 1 Star
+            "prices": [{"label": "XTR", "amount": stars_amount}],  # <--- БЕЗ *100!
             "need_name": False,
             "need_email": False,
             "is_flexible": False,
@@ -279,9 +278,9 @@ async def generate_stars_invoice_link(request: Request):
     try:
         data = await request.json()
         user_id = data.get("user_id")
-        amount = data.get("amount")
-        if not user_id or not amount:
-            raise HTTPException(status_code=400, detail="user_id и amount обязательны")
+        amount = 1 # <--- УСТАНОВЛЕНО В 1 Star
+        if not user_id:
+            raise HTTPException(status_code=400, detail="user_id обязателен")
         bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
         if not bot_token:
             raise HTTPException(status_code=500, detail="TELEGRAM_BOT_TOKEN не задан в окружении")
@@ -292,7 +291,7 @@ async def generate_stars_invoice_link(request: Request):
             "payload": f"stars_invoice_{user_id}_{int(time.time())}",
             "provider_token": "",
             "currency": "XTR",
-            "prices": [{"label": "XTR", "amount": int(amount)}],
+            "prices": [{"label": "XTR", "amount": amount}], # <--- Цена теперь 1
             "photo_url": "https://smart-content-assistant.onrender.com/static/premium_sub.jpg"
         }
         async with httpx.AsyncClient() as client:
@@ -322,30 +321,40 @@ async def telegram_webhook(request: Request):
                 f"https://api.telegram.org/bot{bot_token}/answerPreCheckoutQuery",
                 json={"pre_checkout_query_id": query_id, "ok": True}
             )
-            logger.info(f"Ответ на pre_checkout_query: {resp.json()}")
-        return {"ok": True}
-    # 2. Обработка successful_payment
+            print("Ответ на pre_checkout_query:", resp.text)
+        return {"ok": True, "pre_checkout_query": True}
+    # 2. Обработка успешной оплаты
     message = data.get("message", {})
     successful_payment = message.get("successful_payment")
     if successful_payment:
         user_id = message.get("from", {}).get("id")
         payment_id = successful_payment.get("telegram_payment_charge_id")
-        if not user_id or not payment_id:
-            logger.error("Недостаточно данных в successful_payment")
-            return {"ok": False}
-        
-        # Используем Depends для получения сервиса (или создаем его вручную, если Depends не работает в webhook)
-        # Простой вариант: создаем Pool и Service вручную (требует переменных окружения)
+        now = datetime.utcnow()
+        start_date = now
+        end_date = now + timedelta(days=30)
         try:
-            pool = await asyncpg.create_pool(DATABASE_URL)
-            subscription_service = SubscriptionService(pool)
-            await subscription_service.create_or_update_subscription(user_id, payment_id)
-            logger.info(f"Подписка для user_id={user_id} создана/обновлена.")
-            await pool.close()
+            # Проверяем, есть ли уже подписка
+            existing = supabase.table("user_subscription").select("*").eq("user_id", user_id).execute()
+            if existing.data and len(existing.data) > 0:
+                # Обновляем подписку
+                supabase.table("user_subscription").update({
+                    "is_active": True,
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "payment_id": payment_id
+                }).eq("user_id", user_id).execute()
+            else:
+                # Создаём новую подписку
+                supabase.table("user_subscription").insert({
+                    "user_id": user_id,
+                    "is_active": True,
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "payment_id": payment_id
+                }).execute()
         except Exception as e:
-            logger.error(f"Ошибка при создании/обновлении подписки для user_id={user_id}: {e}")
-            # Не возвращаем ошибку Telegram, чтобы он не пытался повторить
-
+            print("Ошибка при активации подписки:", e)
+        return {"ok": True, "successful_payment": True}
     return {"ok": True}
 
 
