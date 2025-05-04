@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import '../styles/SubscriptionWidget.css';
-import { getUserSubscriptionStatus, SubscriptionStatus } from '../api/subscription';
+import { getUserSubscriptionStatus, SubscriptionStatus, getSubscriptionStatusV2, getPremiumStatus } from '../api/subscription';
 
 interface SubscriptionWidgetProps {
   userId: string | null;
@@ -39,76 +39,115 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 1; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
-  const [validatedUserId, setValidatedUserId] = useState<string | null>(null);
+  
+  // Сохраняем userId в ref для предотвращения нежелательных перерисовок
+  const userIdRef = useRef<string | null>(null);
   
   // Ссылка для хранения таймера обновления статуса
   const updateTimerRef = useRef<number | null>(null);
   
-  // Проверка и валидация ID пользователя
+  // При монтировании получаем userId из URL-параметров, если он не передан через props
   useEffect(() => {
-    console.log('[ValidateUserID] Starting validation...');
+    console.log('[SubscriptionWidget] Инициализация компонента');
     
-    const clearUpdateTimer = () => {
+    const getUserIdFromUrl = (): string | null => {
+      try {
+        // Извлекаем userId из параметров URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlUserId = urlParams.get('user_id');
+        
+        if (urlUserId) {
+          console.log(`[SubscriptionWidget] Получен userId из URL: ${urlUserId}`);
+          return urlUserId;
+        }
+        
+        // Извлекаем userId из hash данных Telegram WebApp
+        const hash = window.location.hash;
+        if (hash && hash.includes("user")) {
+          const decodedHash = decodeURIComponent(hash);
+          const userMatch = decodedHash.match(/"id":(\d+)/);
+          if (userMatch && userMatch[1]) {
+            console.log(`[SubscriptionWidget] Получен userId из hash Telegram WebApp: ${userMatch[1]}`);
+            return userMatch[1];
+          }
+        }
+        
+        return null;
+      } catch (e) {
+        console.error('[SubscriptionWidget] Ошибка при извлечении userId из URL:', e);
+        return null;
+      }
+    };
+    
+    const validateUserId = () => {
+      // Приоритет 1: userId из props
+      if (userId) {
+        console.log(`[SubscriptionWidget] Используем userId из props: ${userId}`);
+        userIdRef.current = userId;
+        return;
+      }
+      
+      // Приоритет 2: userId из Telegram WebApp
+      if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
+        const telegramUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
+        console.log(`[SubscriptionWidget] Используем userId из Telegram WebApp: ${telegramUserId}`);
+        userIdRef.current = telegramUserId;
+        return;
+      }
+      
+      // Приоритет 3: userId из URL-параметров
+      const urlUserId = getUserIdFromUrl();
+      if (urlUserId) {
+        userIdRef.current = urlUserId;
+        return;
+      }
+      
+      // Если userId не определен, логируем ошибку
+      console.error('[SubscriptionWidget] Не удалось определить userId');
+      setError('Не удалось определить ID пользователя. Пожалуйста, обратитесь в поддержку.');
+    };
+    
+    validateUserId();
+    
+    // Очистка таймера при размонтировании компонента
+    return () => {
       if (updateTimerRef.current !== null) {
         clearInterval(updateTimerRef.current);
         updateTimerRef.current = null;
       }
     };
-    
-    const validateUserId = () => {
-      // Проверяем userId из props
-      if (userId) {
-        console.log(`[ValidateUserID] Got userId from props: ${userId}`);
-        setValidatedUserId(userId);
-        setError(null);
-        clearUpdateTimer();
-        return;
-      }
-      
-      // Если userId из props отсутствует, проверяем Telegram WebApp
-      if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
-        const telegramUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
-        console.log(`[ValidateUserID] Got userId from Telegram WebApp immediately: ${telegramUserId}`);
-        setValidatedUserId(telegramUserId);
-        setError(null);
-        clearUpdateTimer();
-        return;
-      }
-      
-      console.log('[ValidateUserID] Failed to get userId from props or Telegram WebApp');
-      setError('ID пользователя не найден');
-      setLoading(false);
-    };
-    
-    // Вызываем функцию валидации при монтировании компонента
-    validateUserId();
-    
-    // Очистка таймера при размонтировании компонента
-    return () => {
-      clearUpdateTimer();
-    };
   }, [userId]);
   
   // Инициализация Telegram WebApp при монтировании компонента
   useEffect(() => {
-    console.log('Инициализация Telegram WebApp...');
+    console.log('[SubscriptionWidget] Инициализация Telegram WebApp...');
     
     if (window.Telegram?.WebApp) {
-      console.log('window.Telegram.WebApp найден, настраиваем...');
+      console.log('[SubscriptionWidget] window.Telegram.WebApp найден, настраиваем...');
       try {
         // Сообщаем Telegram WebApp, что мы готовы
         window.Telegram.WebApp.ready();
+        console.log('[SubscriptionWidget] Telegram WebApp.ready() вызван успешно');
+        
+        // Если инит-данные содержат информацию о пользователе, обновляем userId
+        if (window.Telegram.WebApp.initDataUnsafe?.user?.id && !userIdRef.current) {
+          const telegramUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
+          console.log(`[SubscriptionWidget] Обновляем userId из Telegram WebApp: ${telegramUserId}`);
+          userIdRef.current = telegramUserId;
+        }
       } catch (e) {
-        console.error('Ошибка при инициализации Telegram WebApp:', e);
+        console.error('[SubscriptionWidget] Ошибка при инициализации Telegram WebApp:', e);
       }
     }
   }, []);
   
-  // Получение статуса подписки при изменении validatedUserId
+  // Получение статуса подписки при изменении userId
   useEffect(() => {
     const fetchSubscriptionStatus = async () => {
-      if (!validatedUserId) {
-        console.log('Невозможно запросить статус подписки без валидного userId');
+      if (!userIdRef.current) {
+        console.error('[SubscriptionWidget] Попытка запроса статуса подписки без валидного userId');
+        setLoading(false);
+        setError('ID пользователя не определен');
         return;
       }
       
@@ -116,29 +155,45 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
         setLoading(true);
         setError(null);
         
-        console.log(`Запрос статуса подписки для ID: ${validatedUserId}`);
+        console.log(`[SubscriptionWidget] Запрос статуса подписки для ID: ${userIdRef.current}`);
         
-        // Получение статуса подписки
-        const subscriptionData = await getUserSubscriptionStatus(validatedUserId);
-        console.log(`Получен статус подписки:`, subscriptionData);
+        // Получаем статус подписки через новую функцию с каскадной проверкой
+        const subscriptionData = await getUserSubscriptionStatus(userIdRef.current);
+        
+        console.log(`[SubscriptionWidget] Получен статус подписки:`, subscriptionData);
         
         setStatus(subscriptionData);
         setLoading(false);
+        
+        // Если есть ошибка в данных подписки, отображаем ее
+        if (subscriptionData.error) {
+          console.warn(`[SubscriptionWidget] Ошибка в данных подписки: ${subscriptionData.error}`);
+          setError(`Ошибка получения данных: ${subscriptionData.error}`);
+        }
       } catch (e) {
-        console.error('Ошибка при получении статуса подписки:', e);
+        console.error('[SubscriptionWidget] Ошибка при получении статуса подписки:', e);
+        
         setError('Не удалось получить статус подписки');
         setLoading(false);
+        
+        // Устанавливаем базовый статус при ошибке
+        setStatus({
+          has_subscription: false,
+          analysis_count: 1,
+          post_generation_count: 1,
+          error: e instanceof Error ? e.message : 'Неизвестная ошибка'
+        });
       }
     };
     
-    // Вызываем функцию при монтировании компонента и при изменении validatedUserId
-    if (validatedUserId) {
+    // Вызываем функцию сразу при монтировании и при изменении userId
+    if (userIdRef.current) {
       fetchSubscriptionStatus();
-    
+      
       // Устанавливаем интервал для регулярного обновления статуса
-      const updateInterval = 15000; // 15 секунд
+      const updateInterval = 30000; // 30 секунд
       updateTimerRef.current = window.setInterval(() => {
-        console.log('Регулярное обновление статуса подписки...');
+        console.log('[SubscriptionWidget] Регулярное обновление статуса подписки...');
         fetchSubscriptionStatus();
       }, updateInterval);
     }
@@ -150,17 +205,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
         updateTimerRef.current = null;
       }
     };
-  }, [validatedUserId]);
-  
-  // Диагностическая информация
-  useEffect(() => {
-    console.log('SubscriptionWidget загружен, проверка Telegram.WebApp:');
-    console.log('window.Telegram существует:', !!window.Telegram);
-    console.log('window.Telegram?.WebApp существует:', !!window.Telegram?.WebApp);
-    
-    if (window.Telegram?.WebApp) {
-      console.log('window.Telegram.WebApp методы:', Object.getOwnPropertyNames(window.Telegram.WebApp));
-    }
   }, []);
   
   // Запуск процесса подписки
@@ -169,7 +213,36 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     setShowPaymentInfo(true);
   };
   
-  // Рендер виджета подписки
+  // Проверка премиум-статуса напрямую через API
+  const checkPremiumDirectly = async () => {
+    if (!userIdRef.current) return;
+    
+    try {
+      setLoading(true);
+      const premiumStatus = await getPremiumStatus(userIdRef.current);
+      
+      if (premiumStatus.has_premium) {
+        setStatus({
+          has_subscription: true,
+          analysis_count: premiumStatus.analysis_count || 9999,
+          post_generation_count: premiumStatus.post_generation_count || 9999,
+          subscription_end_date: premiumStatus.subscription_end_date
+        });
+        setError(null);
+      } else {
+        // Если премиум не обнаружен, проверяем подробный статус
+        const detailedStatus = await getSubscriptionStatusV2(userIdRef.current);
+        setStatus(detailedStatus);
+      }
+    } catch (e) {
+      console.error('[SubscriptionWidget] Ошибка при прямой проверке премиума:', e);
+      setError('Ошибка проверки статуса премиума');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Рендеринг виджета подписки
   return (
     <div className="subscription-widget">
       <h2>Управление подпиской</h2>
@@ -181,6 +254,12 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       ) : error ? (
         <div className="subscription-status error">
           <span>{error}</span>
+          <button 
+            className="retry-button" 
+            onClick={checkPremiumDirectly}
+          >
+            Проверить снова
+          </button>
         </div>
       ) : status ? (
         <div className="subscription-container">
@@ -251,36 +330,42 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
             </div>
           )}
           
-          {/* Отладочная информация */}
+          {/* Отладочная информация для диагностики проблем */}
           <div className="debug-info">
-            <h4>Отладочная информация:</h4>
-            <pre>{JSON.stringify(status, null, 2)}</pre>
-            <button 
-              className="debug-button"
-              onClick={async () => {
-                try {
-                  const refreshedStatus = await getUserSubscriptionStatus(validatedUserId);
-                  setStatus(refreshedStatus);
-                  alert('Обновление выполнено');
-                } catch (e) {
-                  console.error('Ошибка обновления:', e);
-                  alert(`Ошибка: ${e}`);
-                }
-              }}
-            >
-              Обновить статус
-            </button>
+            <details>
+              <summary>Диагностическая информация</summary>
+              <div className="debug-data">
+                <p>ID пользователя: {userIdRef.current || 'не определен'}</p>
+                <p>Статус подписки: {status.has_subscription ? 'Активна' : 'Неактивна'}</p>
+                <p>Telegram WebApp доступен: {window.Telegram?.WebApp ? 'Да' : 'Нет'}</p>
+                {window.Telegram?.WebApp?.initDataUnsafe?.user?.id && (
+                  <p>ID из Telegram WebApp: {window.Telegram.WebApp.initDataUnsafe.user.id}</p>
+                )}
+                <button 
+                  className="debug-button"
+                  onClick={checkPremiumDirectly}
+                >
+                  Принудительно проверить статус
+                </button>
+              </div>
+            </details>
           </div>
         </div>
       ) : (
         <div className="subscription-status not-found">
           <span>Информация о подписке не найдена</span>
+          <button 
+            className="retry-button" 
+            onClick={checkPremiumDirectly}
+          >
+            Проверить снова
+          </button>
         </div>
       )}
       
-      {validatedUserId && (
+      {userIdRef.current && (
         <div className="user-id-display">
-          ID пользователя: {validatedUserId}
+          ID пользователя: {userIdRef.current}
         </div>
       )}
     </div>

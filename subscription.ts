@@ -6,64 +6,106 @@ export interface SubscriptionStatus {
   analysis_count: number;
   post_generation_count: number;
   subscription_end_date?: string;
+  error?: string;
+}
+
+// Определение интерфейса для прямой проверки премиума
+export interface PremiumStatus {
+  has_premium: boolean;
+  user_id: string;
+  error?: string;
+  subscription_end_date?: string;
+  analysis_count?: number;
+  post_generation_count?: number;
 }
 
 // API_URL пустая строка для относительных путей
 const API_URL = '';
 
 /**
- * Получение статуса подписки через прямой запрос к базе данных
- * Использует специальный API-эндпоинт, который всегда возвращает JSON
+ * Используем новый API-V2 для получения премиум-статуса
+ * Устойчивый к маршрутизации запрос, гарантированно возвращает JSON
  * 
  * @param userId ID пользователя Telegram
- * @returns Promise с данными о статусе подписки
+ * @returns Promise с данными о премиум-статусе
  */
-export const getForcePremiumStatus = async (userId: string | null): Promise<SubscriptionStatus> => {
+export const getPremiumStatus = async (userId: string | null): Promise<PremiumStatus> => {
   if (!userId) {
     throw new Error('ID пользователя не предоставлен');
   }
 
-  console.log(`[API] Прямая проверка подписки для пользователя ID: ${userId}`);
+  console.log(`[API] Запрос премиум-статуса для пользователя ID: ${userId}`);
   
   try {
-    // Добавляем случайный параметр для предотвращения кэширования
+    // Добавляем случайный параметр nocache для предотвращения кэширования
     const nocache = new Date().getTime();
     
-    const response = await axios.get(`${API_URL}/force-premium-status/${userId}?nocache=${nocache}`, {
+    const response = await axios.get(`${API_URL}/api-v2/premium/check?user_id=${userId}&nocache=${nocache}`, {
       headers: { 
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache',
-        'Expires': '0'
+        'Expires': '0',
+        'Accept': 'application/json'
       }
     });
     
-    console.log(`[API] Получен ответ о статусе подписки:`, response.data);
-    
-    // Преобразуем формат ответа от API к нашему интерфейсу
-    const result: SubscriptionStatus = {
-      has_subscription: response.data.has_premium || false,
-      analysis_count: response.data.analysis_count || 0,
-      post_generation_count: response.data.post_generation_count || 0
-    };
-    
-    if (response.data.subscription_end_date) {
-      result.subscription_end_date = response.data.subscription_end_date;
-    }
-    
-    return result;
+    console.log(`[API] Получен премиум-статус:`, response.data);
+    return response.data;
   } catch (error) {
-    console.error('Ошибка при получении статуса подписки:', error);
-    // В случае ошибки возвращаем базовый статус без подписки
+    console.error('[API] Ошибка при получении премиум-статуса:', error);
+    
+    // Ошибка сети или сервера
     return {
-      has_subscription: false,
-      analysis_count: 1,
-      post_generation_count: 1
+      has_premium: false,
+      user_id: userId,
+      error: error instanceof Error ? error.message : 'Неизвестная ошибка'
     };
   }
 };
 
 /**
+ * Используем новый API-V2 для получения статуса подписки
+ * Устойчивый к маршрутизации запрос, гарантированно возвращает JSON
+ * 
+ * @param userId ID пользователя Telegram
+ * @returns Promise с данными о статусе подписки
+ */
+export const getSubscriptionStatusV2 = async (userId: string | null): Promise<SubscriptionStatus> => {
+  if (!userId) {
+    throw new Error('ID пользователя не предоставлен');
+  }
+
+  console.log(`[API] Запрос статуса подписки V2 для пользователя ID: ${userId}`);
+  
+  try {
+    // Добавляем случайный параметр для предотвращения кэширования
+    const nocache = new Date().getTime();
+    
+    const response = await axios.get(`${API_URL}/api-v2/subscription/status?user_id=${userId}&nocache=${nocache}`, {
+      headers: { 
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Accept': 'application/json'
+      }
+    });
+    
+    console.log(`[API] Получен ответ о подписке V2:`, response.data);
+    return response.data;
+  } catch (error) {
+    console.error('[API] Ошибка при получении статуса подписки V2:', error);
+    throw error;
+  }
+};
+
+/**
  * Получает статус подписки пользователя
+ * 
+ * Пробует несколько способов получения статуса подписки для максимальной надежности:
+ * 1. Новый V2 API
+ * 2. Старый API с проверкой премиума
+ * 3. Резервный вариант - только базовые данные 
+ * 
  * @param userId ID пользователя Telegram
  * @returns Promise с данными о статусе подписки
  */
@@ -72,45 +114,98 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
     throw new Error('ID пользователя не предоставлен');
   }
 
-  console.log(`[API] Запрос статуса подписки для пользователя ID: ${userId}`);
+  console.log(`[API] Основной запрос статуса подписки для пользователя ID: ${userId}`);
   
+  // Пробуем разные способы получения данных о подписке последовательно
   try {
-    // Сначала пробуем использовать прямой запрос к базе данных
+    // Метод 1: Новый V2 API
     try {
-      return await getForcePremiumStatus(userId);
-    } catch (forceError) {
-      console.warn("Не удалось использовать прямой запрос, пробуем стандартный API", forceError);
+      const subscriptionData = await getSubscriptionStatusV2(userId);
+      console.log(`[API] Успешно получены данные через V2 API`);
+      return subscriptionData;
+    } catch (v2Error) {
+      console.warn(`[API] Не удалось получить данные через V2 API:`, v2Error);
     }
     
-    // Добавляем случайный параметр для предотвращения кэширования
-    const nocache = new Date().getTime();
+    // Метод 2: Проверка премиума и преобразование в формат SubscriptionStatus
+    try {
+      const premiumData = await getPremiumStatus(userId);
+      console.log(`[API] Успешно получены данные через премиум API`);
+      
+      return {
+        has_subscription: premiumData.has_premium,
+        analysis_count: premiumData.analysis_count || 1,
+        post_generation_count: premiumData.post_generation_count || 1,
+        subscription_end_date: premiumData.subscription_end_date
+      };
+    } catch (premiumError) {
+      console.warn(`[API] Не удалось получить данные через премиум API:`, premiumError);
+    }
     
-    // Получаем Telegram WebApp initData, если доступен
-    const telegramInitData = window.Telegram?.WebApp?.initData || '';
+    // Метод 3: Старый API (оставляем для обратной совместимости)
+    try {
+      const nocache = new Date().getTime();
+      const response = await axios.get(`${API_URL}/subscription/status?user_id=${userId}&nocache=${nocache}`, {
+        headers: { 
+          'x-telegram-user-id': userId,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'Accept': 'application/json'
+        }
+      });
+      
+      console.log(`[API] Успешно получены данные через старый API:`, response.data);
+      return response.data;
+    } catch (oldApiError) {
+      console.warn(`[API] Не удалось получить данные через старый API:`, oldApiError);
+    }
     
-    // Используем стандартный эндпоинт
-    const response = await axios.get(`${API_URL}/subscription/status?nocache=${nocache}`, {
-      headers: { 
-        'x-telegram-user-id': userId,
-        // Отправляем initData для безопасной аутентификации
-        'x-telegram-init-data': telegramInitData,
-        // Отключаем кэширование
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
-      }
-    });
-    
-    console.log(`[API] Получен ответ о подписке:`, response.data);
-    return response.data;
-  } catch (error) {
-    console.error('Ошибка при получении статуса подписки:', error);
-    
-    // В случае ошибки возвращаем базовый статус без подписки
+    // Если все методы не сработали, возвращаем базовые данные
+    console.warn(`[API] Все методы получения подписки не сработали, возвращаем базовые данные`);
     return {
       has_subscription: false,
       analysis_count: 1,
-      post_generation_count: 1
+      post_generation_count: 1,
+      error: 'Все методы получения статуса подписки не сработали'
     };
+  } catch (error) {
+    console.error('[API] Критическая ошибка при получении статуса подписки:', error);
+    
+    // Возвращаем базовые данные в случае полного сбоя
+    return {
+      has_subscription: false,
+      analysis_count: 1,
+      post_generation_count: 1,
+      error: error instanceof Error ? error.message : 'Неизвестная ошибка'
+    };
+  }
+};
+
+/**
+ * Генерирует счет на оплату для подписки
+ * 
+ * @param userId ID пользователя Telegram
+ * @returns Promise с информацией о счете
+ */
+export const generateInvoice = async (userId: string): Promise<any> => {
+  if (!userId) {
+    throw new Error('ID пользователя не предоставлен');
+  }
+
+  try {
+    const response = await axios.post(`${API_URL}/generate-invoice`, {
+      user_id: userId
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      }
+    });
+    
+    return response.data;
+  } catch (error) {
+    console.error('Ошибка при генерации счета:', error);
+    throw error;
   }
 }; 

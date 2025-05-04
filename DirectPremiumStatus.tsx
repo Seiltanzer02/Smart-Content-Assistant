@@ -1,88 +1,144 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './DirectPremiumStatus.css';
+import { getPremiumStatus, PremiumStatus } from '../api/subscription';
 
 interface DirectPremiumStatusProps {
   userId: string | null;
   showDebug?: boolean;
 }
 
-// Константы
+// API_URL для относительных путей
 const API_URL = '';
 
 /**
  * Компонент для прямого определения премиум-статуса пользователя
- * Использует выделенный эндпоинт для проверки статуса подписки
+ * Использует выделенный эндпоинт API-V2 и надежное отображение статуса
  */
 const DirectPremiumStatus: React.FC<DirectPremiumStatusProps> = ({ userId, showDebug = false }) => {
   const [hasPremium, setHasPremium] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [endDate, setEndDate] = useState<string | null>(null);
-  const [responseData, setResponseData] = useState<any>(null);
+  const [responseData, setResponseData] = useState<PremiumStatus | null>(null);
+  
+  // Сохраняем userId в ref для предотвращения лишних перерисовок
+  const userIdRef = useRef<string | null>(null);
+  
+  // Таймер автообновления
+  const updateTimerRef = useRef<number | null>(null);
+
+  // Получаем и сохраняем userId из разных источников
+  useEffect(() => {
+    console.log('[DirectPremiumStatus] Инициализация компонента');
+    
+    const validateUserId = () => {
+      // Приоритет 1: userId из props
+      if (userId) {
+        console.log(`[DirectPremiumStatus] Используем userId из props: ${userId}`);
+        userIdRef.current = userId;
+        return;
+      }
+      
+      // Приоритет 2: userId из Telegram WebApp
+      if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
+        const telegramUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
+        console.log(`[DirectPremiumStatus] Используем userId из Telegram WebApp: ${telegramUserId}`);
+        userIdRef.current = telegramUserId;
+        return;
+      }
+      
+      // Приоритет 3: userId из URL-параметров
+      try {
+        // Извлекаем userId из параметров URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlUserId = urlParams.get('user_id');
+        
+        if (urlUserId) {
+          console.log(`[DirectPremiumStatus] Получен userId из URL: ${urlUserId}`);
+          userIdRef.current = urlUserId;
+          return;
+        }
+        
+        // Извлекаем userId из hash данных Telegram WebApp
+        const hash = window.location.hash;
+        if (hash && hash.includes("user")) {
+          const decodedHash = decodeURIComponent(hash);
+          const userMatch = decodedHash.match(/"id":(\d+)/);
+          if (userMatch && userMatch[1]) {
+            console.log(`[DirectPremiumStatus] Получен userId из hash Telegram WebApp: ${userMatch[1]}`);
+            userIdRef.current = userMatch[1];
+            return;
+          }
+        }
+      } catch (e) {
+        console.error('[DirectPremiumStatus] Ошибка при извлечении userId из URL:', e);
+      }
+      
+      // Если userId не определен, логируем ошибку
+      console.error('[DirectPremiumStatus] Не удалось определить userId');
+      setError('ID пользователя не определен');
+    };
+    
+    validateUserId();
+    
+    // Очистка таймера при размонтировании
+    return () => {
+      if (updateTimerRef.current !== null) {
+        clearInterval(updateTimerRef.current);
+        updateTimerRef.current = null;
+      }
+    };
+  }, [userId]);
 
   // Функция для получения премиум-статуса
   const checkPremiumStatus = async () => {
-    if (!userId) {
-      console.log('[DirectStatus] Отсутствует userId, статус не может быть проверен');
+    if (!userIdRef.current) {
+      setError('ID пользователя не определен');
       setLoading(false);
-      setError('ID пользователя не предоставлен');
       return;
     }
     
     try {
       setLoading(true);
-      setError(null);
       
-      console.log(`[DirectStatus] Запрос статуса для ID: ${userId}`);
+      console.log(`[DirectPremiumStatus] Запрос статуса для ID: ${userIdRef.current}`);
       
-      // URL с предотвращением кэширования
-      const nocache = new Date().getTime();
-      const url = `${API_URL}/force-premium-status/${userId}?nocache=${nocache}`;
+      // Используем новый API для проверки премиума
+      const premiumData = await getPremiumStatus(userIdRef.current);
       
-      // Запрос к API с дополнительными заголовками против кэширования
-      const response = await fetch(url, {
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0'
-        }
-      });
+      console.log(`[DirectPremiumStatus] Получен ответ:`, premiumData);
       
-      if (response.ok) {
-        const data = await response.json();
-        console.log(`[DirectStatus] Получен ответ:`, data);
-        
-        setHasPremium(data.has_premium || false);
-        setEndDate(data.subscription_end_date || null);
-        setResponseData(data);
-      } else {
-        // В случае ошибки API
-        console.error(`[DirectStatus] Ошибка API: ${response.status}`);
-        setError(`Ошибка API: ${response.status}`);
-        setHasPremium(false);
-      }
+      // Обновляем состояние компонента
+      setHasPremium(premiumData.has_premium);
+      setEndDate(premiumData.subscription_end_date || null);
+      setResponseData(premiumData);
+      setError(premiumData.error || null);
+      
     } catch (e) {
-      console.error(`[DirectStatus] Ошибка запроса:`, e);
-      setError(`Ошибка запроса: ${e}`);
-      setHasPremium(false);
+      console.error(`[DirectPremiumStatus] Ошибка запроса:`, e);
+      setError(`Ошибка запроса: ${e instanceof Error ? e.message : 'Неизвестная ошибка'}`);
     } finally {
       setLoading(false);
     }
   };
 
-  // Проверка статуса при монтировании компонента или изменении userId
+  // Проверка статуса при монтировании компонента и при изменении userId
   useEffect(() => {
-    if (userId) {
+    if (userIdRef.current) {
       checkPremiumStatus();
       
-      // Регулярное обновление статуса
-      const interval = setInterval(checkPremiumStatus, 15000); // каждые 15 секунд
-      
-      return () => {
-        clearInterval(interval);
-      };
+      // Устанавливаем таймер для регулярного обновления
+      const updateInterval = 30000; // 30 секунд
+      updateTimerRef.current = window.setInterval(checkPremiumStatus, updateInterval);
     }
-  }, [userId]);
+    
+    return () => {
+      if (updateTimerRef.current !== null) {
+        clearInterval(updateTimerRef.current);
+        updateTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // Функция для форматирования даты с часовым поясом
   const formatDate = (isoDateString: string): string => {
@@ -114,6 +170,12 @@ const DirectPremiumStatus: React.FC<DirectPremiumStatusProps> = ({ userId, showD
       ) : error ? (
         <div className="direct-status error">
           {error}
+          <button 
+            className="refresh-button"
+            onClick={checkPremiumStatus}
+          >
+            Проверить снова
+          </button>
         </div>
       ) : (
         <div className={`direct-status ${hasPremium ? 'premium' : 'free'}`}>
@@ -138,6 +200,13 @@ const DirectPremiumStatus: React.FC<DirectPremiumStatusProps> = ({ userId, showD
               <details>
                 <summary>Отладочная информация</summary>
                 <pre>{JSON.stringify(responseData, null, 2)}</pre>
+                <p>
+                  ID: {userIdRef.current || 'не определен'}<br/>
+                  Telegram WebApp: {window.Telegram?.WebApp ? 'Доступен' : 'Не доступен'}<br/>
+                  {window.Telegram?.WebApp?.initDataUnsafe?.user?.id && 
+                    `Telegram ID: ${window.Telegram.WebApp.initDataUnsafe.user.id}`
+                  }
+                </p>
               </details>
               <button onClick={checkPremiumStatus} className="refresh-button">
                 Обновить статус

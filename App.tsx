@@ -66,27 +66,11 @@ function App() {
   const [currentView, setCurrentView] = useState<ViewType>('analyze');
   const [showSubscription, setShowSubscription] = useState(false);
   
-  // Получение ID пользователя при монтировании компонента
-  useEffect(() => {
-    // Проверяем Telegram WebApp для получения user_id
-    if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
-      const telegramUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
-      console.log(`[App] Получен user_id из Telegram WebApp: ${telegramUserId}`);
-      setUserId(telegramUserId);
-      setIsAuthenticated(true);
-      setLoading(false);
-    } else {
-      console.log('[App] Не удалось получить user_id из Telegram WebApp');
-      // Можно добавить запасной вариант получения ID, например из localStorage или URL-параметров
-      setLoading(false);
-    }
-  }, []);
-  
   // Компонент для пользователей, прошедших аутентификацию
   const AuthenticatedApp = () => {
     return (
       <div className="authenticated-app">
-        {/* Показ статуса подписки вверху страницы */}
+        {/* Принудительный показ премиум-статуса вверху страницы */}
         <DirectPremiumStatus userId={userId} />
         
         {/* Основной контент приложения */}
@@ -101,8 +85,8 @@ function App() {
       <header className="app-header">
         <div className="logo">Smart Content Assistant</div>
         
-        {/* Компактное отображение статуса подписки */}
-        {userId && <DirectPremiumStatus userId={userId} showDebug={false} />}
+        {/* Принудительное отображение статуса подписки */}
+        <DirectPremiumStatus userId={userId} showDebug={false} />
         
         <div className="header-icons">
           {/* Кнопка для управления подпиской */}
@@ -120,20 +104,18 @@ function App() {
       </header>
 
       {/* Виджет управления подпиской */}
-      {showSubscription && userId && (
+      {showSubscription && (
         <SubscriptionWidget userId={userId} isActive={true} />
       )}
       
       {/* Основной контент */}
       <main className="app-main">
-        {loading ? (
-          <Loading message="Загрузка приложения..." />
-        ) : isAuthenticated ? (
+        {isAuthenticated ? (
           <AuthenticatedApp />
         ) : (
           <div className="login-container">
             <p>Для использования приложения необходимо авторизоваться</p>
-            <p>Откройте это приложение через Telegram</p>
+            {/* ... компоненты для авторизации ... */}
           </div>
         )}
       </main>
