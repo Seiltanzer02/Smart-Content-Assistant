@@ -248,6 +248,19 @@ const DirectPremiumStatus: React.FC<DirectPremiumStatusProps> = ({ userId, showD
           >
             Проверить снова
           </button>
+          
+          {/* Добавляем кнопку для диагностики */}
+          <button 
+            className="debug-button"
+            onClick={() => {
+              if (!userIdRef.current) return;
+              
+              // Открываем диагностический эндпоинт в новом окне
+              window.open(`/api/subscription/debug/${userIdRef.current}?create_test=true`, '_blank');
+            }}
+          >
+            Диагностика и создание тестовой подписки
+          </button>
         </div>
       ) : (
         <div className={`direct-status ${hasPremium ? 'premium' : 'free'}`}>

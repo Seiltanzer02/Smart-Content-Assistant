@@ -2,6 +2,24 @@ import React, { useState, useEffect, useRef } from 'react';
 import '../styles/SubscriptionWidget.css';
 import { getUserSubscriptionStatus, SubscriptionStatus, getSubscriptionStatusV2, getPremiumStatus } from '../api/subscription';
 
+// Расширение интерфейса Window для поддержки INJECTED_USER_ID
+declare global {
+  interface Window {
+    INJECTED_USER_ID?: string;
+    Telegram?: {
+      WebApp?: {
+        initDataUnsafe?: {
+          user?: {
+            id?: number;
+          };
+        };
+        ready?: () => void;
+        initData?: string;
+      };
+    };
+  }
+}
+
 interface SubscriptionWidgetProps {
   userId: string | null;
   isActive?: boolean;
@@ -144,6 +162,39 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   // Получение статуса подписки при изменении userId
   useEffect(() => {
     const fetchSubscriptionStatus = async () => {
+      // Синхронно проверяем наличие userId
+      // Проверяем все возможные источники
+      if (!userIdRef.current) {
+        // Проверяем window.INJECTED_USER_ID
+        if (window.INJECTED_USER_ID) {
+          console.log(`[SubscriptionWidget] Используем INJECTED_USER_ID: ${window.INJECTED_USER_ID}`);
+          userIdRef.current = window.INJECTED_USER_ID;
+        } 
+        // Проверяем localStorage
+        else if (localStorage.getItem('contenthelper_user_id')) {
+          userIdRef.current = localStorage.getItem('contenthelper_user_id');
+          console.log(`[SubscriptionWidget] Используем userId из localStorage: ${userIdRef.current}`);
+        }
+        // Проверяем Telegram WebApp
+        else if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
+          userIdRef.current = String(window.Telegram.WebApp.initDataUnsafe.user.id);
+          console.log(`[SubscriptionWidget] Используем userId из Telegram WebApp: ${userIdRef.current}`);
+        }
+        // Извлекаем userId из URL
+        else {
+          try {
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlUserId = urlParams.get('user_id');
+            if (urlUserId) {
+              userIdRef.current = urlUserId;
+              console.log(`[SubscriptionWidget] Используем userId из URL: ${userIdRef.current}`);
+            }
+          } catch (e) {
+            console.error('[SubscriptionWidget] Ошибка при извлечении userId из URL:', e);
+          }
+        }
+      }
+      
       if (!userIdRef.current) {
         console.error('[SubscriptionWidget] Попытка запроса статуса подписки без валидного userId');
         setLoading(false);
@@ -186,17 +237,15 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       }
     };
     
-    // Вызываем функцию сразу при монтировании и при изменении userId
-    if (userIdRef.current) {
+    // Вызываем функцию сразу при монтировании компонента
+    fetchSubscriptionStatus();
+    
+    // Устанавливаем интервал для регулярного обновления статуса
+    const updateInterval = 30000; // 30 секунд
+    updateTimerRef.current = window.setInterval(() => {
+      console.log('[SubscriptionWidget] Регулярное обновление статуса подписки...');
       fetchSubscriptionStatus();
-      
-      // Устанавливаем интервал для регулярного обновления статуса
-      const updateInterval = 30000; // 30 секунд
-      updateTimerRef.current = window.setInterval(() => {
-        console.log('[SubscriptionWidget] Регулярное обновление статуса подписки...');
-        fetchSubscriptionStatus();
-      }, updateInterval);
-    }
+    }, updateInterval);
     
     // Очистка интервала при размонтировании компонента
     return () => {
@@ -330,6 +379,52 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
           >
             Проверить снова
           </button>
+          
+          {/* Добавляем кнопку диагностики */}
+          {userIdRef.current && (
+            <button 
+              className="debug-button"
+              onClick={() => {
+                // Открываем диагностическую страницу в новом окне
+                window.open(`/api/subscription/debug/${userIdRef.current}?create_test=true`, '_blank');
+              }}
+            >
+              Диагностика и создание тестовой подписки
+            </button>
+          )}
+          
+          {/* Форма для ручного ввода userId если он не определен */}
+          {!userIdRef.current && (
+            <div className="manual-userid-form">
+              <input 
+                type="text" 
+                placeholder="Введите Telegram ID пользователя" 
+                id="manual-userid-input"
+              />
+              <button 
+                onClick={() => {
+                  const input = document.getElementById('manual-userid-input') as HTMLInputElement;
+                  if (input && input.value) {
+                    userIdRef.current = input.value;
+                    console.log(`[SubscriptionWidget] Установлен userId вручную: ${userIdRef.current}`);
+                    
+                    // Сохраняем в localStorage
+                    try {
+                      localStorage.setItem('contenthelper_user_id', userIdRef.current);
+                    } catch (e) {
+                      console.error('[SubscriptionWidget] Ошибка сохранения в localStorage:', e);
+                    }
+                    
+                    // Перезапускаем проверку
+                    checkPremiumDirectly();
+                  }
+                }}
+              >
+                Установить ID и проверить
+              </button>
+            </div>
+          )}
+          
         </div>
       ) : status ? (
         <div className="subscription-container">
