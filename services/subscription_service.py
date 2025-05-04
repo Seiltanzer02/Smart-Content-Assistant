@@ -81,22 +81,68 @@ class SubscriptionService:
         
     async def get_subscription(self, user_id: int):
         """Получает активную подписку пользователя"""
-        query = """
-        SELECT * FROM subscriptions 
-        WHERE user_id = $1 AND is_active = TRUE AND end_date > NOW()
+        # Сначала запросим подписки только с проверкой is_active
+        query_active = """
+        SELECT * FROM user_subscription 
+        WHERE user_id = $1 AND is_active = TRUE
         ORDER BY end_date DESC
         LIMIT 1
         """
         
-        subscription = await self.db.fetchrow(query, user_id)
-        return subscription
+        active_subscription = await self.db.fetchrow(query_active, user_id)
+        
+        # Если нашли активную подписку по флагу, проверим её срок
+        if active_subscription:
+            # Просто выведем отладочную информацию
+            print(f"[DEBUG] Найдена подписка с is_active=TRUE: ID={active_subscription['id']}, end_date={active_subscription['end_date']}")
+            
+            # Проверим, не истек ли срок
+            current_time = await self.db.fetchval("SELECT NOW()")
+            if active_subscription['end_date'] > current_time:
+                print(f"[DEBUG] Подписка активна, end_date > NOW(): {active_subscription['end_date']} > {current_time}")
+                return active_subscription
+            else:
+                print(f"[DEBUG] Подписка неактивна (истек срок), end_date <= NOW(): {active_subscription['end_date']} <= {current_time}")
+                # Деактивируем подписку, так как она истекла
+                update_query = """
+                UPDATE user_subscription 
+                SET is_active = FALSE, updated_at = NOW()
+                WHERE id = $1
+                """
+                await self.db.execute(update_query, active_subscription['id'])
+                return None
+        
+        # Если не нашли подписку с is_active=TRUE, проверим наличие подписок, у которых срок не истек
+        # Это может исправить ситуацию, когда флаг is_active=FALSE, но срок подписки не истек
+        query_valid = """
+        SELECT * FROM user_subscription 
+        WHERE user_id = $1 AND end_date > NOW()
+        ORDER BY end_date DESC
+        LIMIT 1
+        """
+        
+        valid_subscription = await self.db.fetchrow(query_valid, user_id)
+        
+        if valid_subscription and not valid_subscription['is_active']:
+            print(f"[DEBUG] Найдена подписка с end_date > NOW(), но is_active=FALSE: ID={valid_subscription['id']}")
+            # Активируем подписку, так как срок не истек
+            update_query = """
+            UPDATE user_subscription 
+            SET is_active = TRUE, updated_at = NOW()
+            WHERE id = $1
+            RETURNING *
+            """
+            return await self.db.fetchrow(update_query, valid_subscription['id'])
+        
+        # Возвращаем valid_subscription (который может быть None)
+        return valid_subscription
         
     async def create_subscription(self, user_id: int, payment_id: str = None):
         """Создает новую подписку"""
         end_date = datetime.now() + relativedelta(months=SUBSCRIPTION_DURATION_MONTHS)
         
         query = """
-        INSERT INTO subscriptions 
+        INSERT INTO user_subscription 
         (user_id, end_date, payment_id)
         VALUES ($1, $2, $3)
         RETURNING *

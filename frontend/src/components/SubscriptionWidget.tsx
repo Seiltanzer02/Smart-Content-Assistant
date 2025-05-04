@@ -17,6 +17,34 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 1; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
+  const [validatedUserId, setValidatedUserId] = useState<string | null>(null);
+  
+  // Проверка и валидация ID пользователя
+  useEffect(() => {
+    const validateUserId = () => {
+      // Проверяем userId из props
+      if (userId) {
+        console.log(`Получен userId из props: ${userId}`);
+        setValidatedUserId(userId);
+        return;
+      }
+      
+      // Если userId из props отсутствует, проверяем Telegram WebApp
+      if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
+        const telegramUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
+        console.log(`Получен userId из Telegram WebApp: ${telegramUserId}`);
+        setValidatedUserId(telegramUserId);
+        return;
+      }
+      
+      // Если не удалось получить userId
+      console.error('Не удалось получить ID пользователя ни из props, ни из Telegram WebApp');
+      setError('Не удалось определить ID пользователя. Попробуйте перезагрузить страницу.');
+      setValidatedUserId(null);
+    };
+    
+    validateUserId();
+  }, [userId]);
   
   // Инициализация и настройка Telegram WebApp
   useEffect(() => {
@@ -77,11 +105,42 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     }
   }, [userId]);
   
+  // Периодическое обновление статуса подписки
+  useEffect(() => {
+    let intervalId: number | null = null;
+    
+    if (validatedUserId) {
+      // Сразу запрашиваем статус
+      fetchSubscriptionStatus();
+      
+      // Устанавливаем интервал обновления - каждые 15 секунд
+      intervalId = window.setInterval(() => {
+        console.log('Регулярное обновление статуса подписки...');
+        fetchSubscriptionStatus();
+      }, 15000);
+    }
+    
+    // Очистка при размонтировании
+    return () => {
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, [validatedUserId]);
+  
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
+    if (!validatedUserId) {
+      console.error('Попытка запроса статуса подписки без валидного userId');
+      setError('ID пользователя не определен');
+      return false;
+    }
+    
     setLoading(true);
     try {
+      console.log(`Запрос статуса подписки для ID: ${validatedUserId}`);
       // Используем функцию из API вместо прямого запроса
-      const subscriptionData = await getUserSubscriptionStatus(userId);
+      const subscriptionData = await getUserSubscriptionStatus(validatedUserId);
+      console.log('Получен статус подписки:', subscriptionData);
       setStatus(subscriptionData);
       
       // Показываем/скрываем главную кнопку в зависимости от статуса подписки
@@ -125,6 +184,11 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   
   const handleInvoiceGeneration = async (userId: number) => {
     try {
+      if (!validatedUserId) {
+        setError('Не удалось определить ID пользователя');
+        return;
+      }
+      
       setIsSubscribing(true);
       // Получаем invoice_link с backend
       const response = await fetch('/generate-stars-invoice-link', {
@@ -206,10 +270,15 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   return (
     <div className={`subscription-widget ${status?.has_subscription ? 'premium-active' : 'free-tier'}`}>
       <h3>Управление подпиской</h3>
-      {loading ? (
+      {!validatedUserId ? (
+        <p className="error-message">Не удалось определить пользователя. Пожалуйста, перезагрузите страницу.</p>
+      ) : loading ? (
         <p>Загрузка статуса подписки...</p>
       ) : error ? (
-        <p className="error-message">{error}</p>
+        <div>
+          <p className="error-message">{error}</p>
+          <button onClick={fetchSubscriptionStatus}>Повторить</button>
+        </div>
       ) : status ? (
         <div className={status.has_subscription ? "subscription-active" : "subscription-free"}>
           {status.has_subscription ? (
@@ -217,6 +286,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
               <span className="status-badge premium">Premium</span>
               <p>Ваша подписка активна до: {new Date(status.subscription_end_date!).toLocaleDateString()}</p>
               <p>Спасибо за поддержку!</p>
+              <p className="user-info">ID пользователя: {validatedUserId}</p>
             </>
           ) : (
             <>
@@ -231,12 +301,13 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
                 <p>Снимите все ограничения, получив Premium-подписку всего за 1 Star в месяц!</p>
                 <button 
                   className="subscribe-button"
-                  onClick={() => userId && handleInvoiceGeneration(Number(userId))}
+                  onClick={() => validatedUserId && handleInvoiceGeneration(Number(validatedUserId))}
                   disabled={isSubscribing}
                 >
                   {isSubscribing ? 'Создание платежа...' : 'Подписаться за 1 Star'}
                 </button>
               </div>
+              <p className="user-info">ID пользователя: {validatedUserId}</p>
             </>
           )}
         </div>
