@@ -1,95 +1,125 @@
-import asyncio
-import asyncpg
+#!/usr/bin/env python3
+"""
+Диагностический скрипт для проверки статуса подписки пользователя в базе данных.
+Использование: python check_subscription.py <user_id>
+"""
+
 import os
 import sys
-from dotenv import load_dotenv
+import json
+import asyncio
+import logging
+import asyncpg
+from datetime import datetime, timezone
 
-# Загрузка переменных окружения
-load_dotenv()
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-# ID пользователя из скриншота базы данных
-USER_ID = 427032240
-
-async def check_connection():
-    """Проверка только соединения с базой данных"""
-    conn_string = os.getenv("DATABASE_URL")
-    if not conn_string:
-        print("Ошибка: переменная окружения DATABASE_URL не установлена")
-        return False
+class SubscriptionChecker:
+    def __init__(self, db_url=None):
+        self.db_url = db_url or os.getenv("DATABASE_URL")
+        if not self.db_url:
+            raise ValueError("DATABASE_URL не указан в переменных окружения")
+        self.pool = None
+        
+    async def connect(self):
+        """Устанавливает соединение с базой данных"""
+        try:
+            self.pool = await asyncpg.create_pool(self.db_url)
+            logger.info("Успешное подключение к базе данных")
+        except Exception as e:
+            logger.error(f"Ошибка подключения к базе данных: {e}")
+            raise
     
-    try:
-        # Пытаемся подключиться к БД
-        conn = await asyncpg.connect(conn_string)
-        # Проверяем, что соединение работает
-        server_time = await conn.fetchval("SELECT NOW()")
-        print(f"Соединение с БД установлено успешно. Время сервера: {server_time}")
-        await conn.close()
-        return True
-    except Exception as e:
-        print(f"Ошибка подключения к БД: {e}")
-        return False
+    async def check_user_subscription(self, user_id):
+        """Проверяет статус подписки пользователя"""
+        if not self.pool:
+            await self.connect()
+            
+        try:
+            # Получаем информацию о подписке
+            query = """
+            SELECT id, user_id, start_date, end_date, payment_id, is_active, created_at, updated_at
+            FROM subscriptions
+            WHERE user_id = $1
+            ORDER BY end_date DESC
+            """
+            subscriptions = await self.pool.fetch(query, int(user_id))
+            
+            if not subscriptions:
+                logger.info(f"Пользователь {user_id} не имеет записей о подписках в базе данных")
+                return {
+                    "status": "not_found",
+                    "message": f"Пользователь {user_id} не имеет записей о подписках в базе данных",
+                    "subscriptions": []
+                }
+            
+            # Форматируем результаты
+            result = []
+            for sub in subscriptions:
+                now = datetime.now(timezone.utc)
+                is_active = sub['is_active'] and sub['end_date'] > now
+                
+                subscription_info = {
+                    "id": sub['id'],
+                    "user_id": sub['user_id'],
+                    "start_date": sub['start_date'].isoformat() if sub['start_date'] else None,
+                    "end_date": sub['end_date'].isoformat() if sub['end_date'] else None,
+                    "payment_id": sub['payment_id'],
+                    "db_is_active": sub['is_active'],
+                    "calculated_is_active": is_active,
+                    "created_at": sub['created_at'].isoformat() if sub['created_at'] else None,
+                    "updated_at": sub['updated_at'].isoformat() if sub['updated_at'] else None,
+                    "time_left_days": (sub['end_date'] - now).days if sub['end_date'] else None
+                }
+                result.append(subscription_info)
+            
+            # Проверка наличия активной подписки
+            active_subscription = next((s for s in result if s["calculated_is_active"]), None)
+            status = "active" if active_subscription else "expired"
+            
+            return {
+                "status": status,
+                "message": f"Пользователь {user_id} имеет {'активную' if status == 'active' else 'истекшую'} подписку",
+                "subscriptions": result,
+                "active_subscription": active_subscription
+            }
+                
+        except Exception as e:
+            logger.error(f"Ошибка при проверке подписки: {e}")
+            return {
+                "status": "error",
+                "message": f"Ошибка при проверке подписки: {str(e)}",
+                "subscriptions": []
+            }
+    
+    async def close(self):
+        """Закрывает соединение с базой данных"""
+        if self.pool:
+            await self.pool.close()
+            logger.info("Соединение с базой данных закрыто")
 
-async def check_subscription():
-    # Подключение к базе данных
-    conn_string = os.getenv("DATABASE_URL")
-    if not conn_string:
-        print("Ошибка: переменная окружения DATABASE_URL не установлена")
+
+async def main():
+    """Основная функция скрипта"""
+    if len(sys.argv) < 2:
+        print("Использование: python check_subscription.py <user_id>")
         return
     
-    conn = await asyncpg.connect(conn_string)
+    user_id = sys.argv[1]
     
     try:
-        print(f"Проверка подписки для user_id: {USER_ID}")
-        
-        # 1. Получить все записи для пользователя
-        all_subscriptions = await conn.fetch(
-            "SELECT * FROM user_subscription WHERE user_id = $1",
-            USER_ID
-        )
-        print(f"\nВсе подписки пользователя ({len(all_subscriptions)}):")
-        for sub in all_subscriptions:
-            print(f"ID: {sub['id']}, active: {sub['is_active']}, start: {sub['start_date']}, end: {sub['end_date']}")
-        
-        # 2. Получить текущее время на сервере
-        server_time = await conn.fetchval("SELECT NOW()")
-        print(f"\nТекущее время на сервере: {server_time}")
-        
-        # 3. Проверить активные подписки
-        active_subs = await conn.fetch(
-            "SELECT * FROM user_subscription WHERE user_id = $1 AND is_active = TRUE AND end_date > NOW()",
-            USER_ID
-        )
-        print(f"\nАктивные подписки ({len(active_subs)}):")
-        for sub in active_subs:
-            print(f"ID: {sub['id']}, end_date: {sub['end_date']}")
-        
-        # 4. Проверить, почему подписка может быть неактивна
-        inactive_reasons = await conn.fetch(
-            """
-            SELECT id, 
-                is_active,
-                end_date,
-                NOW() as current_time,
-                CASE 
-                    WHEN NOT is_active THEN 'Флаг is_active установлен в FALSE'
-                    WHEN end_date <= NOW() THEN 'Срок подписки истек'
-                    ELSE 'Подписка должна быть активна'
-                END as reason
-            FROM user_subscription 
-            WHERE user_id = $1
-            """,
-            USER_ID
-        )
-        print("\nПричины неактивности подписок:")
-        for row in inactive_reasons:
-            print(f"ID: {row['id']}, Причина: {row['reason']}, is_active: {row['is_active']}, end_date: {row['end_date']}")
-            
-    finally:
-        await conn.close()
+        checker = SubscriptionChecker()
+        result = await checker.check_user_subscription(user_id)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        await checker.close()
+    except Exception as e:
+        logger.error(f"Ошибка в работе скрипта: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    # Проверка аргументов командной строки
-    if len(sys.argv) > 1 and sys.argv[1] == "--connection-check":
-        sys.exit(0 if asyncio.run(check_connection()) else 1)
-    else:
-        asyncio.run(check_subscription()) 
+    asyncio.run(main()) 

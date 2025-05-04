@@ -97,16 +97,86 @@ async def get_subscription_service():
 # ===========================================
 
 @app.get("/subscription/status", response_model=SubscriptionStatusResponse)
-async def get_subscription_status(
-    # ... (зависимости и код эндпоинта) ...
-):
-    # ... (реализация) ...
-    pass # Заглушка
+async def get_subscription_status(request: Request, user_id: Optional[str] = None):
+    """Получить статус подписки пользователя"""
+    try:
+        # Если user_id не передан явно, пытаемся извлечь его из query-параметров или заголовков
+        if not user_id:
+            user_id = request.query_params.get('user_id')
+            
+        # Проверяем заголовок x-telegram-user-id
+        if not user_id and 'x-telegram-user-id' in request.headers:
+            user_id = request.headers.get('x-telegram-user-id')
+            logger.info(f"ID пользователя получен из заголовка: {user_id}")
+        
+        # Проверка наличия user_id
+        if not user_id:
+            logger.error("get_subscription_status: user_id не предоставлен ни в параметрах, ни в заголовках")
+            raise HTTPException(status_code=400, detail="user_id is required")
+            
+        # Получение сервиса подписок
+        subscription_service = await get_subscription_service()
+        
+        # Запрос на получение данных подписки
+        subscription_data = await subscription_service.get_subscription(int(user_id))
+        
+        # Добавляем заголовки для предотвращения кэширования
+        response = JSONResponse(content=dict(subscription_data))
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        
+        # Логирование успешного запроса
+        logger.info(f"Получен статус подписки для user_id={user_id}: {subscription_data}")
+        
+        return response
+    except ValueError as ve:
+        logger.error(f"Ошибка преобразования user_id: {ve}")
+        raise HTTPException(status_code=400, detail=f"Invalid user_id format: {str(ve)}")
+    except Exception as e:
+        logger.error(f"Ошибка при получении статуса подписки: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching subscription status: {str(e)}")
 
 @app.get("/direct_premium_check", response_model=DirectPremiumStatusResponse)
-async def direct_premium_check(request: Request):
-    # ... (реализация) ...
-    pass # Заглушка
+async def direct_premium_check(request: Request, user_id: Optional[str] = None):
+    """Прямая проверка премиум-статуса (для отладки и внутреннего использования)"""
+    try:
+        # Если user_id не передан явно, пытаемся извлечь его из query-параметров или заголовков
+        if not user_id:
+            user_id = request.query_params.get('user_id')
+            
+        # Проверяем заголовок x-telegram-user-id
+        if not user_id and 'x-telegram-user-id' in request.headers:
+            user_id = request.headers.get('x-telegram-user-id')
+            logger.info(f"ID пользователя получен из заголовка: {user_id}")
+        
+        # Проверка наличия user_id
+        if not user_id:
+            logger.error("direct_premium_check: user_id не предоставлен ни в параметрах, ни в заголовках")
+            raise HTTPException(status_code=400, detail="user_id is required")
+            
+        # Получение сервиса подписок
+        subscription_service = await get_subscription_service()
+        
+        # Прямой запрос в БД на проверку премиум-статуса
+        has_premium = await subscription_service.check_premium_directly(int(user_id))
+        
+        # Добавляем заголовки для предотвращения кэширования
+        response = JSONResponse(content={"has_premium": has_premium, "user_id": user_id})
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        
+        # Логирование успешного запроса
+        logger.info(f"Прямая проверка премиум для user_id={user_id}: {has_premium}")
+        
+        return response
+    except ValueError as ve:
+        logger.error(f"Ошибка преобразования user_id: {ve}")
+        raise HTTPException(status_code=400, detail=f"Invalid user_id format: {str(ve)}")
+    except Exception as e:
+        logger.error(f"Ошибка при прямой проверке премиум: {e}")
+        raise HTTPException(status_code=500, detail=f"Error checking premium status: {str(e)}")
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_channel(
@@ -185,7 +255,7 @@ if os.path.exists(static_files_path) and os.path.isdir(static_files_path):
     app.mount("/", StaticFiles(directory=static_files_path, html=True), name="spa-static")
 
     # Обработчик для корня, если StaticFiles(html=True) не сработает (на всякий случай)
-    @app.get("/")
+    @app.get("/", include_in_schema=False)
     async def serve_index_explicitly():
         index_path = os.path.join(static_files_path, "index.html")
         if os.path.exists(index_path):
@@ -194,15 +264,47 @@ if os.path.exists(static_files_path) and os.path.isdir(static_files_path):
              logger.error(f"Файл index.html не найден в {static_files_path}")
              raise HTTPException(status_code=404, detail="Index file not found")
 
+    # ВАЖНО: Список API-путей должен быть точным и актуальным!
+    # Это предотвратит перехват API-запросов SPA-обработчиком
+    api_paths = [
+        "/api/",
+        "/docs",
+        "/openapi.json",
+        "/subscription/",
+        "/direct_premium_check",
+        "/posts",
+        "/analyze",
+        "/generate-",
+        "/images",
+        "/ideas",
+        "/telegram/",
+        "/bot/",
+        "/payment/",
+        "/health"
+    ]
+
+    # Middleware для корректной обработки API-запросов
+    @app.middleware("http")
+    async def api_priority_middleware(request: Request, call_next):
+        # Проверяем, является ли путь API-запросом
+        path = request.url.path
+        is_api_request = any(path.startswith(api_prefix) for api_prefix in api_paths)
+        
+        # Если это API-запрос, пропускаем его через основной обработчик
+        if is_api_request:
+            logger.debug(f"API запрос: {path}")
+            return await call_next(request)
+        
+        # Для других путей - стандартное поведение
+        response = await call_next(request)
+        return response
+
     # Перехват всех остальных путей для SPA-роутинга
     # Этот обработчик должен быть САМЫМ ПОСЛЕДНИМ
-    @app.get("/{rest_of_path:path}")
+    @app.get("/{rest_of_path:path}", include_in_schema=False)
     async def serve_spa_catch_all(request: Request, rest_of_path: str):
-        # Проверяем, не является ли путь зарезервированным для API
-        # (Можно улучшить эту проверку, но для начала так)
-        api_prefixes = ("/api/", "/docs", "/openapi.json", "/subscription/", "/direct_premium_check", "/posts", "/analyze", "/generate-", "/images", "/ideas", "/telegram/", "/bot/", "/payment/", "/health")
-        if any(rest_of_path.startswith(prefix) for prefix in api_prefixes):
-             # Если это похоже на API-путь, который не был обработан выше, возвращаем 404
+        # Проверка api_paths уже в middleware, здесь для дополнительной защиты
+        if any(rest_of_path.startswith(prefix.lstrip('/')) for prefix in api_paths):
              logger.warning(f"Путь '{rest_of_path}' похож на API, но не обработан. Возврат 404.")
              raise HTTPException(status_code=404, detail="API endpoint not found")
 
