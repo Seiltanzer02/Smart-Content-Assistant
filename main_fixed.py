@@ -178,5 +178,57 @@ async def generate_invoice(
 
 # Дублирующийся блок эндпоинта /generate-invoice удален
 
+@app.post("/analyze", response_model=AnalyzeResponse)
+async def analyze_channel(
+    request: Request, 
+    req: AnalyzeRequest,
+    subscription_service: SubscriptionService = Depends(get_subscription_service)
+):
+    """Анализирует Telegram канал"""
+    startTime = time.time() # Для измерения времени выполнения
+    user_id_str = request.headers.get("x-telegram-user-id")
+    if not user_id_str:
+        raise HTTPException(status_code=401, detail="Требуется авторизация")
+    try:
+        user_id = int(user_id_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Некорректный идентификатор пользователя")
+
+    if not await subscription_service.can_analyze_channel(user_id):
+        await subscription_service.db.close()
+        raise HTTPException(status_code=403, detail="Превышен лимит на анализ каналов. Оформите подписку для снятия ограничений.")
+
+    username = req.username.strip()
+    # ... (остальной код эндпоинта) ...
+    # В конце успешно выполненного анализа - увеличиваем счетчик
+    await subscription_service.increment_analysis_usage(user_id)
+    await subscription_service.db.close() # Закрываем соединение с БД
+    # ... (возврат результата) ...
+
+@app.post("/generate-post-details", response_model=PostDetailsResponse)
+async def generate_post_details(
+    request: Request, 
+    req: GeneratePostDetailsRequest,
+    subscription_service: SubscriptionService = Depends(get_subscription_service)
+):
+    """Генерирует детали поста по указанной теме и формату"""
+    user_id_str = request.headers.get("x-telegram-user-id")
+    if not user_id_str:
+        raise HTTPException(status_code=401, detail="Требуется авторизация")
+    try:
+        user_id = int(user_id_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Некорректный идентификатор пользователя")
+
+    if not await subscription_service.can_generate_post(user_id):
+        await subscription_service.db.close()
+        raise HTTPException(status_code=403, detail="Превышен лимит на генерацию постов. Оформите подписку для снятия ограничений.")
+
+    # ... (остальной код эндпоинта) ...
+    # В конце успешной генерации - увеличиваем счетчик
+    await subscription_service.increment_post_usage(user_id)
+    await subscription_service.db.close() # Закрываем соединение с БД
+    # ... (возврат результата) ...
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True) 

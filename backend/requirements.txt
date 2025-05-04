@@ -14,4 +14,3 @@ python-unsplash
 gunicorn
 python-telegram-bot
 aiogram
-python-dateutil
