@@ -8,6 +8,16 @@ export interface SubscriptionStatus {
   subscription_end_date?: string;
 }
 
+// Интерфейс для прямой проверки премиум-статуса
+export interface PremiumStatus {
+  has_premium: boolean;
+  user_id: string;
+  error?: string | null;
+  subscription_end_date?: string | null;
+  analysis_count?: number | null;
+  post_generation_count?: number | null;
+}
+
 // API_URL пустая строка для относительных путей
 const API_URL = '';
 
@@ -91,5 +101,75 @@ export const generateInvoice = async (userId: number, amount: number = 70) => {
   } catch (error) {
     console.error('Ошибка при генерации инвойса:', error);
     throw error;
+  }
+};
+
+/**
+ * Получает статус подписки v2 с использованием нового API
+ * @param userId ID пользователя Telegram
+ * @returns Promise с данными о статусе подписки
+ */
+export const getSubscriptionStatusV2 = async (userId: string | null): Promise<SubscriptionStatus> => {
+  if (!userId) {
+    throw new Error('ID пользователя не предоставлен');
+  }
+
+  console.log(`[API] Запрос статуса подписки V2 для пользователя ID: ${userId}`);
+  
+  try {
+    // Добавляем случайный параметр для предотвращения кэширования
+    const nocache = new Date().getTime();
+    
+    const response = await axios.get(`${API_URL}/api-v2/subscription/status?user_id=${userId}&nocache=${nocache}`, {
+      headers: { 
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
+    });
+    
+    console.log(`[API] Получен ответ о подписке V2:`, response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Ошибка при получении статуса подписки V2:', error);
+    throw error;
+  }
+};
+
+/**
+ * Прямая проверка премиум-статуса пользователя
+ * @param userId ID пользователя Telegram
+ * @param nocacheParam Дополнительный параметр для защиты от кэширования (опционально)
+ * @returns Promise с данными о премиум-статусе
+ */
+export const getPremiumStatus = async (userId: string | null, nocacheParam?: string): Promise<PremiumStatus> => {
+  if (!userId) {
+    throw new Error('ID пользователя не предоставлен');
+  }
+
+  console.log(`[API] Прямая проверка премиума для пользователя ID: ${userId}`);
+  
+  try {
+    // Добавляем случайный параметр для предотвращения кэширования
+    const nocache = nocacheParam || `nocache=${new Date().getTime()}`;
+    
+    const response = await axios.get(`${API_URL}/api-v2/premium/check?user_id=${userId}&${nocache}`, {
+      headers: { 
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
+    });
+    
+    console.log(`[API] Получен ответ о премиум-статусе:`, response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Ошибка при прямой проверке премиума:', error);
+    // Возвращаем отрицательный статус при ошибке
+    return {
+      has_premium: false,
+      user_id: userId,
+      error: error instanceof Error ? error.message : 'Неизвестная ошибка'
+    };
   }
 }; 

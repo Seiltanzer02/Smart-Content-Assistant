@@ -96,7 +96,7 @@ class SubscriptionService:
             # Запрос для проверки наличия активной подписки
             query = """
             SELECT end_date 
-            FROM subscriptions 
+            FROM user_subscription 
             WHERE user_id = $1 
             AND is_active = TRUE 
             AND end_date > NOW() 
@@ -134,7 +134,7 @@ class SubscriptionService:
                 # Проверяем наличие активной подписки напрямую
                 query = """
                 SELECT COUNT(*) 
-                FROM subscriptions 
+                FROM user_subscription 
                 WHERE user_id = $1 
                   AND is_active = TRUE 
                   AND end_date > NOW()
@@ -174,7 +174,7 @@ class SubscriptionService:
                 async with conn.transaction():
                     # Создаем новую активную подписку
                     query = """
-                    INSERT INTO subscriptions 
+                    INSERT INTO user_subscription 
                     (user_id, start_date, end_date, payment_id, is_active, created_at, updated_at) 
                     VALUES ($1, $2, $3, $4, TRUE, NOW(), NOW()) 
                     RETURNING id, user_id, start_date, end_date, payment_id, is_active
@@ -219,7 +219,7 @@ class SubscriptionService:
         try:
             async with self.pool.acquire() as conn:
                 query = """
-                UPDATE subscriptions 
+                UPDATE user_subscription 
                 SET is_active = FALSE, updated_at = NOW() 
                 WHERE user_id = $1 AND is_active = TRUE 
                 RETURNING id
@@ -257,7 +257,7 @@ class SubscriptionService:
                 # Проверяем наличие активной подписки
                 current_subscription_query = """
                 SELECT id, end_date 
-                FROM subscriptions 
+                FROM user_subscription 
                 WHERE user_id = $1 
                   AND is_active = TRUE 
                   AND end_date > NOW() 
@@ -273,7 +273,7 @@ class SubscriptionService:
                         new_end_date = current_end_date + timedelta(days=30 * months)
                         
                         update_query = """
-                        UPDATE subscriptions 
+                        UPDATE user_subscription 
                         SET end_date = $1, 
                             payment_id = $2, 
                             updated_at = NOW() 
@@ -331,7 +331,7 @@ class SubscriptionService:
                 is_active, 
                 created_at, 
                 updated_at 
-            FROM subscriptions 
+            FROM user_subscription 
             WHERE user_id = $1 
             ORDER BY created_at DESC
             """

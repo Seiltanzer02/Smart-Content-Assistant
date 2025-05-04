@@ -222,7 +222,7 @@ async def check_premium_v2(user_id: str):
             # Проверяем наличие активной подписки
             query = """
             SELECT COUNT(*) 
-            FROM subscriptions 
+            FROM user_subscription 
             WHERE user_id = $1 
               AND is_active = TRUE 
               AND end_date > NOW()
@@ -234,7 +234,7 @@ async def check_premium_v2(user_id: str):
             if has_premium:
                 sub_query = """
                 SELECT end_date 
-                FROM subscriptions 
+                FROM user_subscription 
                 WHERE user_id = $1 
                   AND is_active = TRUE
                 ORDER BY end_date DESC 
@@ -402,7 +402,7 @@ async def force_premium_status(user_id: str):
             # Проверяем наличие активной подписки
             query = """
             SELECT COUNT(*) 
-            FROM subscriptions 
+            FROM user_subscription 
             WHERE user_id = $1 
               AND is_active = TRUE 
               AND end_date > NOW()
@@ -414,7 +414,7 @@ async def force_premium_status(user_id: str):
             if has_premium:
                 sub_query = """
                 SELECT end_date 
-                FROM subscriptions 
+                FROM user_subscription 
                 WHERE user_id = $1 
                 ORDER BY end_date DESC 
                 LIMIT 1
@@ -531,7 +531,7 @@ async def diagnose_subscription(user_id: str):
                 created_at, updated_at,
                 NOW() as current_time,
                 CASE WHEN end_date > NOW() AND is_active = TRUE THEN TRUE ELSE FALSE END as is_valid
-            FROM subscriptions 
+            FROM user_subscription 
             WHERE user_id = $1
             ORDER BY end_date DESC
             """
@@ -550,7 +550,7 @@ async def diagnose_subscription(user_id: str):
             # Проверяем наличие активной подписки
             premium_query = """
             SELECT COUNT(*) 
-            FROM subscriptions 
+            FROM user_subscription 
             WHERE user_id = $1 
               AND is_active = TRUE 
               AND end_date > NOW()
@@ -626,14 +626,14 @@ async def debug_create_premium(user_id: str, request: Request):
         try:
             # Деактивируем все существующие подписки пользователя
             await conn.execute("""
-                UPDATE subscriptions
+                UPDATE user_subscription
                 SET is_active = FALSE, updated_at = NOW()
                 WHERE user_id = $1
             """, user_id_int)
             
             # Создаем новую тестовую подписку
             subscription_id = await conn.fetchval("""
-                INSERT INTO subscriptions 
+                INSERT INTO user_subscription 
                     (user_id, start_date, end_date, payment_id, is_active, created_at, updated_at)
                 VALUES 
                     ($1, $2, $3, $4, TRUE, NOW(), NOW())

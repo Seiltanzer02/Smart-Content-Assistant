@@ -175,8 +175,8 @@ const DirectPremiumStatus: React.FC<DirectPremiumStatusProps> = ({ userId, showD
       
       console.log(`[DirectPremiumStatus] Запрос статуса для ID: ${userIdRef.current}`);
       
-      // Используем новый API для проверки премиума
-      const premiumData = await getPremiumStatus(userIdRef.current);
+      // Используем новый API для проверки премиума с защитой от кэширования
+      const premiumData = await getPremiumStatus(userIdRef.current, `_nocache=${Date.now()}`);
       
       console.log(`[DirectPremiumStatus] Получен ответ:`, premiumData);
       
