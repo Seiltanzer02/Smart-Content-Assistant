@@ -82,7 +82,7 @@ class SubscriptionService:
     async def get_subscription(self, user_id: int):
         """Получает активную подписку пользователя"""
         query = """
-        SELECT * FROM user_subscription 
+        SELECT * FROM subscriptions 
         WHERE user_id = $1 AND is_active = TRUE AND end_date > NOW()
         ORDER BY end_date DESC
         LIMIT 1
@@ -96,7 +96,7 @@ class SubscriptionService:
         end_date = datetime.now() + relativedelta(months=SUBSCRIPTION_DURATION_MONTHS)
         
         query = """
-        INSERT INTO user_subscription 
+        INSERT INTO subscriptions 
         (user_id, end_date, payment_id)
         VALUES ($1, $2, $3)
         RETURNING *
