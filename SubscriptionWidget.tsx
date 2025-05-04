@@ -1,6 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import '../styles/SubscriptionWidget.css';
-import { getUserSubscriptionStatus, SubscriptionStatus, getSubscriptionStatusV2, getPremiumStatus } from '../api/subscription';
+import { 
+  getUserSubscriptionStatus, 
+  SubscriptionStatus, 
+  getSubscriptionStatusV2, 
+  getPremiumStatus, 
+  getRawPremiumStatus,
+  openPremiumStatusPage
+} from '../api/subscription';
 
 // Расширение интерфейса Window для поддержки INJECTED_USER_ID
 declare global {
@@ -256,39 +263,71 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     };
   }, []);
   
+  // Запрос статуса подписки
+  const checkPremiumDirectly = async () => {
+    if (!userIdRef.current) {
+      console.error('Попытка запроса статуса подписки без валидного userId');
+      setError('ID пользователя не определен');
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+    
+    console.log(`Запрос статуса подписки для ID: ${userIdRef.current}`);
+    
+    try {
+      // Сначала пробуем новый raw-метод, который не должен перехватываться SPA-роутером
+      try {
+        const rawStatus = await getRawPremiumStatus(userIdRef.current, `_nocache=${Date.now()}`);
+        console.log('Получен RAW статус подписки:', rawStatus);
+        
+        if (rawStatus) {
+          setStatus({
+            has_subscription: rawStatus.has_premium,
+            analysis_count: rawStatus.analysis_count || 0,
+            post_generation_count: rawStatus.post_generation_count || 0,
+            subscription_end_date: rawStatus.subscription_end_date || null
+          });
+          setError(null);
+          setLoading(false);
+          return;
+        }
+      } catch (rawError) {
+        console.error('Ошибка при получении RAW статуса:', rawError);
+        console.log('Переключение на обычный API...');
+      }
+      
+      // Если RAW-метод не сработал, пробуем обычный API
+      const status = await getSubscriptionStatusV2(userIdRef.current);
+      console.log('Получен статус подписки:', status);
+      
+      // Проверяем, не получили ли мы HTML вместо JSON
+      if (typeof status === 'string' && 
+          (status.includes('<!doctype html>') || status.includes('<html>'))) {
+        console.error('Получен HTML вместо JSON (SPA перехват). Открываем отдельную страницу...');
+        // Открываем отдельную страницу со статусом, если получили HTML
+        openPremiumStatusPage(userIdRef.current, true);
+        throw new Error('API вернул HTML вместо JSON (проблема маршрутизации)');
+      }
+      
+      setStatus(status);
+    } catch (err) {
+      console.error('Ошибка при запросе статуса подписки:', err);
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Неизвестная ошибка при запросе статуса подписки');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+  
   // Запуск процесса подписки
   const handleSubscribe = () => {
     setIsSubscribing(true);
     setShowPaymentInfo(true);
-  };
-  
-  // Проверка премиум-статуса напрямую через API
-  const checkPremiumDirectly = async () => {
-    if (!userIdRef.current) return;
-    
-    try {
-      setLoading(true);
-      const premiumStatus = await getPremiumStatus(userIdRef.current);
-      
-      if (premiumStatus.has_premium) {
-        setStatus({
-          has_subscription: true,
-          analysis_count: premiumStatus.analysis_count || 9999,
-          post_generation_count: premiumStatus.post_generation_count || 9999,
-          subscription_end_date: premiumStatus.subscription_end_date
-        });
-        setError(null);
-      } else {
-        // Если премиум не обнаружен, проверяем подробный статус
-        const detailedStatus = await getSubscriptionStatusV2(userIdRef.current);
-        setStatus(detailedStatus);
-      }
-    } catch (e) {
-      console.error('[SubscriptionWidget] Ошибка при прямой проверке премиума:', e);
-      setError('Ошибка проверки статуса премиума');
-    } finally {
-      setLoading(false);
-    }
   };
   
   // Добавляем слушатель событий для получения userId из инъекции
