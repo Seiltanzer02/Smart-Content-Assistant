@@ -15,7 +15,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
-  const SUBSCRIPTION_PRICE = 70; // в Stars
+  const SUBSCRIPTION_PRICE = 1; // в Stars - изменено с 70 на 1
   const [isSubscribing, setIsSubscribing] = useState(false);
   
   // Инициализация и настройка Telegram WebApp
@@ -130,7 +130,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       const response = await fetch('/generate-stars-invoice-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, amount: 70 })
+        body: JSON.stringify({ user_id: userId })
       });
       const data = await response.json();
       if (data.success && data.invoice_link) {
@@ -251,7 +251,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
                 onClick={handleSubscribe}
                 disabled={isSubscribing}
               >
-                {isSubscribing ? 'Создание платежа...' : 'Подписаться за 70 Stars'}
+                {isSubscribing ? 'Создание платежа...' : `Подписаться за ${SUBSCRIPTION_PRICE} Stars`}
               </button>
             </div>
           )}

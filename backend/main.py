@@ -278,9 +278,10 @@ async def generate_stars_invoice_link(request: Request):
     try:
         data = await request.json()
         user_id = data.get("user_id")
-        amount = data.get("amount")
-        if not user_id or not amount:
-            raise HTTPException(status_code=400, detail="user_id и amount обязательны")
+        # Принудительно устанавливаем amount = 1 для Stars
+        amount = 1
+        if not user_id:
+            raise HTTPException(status_code=400, detail="user_id обязателен")
         bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
         if not bot_token:
             raise HTTPException(status_code=500, detail="TELEGRAM_BOT_TOKEN не задан в окружении")
@@ -701,6 +702,48 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
     username = req.username.replace("@", "").strip()
     logger.info(f"Получен запрос на анализ канала @{username}")
     
+    # --- ДОБАВЛЕНО: Проверка подписки и лимитов ---
+    if telegram_user_id:
+        try:
+            # Проверяем наличие подписки
+            has_subscription = False
+            if supabase:
+                subscription_result = supabase.table("user_subscription").select("*").eq("user_id", int(telegram_user_id)).eq("is_active", True).execute()
+                has_subscription = hasattr(subscription_result, 'data') and len(subscription_result.data) > 0
+            
+            # Если нет подписки, проверяем лимиты
+            if not has_subscription:
+                # Получаем статистику использования
+                if supabase:
+                    usage_result = supabase.table("user_usage_stats").select("*").eq("user_id", int(telegram_user_id)).execute()
+                    
+                    if hasattr(usage_result, 'data') and len(usage_result.data) > 0:
+                        usage_data = usage_result.data[0]
+                        analysis_count = usage_data.get("analysis_count", 0)
+                        
+                        # Проверяем лимит анализов
+                        if analysis_count >= 2:  # Бесплатный лимит
+                            raise HTTPException(
+                                status_code=402,  # Payment Required
+                                detail="Достигнут лимит бесплатных анализов. Приобретите Premium-подписку для продолжения."
+                            )
+                        
+                        # Увеличиваем счетчик
+                        supabase.table("user_usage_stats").update({"analysis_count": analysis_count + 1}).eq("user_id", int(telegram_user_id)).execute()
+                    else:
+                        # Создаем запись о использовании
+                        supabase.table("user_usage_stats").insert({
+                            "user_id": int(telegram_user_id),
+                            "analysis_count": 1,
+                            "post_generation_count": 0
+                        }).execute()
+        except HTTPException:
+            raise
+        except Exception as e:
+            # Логируем ошибку, но продолжаем выполнение
+            logger.error(f"Ошибка при проверке подписки: {e}")
+    # --- КОНЕЦ ДОБАВЛЕНИЯ ---
+    
     posts = []
     errors_list = []
     error_message = None
@@ -1053,50 +1096,69 @@ def clean_text_formatting(text):
 # --- Маршрут для генерации плана публикаций ---
 @app.post("/generate-plan", response_model=PlanGenerationResponse)
 async def generate_content_plan(request: Request, req: PlanGenerationRequest):
-    """Генерация и сохранение плана контента на основе тем и стилей."""
+    """Генерация плана контента на основе тем и стилей."""
+    # Получение telegram_user_id из заголовков
+    telegram_user_id = request.headers.get("X-Telegram-User-Id")
+    if not telegram_user_id:
+        logger.warning("Запрос генерации плана без идентификации пользователя Telegram")
+        raise HTTPException(status_code=401, detail="Для генерации плана необходимо авторизоваться через Telegram")
+    
+    themes = req.themes
+    styles = req.styles
+    period_days = req.period_days
+    channel_name = req.channel_name  # Обязательное поле
+    
+    # --- ДОБАВЛЕНО: Проверка подписки и лимитов ---
     try:
-        # Получение telegram_user_id из заголовков
-        telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            logger.warning("Запрос генерации плана без идентификации пользователя Telegram")
-            return PlanGenerationResponse(
-                message="Для генерации плана необходимо авторизоваться через Telegram",
-                plan=[]
-            )
-            
-        themes = req.themes
-        styles = req.styles
-        period_days = req.period_days
-        channel_name = req.channel_name
+        # Проверяем наличие подписки
+        has_subscription = False
+        if supabase:
+            subscription_result = supabase.table("user_subscription").select("*").eq("user_id", int(telegram_user_id)).eq("is_active", True).execute()
+            has_subscription = hasattr(subscription_result, 'data') and len(subscription_result.data) > 0
         
-        if not themes or not styles:
-            logger.warning(f"Запрос с пустыми темами или стилями: themes={themes}, styles={styles}")
-            return PlanGenerationResponse(
-                message="Необходимо указать темы и стили для генерации плана",
-                plan=[]
-            )
-            
-        # Проверяем наличие API ключа
-        if not OPENROUTER_API_KEY:
-            logger.warning("Генерация плана невозможна: отсутствует OPENROUTER_API_KEY")
-            # Генерируем простой план без использования API
-            plan_items = []
-            for day in range(1, period_days + 1):
-                random_theme = random.choice(themes)
-                random_style = random.choice(styles)
-                plan_items.append(PlanItem(
-                    day=day,
-                    topic_idea=f"Пост о {random_theme}",
-                    format_style=random_style
-                ))
-            logger.info(f"Создан базовый план из {len(plan_items)} идей (без использования API)")
-            return PlanGenerationResponse(
-                plan=plan_items,
-                message="План сгенерирован с базовыми идеями (API недоступен)"
-            )
-            
-        # --- ИЗМЕНЕНИЕ НАЧАЛО: Уточненные промпты --> ЕЩЕ БОЛЕЕ СТРОГИЙ ПРОМПТ ---
-        system_prompt = f"""Ты - опытный контент-маркетолог. Твоя задача - сгенерировать план публикаций для Telegram-канала на {period_days} дней.
+        # Если нет подписки, проверяем лимиты
+        if not has_subscription:
+            # Ограничиваем период для бесплатных пользователей
+            if period_days > 7:
+                period_days = 7
+                logger.info(f"Период генерации плана ограничен до 7 дней для бесплатного пользователя {telegram_user_id}")
+    except Exception as e:
+        # Логируем ошибку, но продолжаем выполнение
+        logger.error(f"Ошибка при проверке подписки для генерации плана: {e}")
+    # --- КОНЕЦ ДОБАВЛЕНИЯ ---
+    
+    # Подготовка списка тем для запроса
+    themes_str = "\n".join([f"- {theme}" for theme in themes])
+    styles_str = "\n".join([f"- {style}" for style in styles])
+    
+    if not themes or not styles:
+        logger.warning(f"Запрос с пустыми темами или стилями: themes={themes}, styles={styles}")
+        return PlanGenerationResponse(
+            message="Необходимо указать темы и стили для генерации плана",
+            plan=[]
+        )
+        
+    # Проверяем наличие API ключа
+    if not OPENROUTER_API_KEY:
+        logger.warning("Генерация плана невозможна: отсутствует OPENROUTER_API_KEY")
+        # Генерируем простой план без использования API
+        plan_items = []
+        for day in range(1, period_days + 1):
+            random_theme = random.choice(themes)
+            random_style = random.choice(styles)
+            plan_items.append(PlanItem(
+                day=day,
+                topic_idea=f"Пост о {random_theme}",
+                format_style=random_style
+            ))
+        logger.info(f"Создан базовый план из {len(plan_items)} идей (без использования API)")
+        return PlanGenerationResponse(
+            plan=plan_items,
+            message="План сгенерирован с базовыми идеями (API недоступен)"
+        )
+        
+    # --- ИЗМЕНЕНИЕ НАЧАЛО: Уточненные промпты --> ЕЩЕ БОЛЕЕ СТРОГИЙ ПРОМПТ ---
+    system_prompt = f"""Ты - опытный контент-маркетолог. Твоя задача - сгенерировать план публикаций для Telegram-канала на {period_days} дней.
 Используй предоставленные темы и стили.
 
 Темы: {', '.join(themes)}
@@ -1116,7 +1178,7 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
 
 Формат КАЖДОЙ строки: День <номер_дня>:: <Идея поста>:: <Стиль из списка>"""
 
-        user_prompt = f"""Сгенерируй план контента для Telegram-канала \"{channel_name}\" на {period_days} дней.
+    user_prompt = f"""Сгенерируй план контента для Telegram-канала \"{channel_name}\" на {period_days} дней.
 Темы: {', '.join(themes)}
 Стили (используй ТОЛЬКО их): {', '.join(styles)}
 
@@ -1124,141 +1186,141 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
 День <номер_дня>:: <Идея поста>:: <Стиль из списка>
 
 Не включай ничего, кроме этих строк."""
-        # --- ИЗМЕНЕНИЕ КОНЕЦ ---
+    # --- ИЗМЕНЕНИЕ КОНЕЦ ---
 
-        # Настройка клиента OpenAI для использования OpenRouter
-        client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=OPENROUTER_API_KEY
+    # Настройка клиента OpenAI для использования OpenRouter
+    client = AsyncOpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=OPENROUTER_API_KEY
+    )
+    
+    # Запрос к API
+    logger.info(f"Отправка запроса на генерацию плана контента для канала @{channel_name} с уточненным промптом")
+    response = await client.chat.completions.create(
+        model="deepseek/deepseek-chat-v3-0324:free", # <--- ИЗМЕНЕНО НА НОВУЮ БЕСПЛАТНУЮ МОДЕЛЬ
+        messages=[
+            # {"role": "system", "content": system_prompt}, # Системный промпт может конфликтовать с некоторыми моделями, тестируем без него или с ним
+            {"role": "user", "content": user_prompt} # Помещаем все инструкции в user_prompt
+        ],
+        temperature=0.7, # Немного снижаем температуру для строгости формата
+        max_tokens=150 * period_days, # Примерно 150 токенов на идею
+        timeout=120,
+        extra_headers={
+            "HTTP-Referer": "https://content-manager.onrender.com",
+            "X-Title": "Smart Content Assistant"
+        }
+    )
+    
+    # === НАЧАЛО ИЗМЕНЕНИЯ: Проверка ответа API ===
+    plan_text = ""
+    if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+        plan_text = response.choices[0].message.content.strip()
+        logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
+    else:
+        # Логируем полный ответ, если структура неожиданная
+        logger.error(f"Некорректный или пустой ответ от OpenRouter API при генерации плана. Status: {response.response.status_code if hasattr(response, 'response') else 'N/A'}")
+        try:
+            # Попробуем залогировать тело ответа, если оно есть
+            raw_response_content = await response.response.text() if hasattr(response, 'response') and hasattr(response.response, 'text') else str(response)
+            logger.error(f"Полный ответ API (или его представление): {raw_response_content}")
+        except Exception as log_err:
+            logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
+            
+        # Возвращаем пустой план с сообщением об ошибке
+        return PlanGenerationResponse(
+            plan=[],
+            message="Ошибка: API не вернул ожидаемый результат для генерации плана."
         )
-        
-        # Запрос к API
-        logger.info(f"Отправка запроса на генерацию плана контента для канала @{channel_name} с уточненным промптом")
-        response = await client.chat.completions.create(
-            model="deepseek/deepseek-chat-v3-0324:free", # <--- ИЗМЕНЕНО НА НОВУЮ БЕСПЛАТНУЮ МОДЕЛЬ
-            messages=[
-                # {"role": "system", "content": system_prompt}, # Системный промпт может конфликтовать с некоторыми моделями, тестируем без него или с ним
-                {"role": "user", "content": user_prompt} # Помещаем все инструкции в user_prompt
-            ],
-            temperature=0.7, # Немного снижаем температуру для строгости формата
-            max_tokens=150 * period_days, # Примерно 150 токенов на идею
-            timeout=120,
-            extra_headers={
-                "HTTP-Referer": "https://content-manager.onrender.com",
-                "X-Title": "Smart Content Assistant"
-            }
-        )
-        
-        # === НАЧАЛО ИЗМЕНЕНИЯ: Проверка ответа API ===
-        plan_text = ""
-        if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-            plan_text = response.choices[0].message.content.strip()
-            logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
-        else:
-            # Логируем полный ответ, если структура неожиданная
-            logger.error(f"Некорректный или пустой ответ от OpenRouter API при генерации плана. Status: {response.response.status_code if hasattr(response, 'response') else 'N/A'}")
+    # === КОНЕЦ ИЗМЕНЕНИЯ ===
+    
+    plan_items = []
+    lines = plan_text.split('\n')
+
+    # --- ИЗМЕНЕНИЕ НАЧАЛО: Улучшенный парсинг с новым разделителем ---
+    expected_style_set = set(s.lower() for s in styles) # Для быстрой проверки
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        parts = line.split('::')
+        if len(parts) == 3:
+            # === ИСПРАВЛЕНО: Выровнен отступ для try ===
             try:
-                # Попробуем залогировать тело ответа, если оно есть
-                raw_response_content = await response.response.text() if hasattr(response, 'response') and hasattr(response.response, 'text') else str(response)
-                logger.error(f"Полный ответ API (или его представление): {raw_response_content}")
-            except Exception as log_err:
-                logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
-                
-            # Возвращаем пустой план с сообщением об ошибке
-            return PlanGenerationResponse(
-                plan=[],
-                message="Ошибка: API не вернул ожидаемый результат для генерации плана."
-            )
-        # === КОНЕЦ ИЗМЕНЕНИЯ ===
-        
-        plan_items = []
-        lines = plan_text.split('\n')
+                day_part = parts[0].lower().replace('день', '').strip()
+                day = int(day_part)
+                topic_idea = clean_text_formatting(parts[1].strip())
+                format_style = clean_text_formatting(parts[2].strip())
 
-        # --- ИЗМЕНЕНИЕ НАЧАЛО: Улучшенный парсинг с новым разделителем ---
-        expected_style_set = set(s.lower() for s in styles) # Для быстрой проверки
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            parts = line.split('::')
-            if len(parts) == 3:
-                # === ИСПРАВЛЕНО: Выровнен отступ для try ===
-                try:
-                    day_part = parts[0].lower().replace('день', '').strip()
-                    day = int(day_part)
-                    topic_idea = clean_text_formatting(parts[1].strip())
-                    format_style = clean_text_formatting(parts[2].strip())
+                # Проверяем, входит ли стиль в запрошенный список (без учета регистра)
+                if format_style.lower() not in expected_style_set:
+                    logger.warning(f"Стиль '{format_style}' из ответа LLM не найден в запрошенных стилях. Выбираем случайный.")
+                    format_style = random.choice(styles) if styles else "Без указания стиля"
 
-                    # Проверяем, входит ли стиль в запрошенный список (без учета регистра)
-                    if format_style.lower() not in expected_style_set:
-                        logger.warning(f"Стиль '{format_style}' из ответа LLM не найден в запрошенных стилях. Выбираем случайный.")
-                        format_style = random.choice(styles) if styles else "Без указания стиля"
+                if topic_idea: # Пропускаем, если тема пустая
+                    plan_items.append(PlanItem(
+                        day=day,
+                        topic_idea=topic_idea,
+                        format_style=format_style
+                    ))
+                else:
+                    logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
+            # === ИСПРАВЛЕНО: Выровнен отступ для except ===
+            except ValueError:
+                logger.warning(f"Не удалось извлечь номер дня из строки плана: {line}")
+            except Exception as parse_err:
+                logger.warning(f"Ошибка парсинга строки плана '{line}': {parse_err}")
+        # === ИСПРАВЛЕНО: Выровнен отступ для else ===
+        else:
+            logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
+    # --- ИЗМЕНЕНИЕ КОНЕЦ ---
 
-                    if topic_idea: # Пропускаем, если тема пустая
-                        plan_items.append(PlanItem(
-                            day=day,
-                            topic_idea=topic_idea,
-                            format_style=format_style
-                        ))
-                    else:
-                        logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
-                # === ИСПРАВЛЕНО: Выровнен отступ для except ===
-                except ValueError:
-                    logger.warning(f"Не удалось извлечь номер дня из строки плана: {line}")
-                except Exception as parse_err:
-                    logger.warning(f"Ошибка парсинга строки плана '{line}': {parse_err}")
-            # === ИСПРАВЛЕНО: Выровнен отступ для else ===
-            else:
-                logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
-        # --- ИЗМЕНЕНИЕ КОНЕЦ ---
-
-        # ... (остальная логика обработки plan_items: сортировка, дополнение, проверка пустого плана) ...
-        # Если и сейчас нет идей, генерируем вручную
-        if not plan_items:
-            logger.warning("Не удалось извлечь идеи из ответа LLM или все строки были некорректными, генерируем базовый план.")
-            for day in range(1, period_days + 1):
-                random_theme = random.choice(themes) if themes else "Общая тема"
-                random_style = random.choice(styles) if styles else "Общий стиль"
-                # === ИЗМЕНЕНИЕ: Убираем 'Пост о' ===
+    # ... (остальная логика обработки plan_items: сортировка, дополнение, проверка пустого плана) ...
+    # Если и сейчас нет идей, генерируем вручную
+    if not plan_items:
+        logger.warning("Не удалось извлечь идеи из ответа LLM или все строки были некорректными, генерируем базовый план.")
+        for day in range(1, period_days + 1):
+            random_theme = random.choice(themes) if themes else "Общая тема"
+            random_style = random.choice(styles) if styles else "Общий стиль"
+            # === ИЗМЕНЕНИЕ: Убираем 'Пост о' ===
+            fallback_topic = f"{random_theme} ({random_style})"
+            plan_items.append(PlanItem(
+                day=day,
+                topic_idea=fallback_topic, # <--- Используем новую строку
+                format_style=random_style
+            ))
+    
+    # Сортируем по дням
+    plan_items.sort(key=lambda x: x.day)
+    
+    # Обрезаем до запрошенного количества дней (на случай, если LLM выдал больше)
+    plan_items = plan_items[:period_days]
+    
+    # Если план получился короче запрошенного периода, дополняем (возможно, из-за ошибок парсинга)
+    if len(plan_items) < period_days:
+        existing_days = {item.day for item in plan_items}
+        needed_days = period_days - len(plan_items)
+        logger.warning(f"План короче запрошенного ({len(plan_items)}/{period_days}), дополняем {needed_days} идеями.")
+        start_day = max(existing_days) + 1 if existing_days else 1
+        for i in range(needed_days):
+            current_day = start_day + i
+            if current_day not in existing_days:
+                random_theme = random.choice(themes) if themes else "Дополнительная тема"
+                random_style = random.choice(styles) if styles else "Дополнительный стиль"
+                # === ИЗМЕНЕНИЕ: Убираем 'Пост о' и '(Дополнено)' ===
                 fallback_topic = f"{random_theme} ({random_style})"
                 plan_items.append(PlanItem(
-                    day=day,
+                    day=current_day,
                     topic_idea=fallback_topic, # <--- Используем новую строку
                     format_style=random_style
                 ))
-        
-        # Сортируем по дням
+    
+        # Сортируем по дням еще раз после возможного дополнения
         plan_items.sort(key=lambda x: x.day)
-        
-        # Обрезаем до запрошенного количества дней (на случай, если LLM выдал больше)
-        plan_items = plan_items[:period_days]
-        
-        # Если план получился короче запрошенного периода, дополняем (возможно, из-за ошибок парсинга)
-        if len(plan_items) < period_days:
-            existing_days = {item.day for item in plan_items}
-            needed_days = period_days - len(plan_items)
-            logger.warning(f"План короче запрошенного ({len(plan_items)}/{period_days}), дополняем {needed_days} идеями.")
-            start_day = max(existing_days) + 1 if existing_days else 1
-            for i in range(needed_days):
-                current_day = start_day + i
-                if current_day not in existing_days:
-                    random_theme = random.choice(themes) if themes else "Дополнительная тема"
-                    random_style = random.choice(styles) if styles else "Дополнительный стиль"
-                    # === ИЗМЕНЕНИЕ: Убираем 'Пост о' и '(Дополнено)' ===
-                    fallback_topic = f"{random_theme} ({random_style})"
-                    plan_items.append(PlanItem(
-                        day=current_day,
-                        topic_idea=fallback_topic, # <--- Используем новую строку
-                        format_style=random_style
-                    ))
-        
-            # Сортируем по дням еще раз после возможного дополнения
-            plan_items.sort(key=lambda x: x.day)
-        
-        logger.info(f"Сгенерирован и обработан план из {len(plan_items)} идей для канала @{channel_name}")
-        return PlanGenerationResponse(plan=plan_items)
+    
+    logger.info(f"Сгенерирован и обработан план из {len(plan_items)} идей для канала @{channel_name}")
+    return PlanGenerationResponse(plan=plan_items)
                 
     except Exception as e:
         logger.error(f"Ошибка при генерации плана: {e}\\n{traceback.format_exc()}") # Добавляем traceback
@@ -1991,6 +2053,47 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
                 status_code=401, 
                 detail="Для генерации постов необходимо авторизоваться через Telegram"
             )
+            
+        # --- ДОБАВЛЕНО: Проверка подписки и лимитов ---
+        try:
+            # Проверяем наличие подписки
+            has_subscription = False
+            if supabase:
+                subscription_result = supabase.table("user_subscription").select("*").eq("user_id", int(telegram_user_id)).eq("is_active", True).execute()
+                has_subscription = hasattr(subscription_result, 'data') and len(subscription_result.data) > 0
+            
+            # Если нет подписки, проверяем лимиты
+            if not has_subscription:
+                # Получаем статистику использования
+                if supabase:
+                    usage_result = supabase.table("user_usage_stats").select("*").eq("user_id", int(telegram_user_id)).execute()
+                    
+                    if hasattr(usage_result, 'data') and len(usage_result.data) > 0:
+                        usage_data = usage_result.data[0]
+                        post_generation_count = usage_data.get("post_generation_count", 0)
+                        
+                        # Проверяем лимит генераций постов
+                        if post_generation_count >= 2:  # Бесплатный лимит
+                            raise HTTPException(
+                                status_code=402,  # Payment Required
+                                detail="Достигнут лимит бесплатных генераций постов. Приобретите Premium-подписку для продолжения."
+                            )
+                        
+                        # Увеличиваем счетчик
+                        supabase.table("user_usage_stats").update({"post_generation_count": post_generation_count + 1}).eq("user_id", int(telegram_user_id)).execute()
+                    else:
+                        # Создаем запись о использовании
+                        supabase.table("user_usage_stats").insert({
+                            "user_id": int(telegram_user_id),
+                            "analysis_count": 0,
+                            "post_generation_count": 1
+                        }).execute()
+        except HTTPException:
+            raise
+        except Exception as e:
+            # Логируем ошибку, но продолжаем выполнение
+            logger.error(f"Ошибка при проверке подписки для генерации поста: {e}")
+        # --- КОНЕЦ ДОБАВЛЕНИЯ ---
             
         topic_idea = req.topic_idea
         format_style = req.format_style
@@ -3327,4 +3430,61 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     logger.info(f"Запуск сервера на порту {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
+
+@app.get("/subscription/status")
+async def get_subscription_status(request: Request):
+    """Получение статуса подписки пользователя"""
+    try:
+        # Получение telegram_user_id из заголовков
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            logger.error("Запрос статуса подписки без идентификации пользователя")
+            raise HTTPException(status_code=401, detail="Необходима авторизация через Telegram")
+        
+        # Преобразуем ID пользователя в число
+        try:
+            telegram_user_id = int(telegram_user_id)
+            logger.info(f'Запрос /subscription/status для user_id: {telegram_user_id}') # <-- Добавляем лог
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Некорректный ID пользователя")
+        
+        if not supabase:
+            raise HTTPException(status_code=500, detail="База данных недоступна")
+        
+        # 1. Проверяем наличие активной подписки
+        subscription_result = supabase.table("user_subscription").select("*").eq("user_id", telegram_user_id).eq("is_active", True).execute()
+        
+        subscription_data = None
+        if hasattr(subscription_result, 'data') and len(subscription_result.data) > 0:
+            subscription_data = subscription_result.data[0]
+        
+        # 2. Получаем статистику использования услуг
+        usage_result = supabase.table("user_usage_stats").select("*").eq("user_id", telegram_user_id).execute()
+        
+        usage_data = {
+            "analysis_count": 0,
+            "post_generation_count": 0
+        }
+        
+        if hasattr(usage_result, 'data') and len(usage_result.data) > 0:
+            usage_data = usage_result.data[0]
+        
+        # 3. Формируем ответ
+        response = {
+            "has_subscription": subscription_data is not None,
+            "analysis_count": usage_data.get("analysis_count", 0),
+            "post_generation_count": usage_data.get("post_generation_count", 0)
+        }
+        
+        # Если есть подписка, добавляем дату окончания
+        if subscription_data:
+            response["subscription_end_date"] = subscription_data.get("end_date")
+        
+        return response
+        
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f'Ошибка в /subscription/status для user_id {telegram_user_id}: {e}', exc_info=True) # <-- Добавляем лог ошибки
+        raise HTTPException(status_code=500, detail=f"Ошибка при получении статуса подписки: {str(e)}")
 
