@@ -332,4 +332,30 @@ export const hasLocalPremium = (userId: string): boolean => {
     console.error('[API] Ошибка при проверке локального премиум-статуса:', e);
     return false;
   }
+};
+
+/**
+ * Открывает чат с ботом и отправляет команду для проверки статуса подписки
+ * Это альтернативный способ, когда другие методы не работают
+ * 
+ * @param botName имя бота без символа @ (например 'ContentHelperBot')
+ */
+export const checkPremiumViaBot = (botName: string = 'ContentHelperBot'): void => {
+  try {
+    // Формируем URL для открытия чата с ботом и отправки команды
+    const command = '/check_premium';
+    const url = `https://t.me/${botName}?start=check_premium`;
+    
+    console.log(`[API] Открываем чат с ботом для проверки премиума: ${url}`);
+    
+    // Если мы внутри Telegram WebApp, используем специальный метод
+    if (window.Telegram?.WebApp?.openTelegramLink) {
+      window.Telegram.WebApp.openTelegramLink(url);
+    } else {
+      // Обычное открытие в новой вкладке
+      window.open(url, '_blank');
+    }
+  } catch (e) {
+    console.error('[API] Ошибка при открытии чата с ботом:', e);
+  }
 }; 
