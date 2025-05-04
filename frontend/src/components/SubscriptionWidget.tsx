@@ -10,6 +10,28 @@ interface SubscriptionWidgetProps {
 // API_URL для относительных путей
 const API_URL = '';
 
+// Функция для форматирования даты с часовым поясом
+const formatDate = (isoDateString: string): string => {
+  try {
+    const date = new Date(isoDateString);
+    
+    // Форматируем дату с временем и часовым поясом для консистентного отображения
+    const options: Intl.DateTimeFormatOptions = {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short'
+    };
+    
+    return date.toLocaleDateString('ru-RU', options);
+  } catch (e) {
+    console.error('Ошибка при форматировании даты:', e);
+    return 'Дата неизвестна';
+  }
+};
+
 const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActive }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -284,7 +306,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
           {status.has_subscription ? (
             <>
               <span className="status-badge premium">Premium</span>
-              <p>Ваша подписка активна до: {new Date(status.subscription_end_date!).toLocaleDateString()}</p>
+              <p>Ваша подписка активна до: {status.subscription_end_date ? formatDate(status.subscription_end_date) : 'Дата не указана'}</p>
               <p>Спасибо за поддержку!</p>
               <p className="user-info">ID пользователя: {validatedUserId}</p>
             </>

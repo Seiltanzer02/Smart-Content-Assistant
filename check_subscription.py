@@ -1,6 +1,7 @@
 import asyncio
 import asyncpg
 import os
+import sys
 from dotenv import load_dotenv
 
 # Загрузка переменных окружения
@@ -8,6 +9,25 @@ load_dotenv()
 
 # ID пользователя из скриншота базы данных
 USER_ID = 427032240
+
+async def check_connection():
+    """Проверка только соединения с базой данных"""
+    conn_string = os.getenv("DATABASE_URL")
+    if not conn_string:
+        print("Ошибка: переменная окружения DATABASE_URL не установлена")
+        return False
+    
+    try:
+        # Пытаемся подключиться к БД
+        conn = await asyncpg.connect(conn_string)
+        # Проверяем, что соединение работает
+        server_time = await conn.fetchval("SELECT NOW()")
+        print(f"Соединение с БД установлено успешно. Время сервера: {server_time}")
+        await conn.close()
+        return True
+    except Exception as e:
+        print(f"Ошибка подключения к БД: {e}")
+        return False
 
 async def check_subscription():
     # Подключение к базе данных
@@ -68,4 +88,8 @@ async def check_subscription():
         await conn.close()
 
 if __name__ == "__main__":
-    asyncio.run(check_subscription()) 
+    # Проверка аргументов командной строки
+    if len(sys.argv) > 1 and sys.argv[1] == "--connection-check":
+        sys.exit(0 if asyncio.run(check_connection()) else 1)
+    else:
+        asyncio.run(check_subscription()) 

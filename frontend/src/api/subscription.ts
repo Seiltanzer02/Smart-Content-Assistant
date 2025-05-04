@@ -27,9 +27,14 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
     // Добавляем случайный параметр для предотвращения кэширования
     const nocache = new Date().getTime();
     
+    // Получаем Telegram WebApp initData, если доступен
+    const telegramInitData = window.Telegram?.WebApp?.initData || '';
+    
     const response = await axios.get(`${API_URL}/subscription/status?nocache=${nocache}`, {
       headers: { 
         'x-telegram-user-id': userId,
+        // Отправляем initData для безопасной аутентификации
+        'x-telegram-init-data': telegramInitData,
         // Отключаем кэширование
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache',
