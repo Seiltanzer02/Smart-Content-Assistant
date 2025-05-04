@@ -56,7 +56,7 @@ class PremiumSetup:
             SELECT 
                 id, user_id, start_date, end_date, payment_id, is_active, 
                 created_at, updated_at
-            FROM subscriptions
+            FROM user_subscription
             WHERE user_id = $1
             ORDER BY end_date DESC
             """
@@ -78,7 +78,7 @@ class PremiumSetup:
         try:
             # Деактивируем все существующие подписки
             deactivate_query = """
-            UPDATE subscriptions
+            UPDATE user_subscription
             SET is_active = FALSE, updated_at = NOW()
             WHERE user_id = $1
             """
@@ -90,7 +90,7 @@ class PremiumSetup:
             end_date = now + timedelta(days=30 * months)
             
             insert_query = """
-            INSERT INTO subscriptions 
+            INSERT INTO user_subscription 
                 (user_id, start_date, end_date, payment_id, is_active, created_at, updated_at)
             VALUES 
                 ($1, $2, $3, $4, TRUE, NOW(), NOW())
