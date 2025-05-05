@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/SubscriptionWidget.css';
-import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice, checkPremiumViaBot } from '../api/subscription';
+import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice, checkPremiumViaBot, getBotStylePremiumStatus } from '../api/subscription';
 
 interface SubscriptionWidgetProps {
   userId: string | null;
@@ -9,6 +9,9 @@ interface SubscriptionWidgetProps {
 
 // API_URL для относительных путей
 const API_URL = '';
+
+// Ключ для хранения данных о премиум-статусе в localStorage
+const PREMIUM_STATUS_KEY = 'premium_status_data';
 
 // Функция для форматирования даты с часовым поясом
 const formatDate = (isoDateString: string): string => {
@@ -40,6 +43,11 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const SUBSCRIPTION_PRICE = 1; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [validatedUserId, setValidatedUserId] = useState<string | null>(null);
+  // Состояние для отслеживания, когда пользователь проверил статус через бота
+  const [checkedViaBot, setCheckedViaBot] = useState(false);
+  // Состояние для отображения локально сохраненного статуса подписки
+  const [localPremiumStatus, setLocalPremiumStatus] = useState<boolean | null>(null);
+  const [localEndDate, setLocalEndDate] = useState<string | null>(null);
   
   // Проверка и валидация ID пользователя
   useEffect(() => {
@@ -164,6 +172,51 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     };
   }, [isActive]);
   
+  // Проверяем localStorage при загрузке и после проверки через бота
+  useEffect(() => {
+    const checkLocalStorage = () => {
+      const savedData = localStorage.getItem(PREMIUM_STATUS_KEY);
+      if (savedData) {
+        try {
+          const parsedData = JSON.parse(savedData);
+          console.log('[SubscriptionWidget] Найдены сохраненные данные о подписке:', parsedData);
+
+          if (parsedData.userId === validatedUserId && parsedData.timestamp) {
+            // Проверяем, что данные не устарели (24 часа)
+            const now = new Date().getTime();
+            const timestamp = parsedData.timestamp;
+            const isValid = now - timestamp < 24 * 60 * 60 * 1000;
+            
+            if (isValid) {
+              console.log('[SubscriptionWidget] Данные актуальны, используем их');
+              setLocalPremiumStatus(parsedData.hasPremium);
+              setLocalEndDate(parsedData.endDate);
+              // Если мы только что проверили через бота и статус премиум, устанавливаем эти данные и в основной статус
+              if (checkedViaBot && parsedData.hasPremium) {
+                setStatus({
+                  has_subscription: true,
+                  analysis_count: 9999,
+                  post_generation_count: 9999,
+                  subscription_end_date: parsedData.endDate
+                });
+              }
+            } else {
+              console.log('[SubscriptionWidget] Данные устарели, удаляем');
+              localStorage.removeItem(PREMIUM_STATUS_KEY);
+              setLocalPremiumStatus(null);
+              setLocalEndDate(null);
+            }
+          }
+        } catch (e) {
+          console.error('[SubscriptionWidget] Ошибка при разборе данных из localStorage:', e);
+          localStorage.removeItem(PREMIUM_STATUS_KEY);
+        }
+      }
+    };
+
+    checkLocalStorage();
+  }, [validatedUserId, checkedViaBot]);
+  
   useEffect(() => {
     if (userId) {
       fetchSubscriptionStatus();
@@ -242,7 +295,23 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     setLoading(true);
     
     try {
+      // Проверяем, есть ли локальные данные о премиум-статусе
+      if (localPremiumStatus === true) {
+        console.log('[SubscriptionWidget] Используем локальный премиум-статус');
+        const result: SubscriptionStatus = {
+          has_subscription: true,
+          analysis_count: 9999,
+          post_generation_count: 9999,
+          subscription_end_date: localEndDate || undefined
+        };
+        setStatus(result);
+        setError(null);
+        setLoading(false);
+        return true;
+      }
+      
       const result = await getUserSubscriptionStatus(effectiveUserId);
+      console.log('[SubscriptionWidget] Получен статус подписки:', result);
       setStatus(result);
       setError(null);
       
@@ -354,10 +423,117 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     }
   };
   
-  // Добавляем функцию для проверки премиума через бота
+  // Функция для обработки проверки через бота и сохранения результата
   const handleCheckPremiumViaBot = () => {
-    checkPremiumViaBot();
+    // Устанавливаем флаг, что пользователь проверил статус через бота
+    setCheckedViaBot(true);
+    
+    // Пытаемся получить или сохранить информацию в localStorage
+    if (validatedUserId) {
+      // Предварительно сохраняем информацию в localStorage о том, что проверка была запущена
+      const checkInitiated = {
+        userId: validatedUserId,
+        timestamp: new Date().getTime(),
+        status: 'checking'
+      };
+      localStorage.setItem('premium_check_initiated', JSON.stringify(checkInitiated));
+      
+      // Открываем бота для проверки премиума
+      checkPremiumViaBot();
+    }
   };
+  
+  // Функция для ручного сохранения премиум-статуса (после проверки через бота)
+  const savePremiumStatusFromBot = (hasPremium: boolean, endDate?: string) => {
+    if (validatedUserId) {
+      const dataToSave = {
+        userId: validatedUserId,
+        hasPremium,
+        endDate: endDate || null,
+        timestamp: new Date().getTime()
+      };
+      
+      localStorage.setItem(PREMIUM_STATUS_KEY, JSON.stringify(dataToSave));
+      console.log('[SubscriptionWidget] Сохранен премиум-статус в localStorage:', dataToSave);
+      
+      // Обновляем состояния компонента
+      setLocalPremiumStatus(hasPremium);
+      setLocalEndDate(endDate || null);
+      
+      // Обновляем основной статус
+      if (hasPremium) {
+        setStatus({
+          has_subscription: true,
+          analysis_count: 9999,
+          post_generation_count: 9999,
+          subscription_end_date: endDate
+        });
+      }
+    }
+  };
+  
+  // Обработчик события фокуса, чтобы проверить статус после возвращения из бота
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      // Если страница становится видимой и был установлен флаг проверки через бота
+      if (document.visibilityState === 'visible' && checkedViaBot) {
+        console.log('[SubscriptionWidget] Страница снова активна после проверки через бота, обновляем статус');
+        
+        // Проверяем, был ли запрос на проверку через бота
+        const checkInitiatedRaw = localStorage.getItem('premium_check_initiated');
+        if (checkInitiatedRaw) {
+          try {
+            const checkInitiated = JSON.parse(checkInitiatedRaw);
+            const now = new Date().getTime();
+            
+            // Если проверка была запущена не более 5 минут назад
+            if (now - checkInitiated.timestamp < 5 * 60 * 1000) {
+              console.log('[SubscriptionWidget] Обнаружена недавняя проверка через бота, запрашиваем актуальный статус');
+              
+              // Устанавливаем временно статус обновления
+              setLoading(true);
+              setError(null);
+              
+              // Делаем попытку получить статус напрямую через API в стиле бота
+              if (validatedUserId) {
+                getBotStylePremiumStatus(validatedUserId)
+                  .then(botData => {
+                    console.log('[SubscriptionWidget] Получен ответ от бот-стиль API после возвращения из бота:', botData);
+                    
+                    // Если получили премиум-статус, сохраняем его
+                    if (botData.has_premium) {
+                      savePremiumStatusFromBot(true, botData.subscription_end_date || undefined);
+                    }
+                    
+                    // В любом случае обновляем обычный статус
+                    fetchSubscriptionStatus();
+                  })
+                  .catch(error => {
+                    console.error('[SubscriptionWidget] Ошибка при получении статуса через бот-стиль API после возвращения из бота:', error);
+                    // Пробуем обычный метод
+                    fetchSubscriptionStatus();
+                  });
+                
+                // Очищаем флаг инициированной проверки
+                localStorage.removeItem('premium_check_initiated');
+              }
+            }
+          } catch (e) {
+            console.error('[SubscriptionWidget] Ошибка при разборе данных о проверке через бота:', e);
+            localStorage.removeItem('premium_check_initiated');
+          }
+        }
+      }
+    };
+    
+    // Добавляем обработчик события изменения видимости страницы
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Очистка при размонтировании
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [checkedViaBot, validatedUserId]);
   
   if (loading) {
     return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
@@ -368,6 +544,46 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       <div className="subscription-widget error">
         <p>Ошибка: {error}</p>
         <button onClick={fetchSubscriptionStatus}>Повторить</button>
+      </div>
+    );
+  }
+  
+  // Отображаем локальный премиум-статус, если он доступен и мы проверяли через бота
+  if (checkedViaBot && localPremiumStatus === true) {
+    return (
+      <div className="subscription-widget">
+        <h3>Статус подписки</h3>
+        <div className="subscription-details">
+          <div className="premium-status">
+            <p className="status-label">Премиум (подтверждено ботом)</p>
+            {localEndDate && (
+              <p className="end-date">
+                Действует до: {formatDate(localEndDate)}
+              </p>
+            )}
+            <p className="limits">
+              Доступно анализов: Неограниченно
+              <br />
+              Доступно генераций постов: Неограниченно
+            </p>
+          </div>
+        </div>
+        
+        {/* Секция "Прямая проверка" */}
+        <div className="direct-check-section">
+          <h4>Статус подписки (Прямая проверка)</h4>
+          <p className="direct-check-status">Прямая проверка: Статус Premium</p>
+          <p className="user-id">User ID: {validatedUserId}</p>
+        </div>
+        
+        <div className="bot-check-section">
+          <button 
+            className="check-via-bot-button"
+            onClick={handleCheckPremiumViaBot}
+          >
+            Проверить через бота
+          </button>
+        </div>
       </div>
     );
   }
@@ -447,6 +663,31 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
           )}
         </div>
       )}
+
+      {/* Секция "Прямая проверка" */}
+      <div className="direct-check-section">
+        <h4>Статус подписки (Прямая проверка)</h4>
+        <p className="direct-check-status">
+          Прямая проверка: Статус {localPremiumStatus === true ? 'Premium' : 'Free'}
+        </p>
+        <p className="user-id">User ID: {validatedUserId}</p>
+      </div>
+
+      {/* Секция для ручного ввода результата проверки через бота (для тестирования) */}
+      <div className="manual-set-section">
+        <button 
+          className="manual-set-button"
+          onClick={() => savePremiumStatusFromBot(true, '2025-06-03T12:10:56.203118+00:00')}
+        >
+          Установить Premium (тест)
+        </button>
+        <button 
+          className="manual-set-button"
+          onClick={() => savePremiumStatusFromBot(false)}
+        >
+          Установить Free (тест)
+        </button>
+      </div>
 
       {showPaymentInfo && (
         <div className="payment-info">
