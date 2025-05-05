@@ -6,7 +6,6 @@ export interface SubscriptionStatus {
   analysis_count: number;
   post_generation_count: number;
   subscription_end_date?: string;
-  error?: string | null;
 }
 
 // Интерфейс для прямой проверки премиум-статуса
@@ -37,7 +36,7 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
   // Пробуем разные способы получения данных о подписке последовательно
   try {
     // Метод 1: Проверка через бот-стиль API (прямой запрос к БД как в боте)
-  try {
+    try {
       const botStyleData = await getBotStylePremiumStatus(userId);
       console.log(`[API] Успешно получены данные через бот-стиль API`);
       
@@ -117,10 +116,10 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
           'Expires': '0',
           'Accept': 'application/json'
         }
-    });
-    
+      });
+      
       console.log(`[API] Успешно получены данные через старый API:`, response.data);
-    return response.data;
+      return response.data;
     } catch (oldApiError) {
       console.warn(`[API] Не удалось получить данные через старый API:`, oldApiError);
     }
