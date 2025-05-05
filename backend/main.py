@@ -381,24 +381,24 @@ async def telegram_webhook(request: Request):
     """Вебхук для обработки обновлений от бота Telegram."""
     try:
         # Получаем данные запроса
-        data = await request.json()
+    data = await request.json()
         logger.info(f"Получен вебхук от Telegram: {data}")
         
-        # 1. Обработка pre_checkout_query
-        pre_checkout_query = data.get("pre_checkout_query")
-        if pre_checkout_query:
-            query_id = pre_checkout_query.get("id")
-            bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    # 1. Обработка pre_checkout_query
+    pre_checkout_query = data.get("pre_checkout_query")
+    if pre_checkout_query:
+        query_id = pre_checkout_query.get("id")
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
             logger.info(f"Обработка pre_checkout_query с ID: {query_id}")
             
-            if not bot_token:
+        if not bot_token:
                 logger.error("TELEGRAM_BOT_TOKEN не найден в переменных окружения")
                 return {"ok": False, "error": "TELEGRAM_BOT_TOKEN not found"}
             
             # Отправляем ответ Telegram API
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(
-                    f"https://api.telegram.org/bot{bot_token}/answerPreCheckoutQuery",
+                f"https://api.telegram.org/bot{bot_token}/answerPreCheckoutQuery",
                     json={
                         "pre_checkout_query_id": query_id,
                         "ok": True
@@ -481,7 +481,7 @@ async def telegram_webhook(request: Request):
                 # Формируем текст ответа
                 if has_premium:
                     reply_text = f"✅ У вас активирован ПРЕМИУМ доступ!\nДействует до: {end_date_str}\nОбновите страницу приложения, чтобы увидеть изменения."
-                else:
+            else:
                     reply_text = "❌ У вас нет активной ПРЕМИУМ подписки.\nДля получения премиум-доступа оформите подписку в приложении."
                 
                 # Отправляем ответ пользователю
@@ -489,13 +489,13 @@ async def telegram_webhook(request: Request):
                 
                 return {"ok": True, "has_premium": has_premium}
                 
-            except Exception as e:
+        except Exception as e:
                 logger.error(f"Ошибка при проверке премиум-статуса: {e}")
                 await send_telegram_message(user_id, f"Произошла ошибка при проверке статуса подписки. Пожалуйста, попробуйте позже.")
                 return {"ok": False, "error": str(e)}
         
         # Базовый ответ для всех остальных сообщений
-        return {"ok": True}
+    return {"ok": True}
     except Exception as e:
         logger.error(f"Ошибка при обработке вебхука Telegram: {e}")
         return {"ok": False, "error": str(e)}
