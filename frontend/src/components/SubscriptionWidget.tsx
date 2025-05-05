@@ -380,7 +380,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
         <p className="loading-indicator">Загрузка статуса подписки...</p>
       ) : error ? (
         <div className="error-section">
-          <p className="error-message">{error}</p>
+        <p className="error-message">{error}</p>
           
           {/* Добавляем альтернативные действия при ошибке */}
           <div className="error-actions">

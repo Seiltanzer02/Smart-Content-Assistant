@@ -90,12 +90,12 @@ class SubscriptionService:
         """
         try:
             # Используем DBService, который теперь должен работать с asyncpg pool
-            subscription = await self.db.fetchrow(query, user_id)
+        subscription = await self.db.fetchrow(query, user_id)
             if subscription:
                 print(f"[DEBUG SubService] Найдена активная подписка для {user_id}: ID={subscription['id']}, end_date={subscription['end_date']}")
             else:
                 print(f"[DEBUG SubService] Активная подписка для {user_id} не найдена.")
-            return subscription
+        return subscription
         except Exception as e:
             # Логируем ошибку, но не прерываем работу полностью, просто возвращаем None
             print(f"[ERROR SubService] Ошибка при получении подписки для {user_id}: {e}")
