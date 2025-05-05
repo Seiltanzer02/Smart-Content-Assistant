@@ -6,6 +6,7 @@ export interface SubscriptionStatus {
   analysis_count: number;
   post_generation_count: number;
   subscription_end_date?: string;
+  error?: string | null;
 }
 
 // Интерфейс для прямой проверки премиум-статуса

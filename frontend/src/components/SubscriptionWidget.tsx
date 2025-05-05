@@ -257,81 +257,60 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     };
   }, [validatedUserId]);
   
+  // Функция для получения статуса подписки с сервера
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
-    let effectiveUserId = validatedUserId;
-    
-    if (!effectiveUserId) {
-      console.log('[SubscriptionWidget] ValidatedUserId отсутствует, пробуем альтернативные источники...');
-      
-      // Попробуем получить из localStorage
-      const storedUserId = localStorage.getItem('contenthelper_user_id');
-      if (storedUserId) {
-        console.log(`[SubscriptionWidget] Найден userId в localStorage: ${storedUserId}`);
-        effectiveUserId = storedUserId;
-      }
-      
-      // Попробуем получить из URL (если страница содержит user_id в параметрах)
-      if (!effectiveUserId) {
-        const urlParams = new URLSearchParams(window.location.search);
-        const urlUserId = urlParams.get('user_id');
-        if (urlUserId) {
-          console.log(`[SubscriptionWidget] Найден userId в параметрах URL: ${urlUserId}`);
-          effectiveUserId = urlUserId;
-        }
-      }
-      
-      // Попробуем получить из Telegram WebApp если доступен
-      if (!effectiveUserId && window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
-        const webAppUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
-        console.log(`[SubscriptionWidget] Найден userId в Telegram WebApp: ${webAppUserId}`);
-        effectiveUserId = webAppUserId;
-      }
-    }
-
-    if (!effectiveUserId) {
-      console.error('[SubscriptionWidget] Попытка запроса статуса подписки без валидного userId после всех проверок');
-      setError('ID пользователя не определен. Пожалуйста, перезапустите приложение.');
+    if (!validatedUserId) {
+      console.error('[SubscriptionWidget] ID пользователя не определен, не могу получить статус подписки');
+      setError('ID пользователя не определен');
+      setLoading(false);
       return false;
     }
-    
-    setLoading(true);
-    
+
     try {
-      let result: SubscriptionStatus | null = null;
-      try {
-        result = await getUserSubscriptionStatus(effectiveUserId);
-      } catch (apiError) {
-        // fallback: пробуем взять из localStorage
-        const savedData = localStorage.getItem('premium_status_data');
-        if (savedData) {
-          const parsed = JSON.parse(savedData);
-          if (parsed.userId === effectiveUserId && parsed.hasPremium) {
-            result = {
-              has_subscription: true,
-              analysis_count: 9999,
-              post_generation_count: 9999,
-              subscription_end_date: parsed.endDate || undefined
-            };
-        }
-      }
-      }
-      if (!result) {
-        result = {
-          has_subscription: false,
-          analysis_count: 3,
-          post_generation_count: 1
-        };
-      }
-      setStatus(result);
-      setError(null);
-      setLoading(false);
-      return true;
-    } catch (err) {
-      console.error('Ошибка при получении статуса подписки:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Неизвестная ошибка';
+      console.log(`[SubscriptionWidget] Запрос статуса подписки для пользователя ID: ${validatedUserId}`);
       
-      setError(`Не удалось получить статус подписки: ${errorMessage}`);
+      // Сначала пробуем метод подключения к серверу через Supabase
+
+      // Проверяем Telegram WebApp
+      
+      // Получаем статус подписки через новую функцию с каскадной проверкой
+      const subscriptionData = await getUserSubscriptionStatus(validatedUserId);
+      
+      console.log(`[SubscriptionWidget] Получен статус подписки:`, subscriptionData);
+      
+      setStatus(subscriptionData);
       setLoading(false);
+      
+      // Если есть ошибка в данных подписки, отображаем ее
+      if (subscriptionData.error) {
+        console.warn(`[SubscriptionWidget] Ошибка в данных подписки: ${subscriptionData.error}`);
+        setError(`Ошибка получения данных: ${subscriptionData.error}`);
+      }
+      
+      // Если подписка больше не активна, но в localStorage сохранен премиум-статус,
+      // удаляем его из localStorage
+      if (!subscriptionData.has_subscription && localPremiumStatus) {
+        console.log('[SubscriptionWidget] Подписка неактивна, но в localStorage сохранен премиум-статус. Удаляем...');
+        localStorage.removeItem(PREMIUM_STATUS_KEY);
+        setLocalPremiumStatus(false);
+        setLocalEndDate(null);
+      }
+      
+      return true;
+    } catch (e) {
+      console.error('[SubscriptionWidget] Ошибка при получении статуса подписки:', e);
+      
+      setError('Не удалось получить статус подписки');
+      setLoading(false);
+      
+      // Устанавливаем базовый статус при ошибке
+      setStatus({
+        has_subscription: false,
+        analysis_count: 1,
+        post_generation_count: 1,
+        error: e instanceof Error ? e.message : 'Неизвестная ошибка'
+      });
+      
       return false;
     }
   };

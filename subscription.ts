@@ -99,23 +99,6 @@ export const getSubscriptionStatusV2 = async (userId: string | null): Promise<Su
 };
 
 /**
- * Очищает localStorage от всех данных, связанных с премиум-подпиской
- */
-export const clearPremiumDataFromLocalStorage = (): void => {
-  console.log('[API] Очистка localStorage от премиум-данных');
-  localStorage.removeItem('premium_status');
-  localStorage.removeItem('premium_expiry');
-  localStorage.removeItem('subscription_data');
-  
-  // Очищаем все ключи, содержащие "premium" или "subscription"
-  Object.keys(localStorage).forEach(key => {
-    if (key.includes('premium') || key.includes('subscription')) {
-      localStorage.removeItem(key);
-    }
-  });
-};
-
-/**
  * Получает статус подписки пользователя
  * 
  * Пробует несколько способов получения статуса подписки для максимальной надежности:
@@ -139,12 +122,6 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
     try {
       const subscriptionData = await getSubscriptionStatusV2(userId);
       console.log(`[API] Успешно получены данные через V2 API`);
-      
-      // Очищаем localStorage, если нет активной подписки
-      if (!subscriptionData.has_subscription) {
-        clearPremiumDataFromLocalStorage();
-      }
-      
       return subscriptionData;
     } catch (v2Error) {
       console.warn(`[API] Не удалось получить данные через V2 API:`, v2Error);
@@ -154,11 +131,6 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
     try {
       const premiumData = await getPremiumStatus(userId);
       console.log(`[API] Успешно получены данные через премиум API`);
-      
-      // Очищаем localStorage, если нет активной подписки
-      if (!premiumData.has_premium) {
-        clearPremiumDataFromLocalStorage();
-      }
       
       return {
         has_subscription: premiumData.has_premium,
@@ -184,12 +156,6 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
       });
       
       console.log(`[API] Успешно получены данные через старый API:`, response.data);
-      
-      // Очищаем localStorage, если нет активной подписки
-      if (!response.data.has_subscription) {
-        clearPremiumDataFromLocalStorage();
-      }
-      
       return response.data;
     } catch (oldApiError) {
       console.warn(`[API] Не удалось получить данные через старый API:`, oldApiError);
@@ -197,10 +163,6 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
     
     // Если все методы не сработали, возвращаем базовые данные
     console.warn(`[API] Все методы получения подписки не сработали, возвращаем базовые данные`);
-    
-    // Очищаем localStorage на всякий случай
-    clearPremiumDataFromLocalStorage();
-    
     return {
       has_subscription: false,
       analysis_count: 1,
@@ -209,9 +171,6 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
     };
   } catch (error) {
     console.error('[API] Критическая ошибка при получении статуса подписки:', error);
-    
-    // Очищаем localStorage на всякий случай
-    clearPremiumDataFromLocalStorage();
     
     // Возвращаем базовые данные в случае полного сбоя
     return {
