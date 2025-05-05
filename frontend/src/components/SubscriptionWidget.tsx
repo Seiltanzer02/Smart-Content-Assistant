@@ -55,8 +55,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   // Состояние для отображения локально сохраненного статуса подписки
   const [localPremiumStatus, setLocalPremiumStatus] = useState<boolean | null>(null);
   const [localEndDate, setLocalEndDate] = useState<string | null>(null);
-  // 1. ДОБАВЛЯЮ состояние initialLoading для первой загрузки
-  const [initialLoading, setInitialLoading] = useState(true);
   
   // Проверка и валидация ID пользователя
   useEffect(() => {
@@ -226,12 +224,11 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     checkLocalStorage();
   }, [validatedUserId, checkedViaBot]);
   
-  // Модифицирую useEffect для первой загрузки
   useEffect(() => {
     if (userId) {
-      setInitialLoading(true);
-      fetchSubscriptionStatus().finally(() => setInitialLoading(false));
+      fetchSubscriptionStatus();
     }
+    
     // Добавляем логирование статуса Telegram WebApp при загрузке компонента
     console.log('SubscriptionWidget загружен, проверка Telegram.WebApp:');
     console.log('window.Telegram существует:', !!window.Telegram);
@@ -241,15 +238,22 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     }
   }, [userId]);
   
-  // Модифицирую периодическое обновление: не трогаем initialLoading
+  // Периодическое обновление статуса подписки
   useEffect(() => {
     let intervalId: number | null = null;
+    
     if (validatedUserId) {
+      // Сразу запрашиваем статус
       fetchSubscriptionStatus();
+      
+      // Устанавливаем интервал обновления - каждые 15 секунд
       intervalId = window.setInterval(() => {
+        console.log('Регулярное обновление статуса подписки...');
         fetchSubscriptionStatus();
       }, 15000);
     }
+    
+    // Очистка при размонтировании
     return () => {
       if (intervalId !== null) {
         window.clearInterval(intervalId);
@@ -257,60 +261,81 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     };
   }, [validatedUserId]);
   
-  // Функция для получения статуса подписки с сервера
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
-    if (!validatedUserId) {
-      console.error('[SubscriptionWidget] ID пользователя не определен, не могу получить статус подписки');
-      setError('ID пользователя не определен');
-      setLoading(false);
-      return false;
+    let effectiveUserId = validatedUserId;
+    
+    if (!effectiveUserId) {
+      console.log('[SubscriptionWidget] ValidatedUserId отсутствует, пробуем альтернативные источники...');
+      
+      // Попробуем получить из localStorage
+      const storedUserId = localStorage.getItem('contenthelper_user_id');
+      if (storedUserId) {
+        console.log(`[SubscriptionWidget] Найден userId в localStorage: ${storedUserId}`);
+        effectiveUserId = storedUserId;
+      }
+      
+      // Попробуем получить из URL (если страница содержит user_id в параметрах)
+      if (!effectiveUserId) {
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlUserId = urlParams.get('user_id');
+        if (urlUserId) {
+          console.log(`[SubscriptionWidget] Найден userId в параметрах URL: ${urlUserId}`);
+          effectiveUserId = urlUserId;
+        }
+      }
+      
+      // Попробуем получить из Telegram WebApp если доступен
+      if (!effectiveUserId && window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
+        const webAppUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
+        console.log(`[SubscriptionWidget] Найден userId в Telegram WebApp: ${webAppUserId}`);
+        effectiveUserId = webAppUserId;
+      }
     }
 
+    if (!effectiveUserId) {
+      console.error('[SubscriptionWidget] Попытка запроса статуса подписки без валидного userId после всех проверок');
+      setError('ID пользователя не определен. Пожалуйста, перезапустите приложение.');
+      return false;
+    }
+    
+    setLoading(true);
+    
     try {
-      console.log(`[SubscriptionWidget] Запрос статуса подписки для пользователя ID: ${validatedUserId}`);
-      
-      // Сначала пробуем метод подключения к серверу через Supabase
-
-      // Проверяем Telegram WebApp
-      
-      // Получаем статус подписки через новую функцию с каскадной проверкой
-      const subscriptionData = await getUserSubscriptionStatus(validatedUserId);
-      
-      console.log(`[SubscriptionWidget] Получен статус подписки:`, subscriptionData);
-      
-      setStatus(subscriptionData);
+      let result: SubscriptionStatus | null = null;
+      try {
+        result = await getUserSubscriptionStatus(effectiveUserId);
+      } catch (apiError) {
+        // fallback: пробуем взять из localStorage
+        const savedData = localStorage.getItem('premium_status_data');
+        if (savedData) {
+          const parsed = JSON.parse(savedData);
+          if (parsed.userId === effectiveUserId && parsed.hasPremium) {
+            result = {
+              has_subscription: true,
+              analysis_count: 9999,
+              post_generation_count: 9999,
+              subscription_end_date: parsed.endDate || undefined
+            };
+          }
+        }
+      }
+      if (!result) {
+        result = {
+          has_subscription: false,
+          analysis_count: 3,
+          post_generation_count: 1
+        };
+      }
+      setStatus(result);
+      setError(null);
       setLoading(false);
-      
-      // Если есть ошибка в данных подписки, отображаем ее
-      if (subscriptionData.error) {
-        console.warn(`[SubscriptionWidget] Ошибка в данных подписки: ${subscriptionData.error}`);
-        setError(`Ошибка получения данных: ${subscriptionData.error}`);
-      }
-      
-      // Если подписка больше не активна, но в localStorage сохранен премиум-статус,
-      // удаляем его из localStorage
-      if (!subscriptionData.has_subscription && localPremiumStatus) {
-        console.log('[SubscriptionWidget] Подписка неактивна, но в localStorage сохранен премиум-статус. Удаляем...');
-        localStorage.removeItem(PREMIUM_STATUS_KEY);
-        setLocalPremiumStatus(false);
-        setLocalEndDate(null);
-      }
-      
       return true;
-    } catch (e) {
-      console.error('[SubscriptionWidget] Ошибка при получении статуса подписки:', e);
+    } catch (err) {
+      console.error('Ошибка при получении статуса подписки:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Неизвестная ошибка';
       
-      setError('Не удалось получить статус подписки');
+      setError(`Не удалось получить статус подписки: ${errorMessage}`);
       setLoading(false);
-      
-      // Устанавливаем базовый статус при ошибке
-      setStatus({
-        has_subscription: false,
-        analysis_count: 1,
-        post_generation_count: 1,
-        error: e instanceof Error ? e.message : 'Неизвестная ошибка'
-      });
-      
       return false;
     }
   };
@@ -514,49 +539,45 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     };
   }, [checkedViaBot, validatedUserId]);
   
-  // --- UI ---
-  if (initialLoading) {
+  if (loading) {
     return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
   }
+  
   if (error) {
     return (
       <div className="subscription-widget error">
         <p>Ошибка: {error}</p>
-        <button onClick={() => { setInitialLoading(true); fetchSubscriptionStatus().finally(() => setInitialLoading(false)); }}>Повторить</button>
+        <button onClick={fetchSubscriptionStatus}>Повторить</button>
       </div>
     );
   }
-  // --- Новый красивый UI ---
-  const isPremium = localPremiumStatus === true;
+  
+  // Основной индикатор статуса подписки — только "Прямая проверка"
   return (
-    <div className={`subscription-widget modern ${isPremium ? 'premium' : 'free'}`}> {/* добавляем класс для стилей */}
-      <div className="status-header">
-        {isPremium ? (
-          <>
-            <span className="status-icon" role="img" aria-label="Premium">🌟</span>
-            <span className="status-title">Premium-подписка активна</span>
-            </>
-          ) : (
-            <>
-            <span className="status-icon" role="img" aria-label="Free">⭐</span>
-            <span className="status-title">Базовый доступ</span>
-          </>
+    <div className="subscription-widget">
+      <h3>Статус подписки</h3>
+      <div className="direct-check-section main-status">
+        <h4>Статус подписки (Прямая проверка)</h4>
+        <p className="direct-check-status">
+          Прямая проверка: Статус {localPremiumStatus === true ? 'Premium' : 'Free'}
+        </p>
+        <p className="user-id">User ID: {validatedUserId}</p>
+        {localPremiumStatus === true && localEndDate && (
+          <p className="end-date">
+            Действует до: {formatDate(localEndDate)}
+          </p>
         )}
       </div>
-      {isPremium && localEndDate && (
-        <div className="premium-info">
-          <span>Действует до: <b>{formatDate(localEndDate)}</b></span>
-        </div>
-      )}
-      {!isPremium && (
+      {/* Кнопка покупки — только если нет премиума */}
+      {localPremiumStatus !== true && (
         <div className="buy-section">
-                <button 
-                  className="subscribe-button"
+          <button 
+            className="subscribe-button"
             onClick={handleSubscribe}
-                  disabled={isSubscribing}
-                >
+            disabled={isSubscribing}
+          >
             {isSubscribing ? 'Обработка...' : 'Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars'}
-                </button>
+          </button>
         </div>
       )}
     </div>
