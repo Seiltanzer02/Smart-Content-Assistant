@@ -6,8 +6,8 @@ interface DirectPremiumStatusProps {
 }
 
 interface PremiumStatusData {
-  is_premium: boolean;
-  end_date?: string;
+  has_premium: boolean;
+  subscription_end_date?: string;
   error?: string;
 }
 
@@ -61,7 +61,7 @@ const DirectPremiumStatus: React.FC<DirectPremiumStatusProps> = ({ userId }) => 
         console.log('[DirectStatus] Получен ответ:', response.data);
         if (response.data.error) {
             setError(`Ошибка от сервера: ${response.data.error}`);
-            setStatus({ is_premium: false });
+            setStatus({ has_premium: false });
         } else {
             setStatus(response.data);
         }
@@ -70,7 +70,7 @@ const DirectPremiumStatus: React.FC<DirectPremiumStatusProps> = ({ userId }) => 
         console.error('[DirectStatus] Ошибка при запросе:', err);
         const errorMessage = err.response?.data?.detail || err.response?.data?.error || err.message || 'Неизвестная ошибка сети';
         setError(errorMessage);
-        setStatus({ is_premium: false }); // По умолчанию считаем не премиум при ошибке
+        setStatus({ has_premium: false }); // По умолчанию считаем не премиум при ошибке
       } finally {
         setLoading(false);
       }
@@ -93,10 +93,10 @@ const DirectPremiumStatus: React.FC<DirectPremiumStatusProps> = ({ userId }) => 
       return <p style={{ color: 'orange' }}>Прямая проверка: Ошибка: {error}</p>;
     }
     if (status) {
-      if (status.is_premium) {
+      if (status.has_premium) {
         return (
           <p style={{ color: 'green', fontWeight: 'bold' }}>
-            Прямая проверка: Premium активен до {formatDate(status.end_date)}
+            Прямая проверка: Статус Premium до {formatDate(status.subscription_end_date)}
           </p>
         );
       } else {
