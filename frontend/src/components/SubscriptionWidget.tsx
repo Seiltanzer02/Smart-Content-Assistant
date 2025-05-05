@@ -322,15 +322,18 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
           post_generation_count: 1
         };
       }
-      setStatus(result);
-      setError(null);
-      setLoading(false);
-      // --- ДОБАВЛЕНО: если подписка неактивна, очищаем localStorage и локальный статус ---
+      
+      // Если у пользователя нет подписки, очищаем данные из localStorage
       if (!result.has_subscription) {
+        console.log('[SubscriptionWidget] Подписка не обнаружена на сервере, очищаем localStorage');
         localStorage.removeItem(PREMIUM_STATUS_KEY);
         setLocalPremiumStatus(false);
         setLocalEndDate(null);
       }
+      
+      setStatus(result);
+      setError(null);
+      setLoading(false);
       return true;
     } catch (err) {
       console.error('Ошибка при получении статуса подписки:', err);
@@ -540,6 +543,21 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [checkedViaBot, validatedUserId]);
+  
+  // Добавляем дополнительный useEffect для принудительной проверки статуса при первоначальной загрузке
+  useEffect(() => {
+    // Принудительно очищаем localStorage при инициализации компонента
+    console.log('[SubscriptionWidget] Инициализация компонента, запускаем проверку подписки');
+    
+    // Сначала проверяем наличие userId
+    if (validatedUserId) {
+      console.log(`[SubscriptionWidget] Проверка подписки для userId: ${validatedUserId}`);
+      
+      // Принудительно запрашиваем актуальный статус с сервера
+      // Статус в localStorage будет очищен, если подписки нет
+      fetchSubscriptionStatus();
+    }
+  }, [validatedUserId]); // Запускается при получении validatedUserId
   
   // --- UI ---
   if (initialLoading) {
