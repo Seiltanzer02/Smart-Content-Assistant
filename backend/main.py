@@ -489,7 +489,7 @@ async def telegram_webhook(request: Request):
                                     "user_id": f"eq.{user_id}",
                                     "is_active": "eq.true"
                                 }
-                            )
+            )
                             
                             if response.status_code == 200:
                                 subscriptions = response.json()

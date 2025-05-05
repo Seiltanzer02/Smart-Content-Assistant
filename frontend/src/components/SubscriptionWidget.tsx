@@ -2,6 +2,13 @@ import React, { useState, useEffect } from 'react';
 import '../styles/SubscriptionWidget.css';
 import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice, checkPremiumViaBot, getBotStylePremiumStatus } from '../api/subscription';
 
+// Добавляем объявление глобального объекта Telegram для TypeScript
+declare global {
+  interface Window {
+    Telegram?: any;
+  }
+}
+
 interface SubscriptionWidgetProps {
   userId: string | null;
   isActive?: boolean;
@@ -545,151 +552,32 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     );
   }
   
-  // Отображаем локальный премиум-статус, если он доступен и мы проверяли через бота
-  if (checkedViaBot && localPremiumStatus === true) {
-    return (
-      <div className="subscription-widget">
-        <h3>Статус подписки</h3>
-        <div className="subscription-details">
-          <div className="premium-status">
-            <p className="status-label">Премиум (подтверждено ботом)</p>
-            {localEndDate && (
-              <p className="end-date">
-                Действует до: {formatDate(localEndDate)}
-              </p>
-            )}
-            <p className="limits">
-              Доступно анализов: Неограниченно
-              <br />
-              Доступно генераций постов: Неограниченно
-            </p>
-          </div>
-        </div>
-        
-        {/* Секция "Прямая проверка" */}
-        <div className="direct-check-section">
-          <h4>Статус подписки (Прямая проверка)</h4>
-          <p className="direct-check-status">Прямая проверка: Статус Premium</p>
-          <p className="user-id">User ID: {validatedUserId}</p>
-        </div>
-        
-        <div className="bot-check-section">
-          <button 
-            className="check-via-bot-button"
-            onClick={handleCheckPremiumViaBot}
-          >
-            Проверить через бота
-          </button>
-        </div>
-      </div>
-    );
-  }
-  
+  // Основной индикатор статуса подписки — только "Прямая проверка"
   return (
     <div className="subscription-widget">
       <h3>Статус подписки</h3>
-      
-      {loading ? (
-        <p className="loading-indicator">Загрузка статуса подписки...</p>
-      ) : error ? (
-        <div className="error-section">
-        <p className="error-message">{error}</p>
-          
-          {/* Добавляем альтернативные действия при ошибке */}
-          <div className="error-actions">
-            <p>Возможные действия:</p>
-            <button 
-              className="alternative-action-button"
-              onClick={handleCheckPremiumViaBot}
-            >
-              Проверить через бота
-            </button>
-            
-            <button 
-              className="alternative-action-button"
-              onClick={() => fetchSubscriptionStatus()}
-            >
-              Повторить проверку
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="subscription-details">
-          {status?.has_subscription ? (
-            <div className="premium-status">
-              <p className="status-label">Премиум</p>
-              {status?.subscription_end_date && (
-                <p className="end-date">
-                  Действует до: {formatDate(status.subscription_end_date)}
-                </p>
-              )}
-              <p className="limits">
-                Доступно анализов: {status?.analysis_count || 'Неограниченно'}
-                <br />
-                Доступно генераций постов: {status?.post_generation_count || 'Неограниченно'}
-              </p>
-            </div>
-          ) : (
-            <div className="free-status">
-              <p className="status-label">Бесплатный доступ</p>
-              <p className="limits">
-                Доступно анализов: {status?.analysis_count || 3}
-                <br />
-                Доступно генераций постов: {status?.post_generation_count || 1}
-              </p>
-              {!isActive && (
-                <button 
-                  className="subscribe-button"
-                  onClick={handleSubscribe}
-                  disabled={isSubscribing}
-                >
-                  {isSubscribing ? 'Обработка...' : 'Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars'}
-                </button>
-              )}
-              
-              {/* Альтернативные способы проверки */}
-              <div className="alternative-actions">
-                <button 
-                  className="alternative-action-button"
-                  onClick={handleCheckPremiumViaBot}
-                >
-                  Проверить через бота
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Секция "Прямая проверка" */}
-      <div className="direct-check-section">
+      <div className="direct-check-section main-status">
         <h4>Статус подписки (Прямая проверка)</h4>
         <p className="direct-check-status">
           Прямая проверка: Статус {localPremiumStatus === true ? 'Premium' : 'Free'}
         </p>
         <p className="user-id">User ID: {validatedUserId}</p>
+        {localPremiumStatus === true && localEndDate && (
+          <p className="end-date">
+            Действует до: {formatDate(localEndDate)}
+          </p>
+        )}
       </div>
-
-      {/* Секция для ручного ввода результата проверки через бота (для тестирования) */}
-      <div className="manual-set-section">
-        <button 
-          className="manual-set-button"
-          onClick={() => savePremiumStatusFromBot(true, '2025-06-03T12:10:56.203118+00:00')}
-        >
-          Установить Premium (тест)
-        </button>
-        <button 
-          className="manual-set-button"
-          onClick={() => savePremiumStatusFromBot(false)}
-        >
-          Установить Free (тест)
-        </button>
-      </div>
-
-      {showPaymentInfo && (
-        <div className="payment-info">
-          <p>Для оплаты используется Telegram Stars.</p>
-          {/* ... existing payment info ... */}
+      {/* Кнопка покупки — только если нет премиума */}
+      {localPremiumStatus !== true && (
+        <div className="buy-section">
+          <button 
+            className="subscribe-button"
+            onClick={handleSubscribe}
+            disabled={isSubscribing}
+          >
+            {isSubscribing ? 'Обработка...' : 'Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars'}
+          </button>
         </div>
       )}
     </div>
