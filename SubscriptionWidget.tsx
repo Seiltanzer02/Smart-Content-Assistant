@@ -6,25 +6,155 @@ import {
   getSubscriptionStatusV2, 
   getPremiumStatus, 
   getRawPremiumStatus,
-  openPremiumStatusPage
-} from '../api/subscription';
+  openPremiumStatusPage,
+  getDirectPremiumStatus,
+  checkPremiumViaBot,
+  generateInvoice
+} from './subscription';
 
-// Расширение интерфейса Window для поддержки INJECTED_USER_ID
-declare global {
-  interface Window {
-    INJECTED_USER_ID?: string;
-    Telegram?: {
-      WebApp?: {
-        initDataUnsafe?: {
-          user?: {
-            id?: number;
-          };
-        };
-        ready?: () => void;
-        initData?: string;
-      };
+// Определяем недостающие интерфейсы и функции локально
+interface PremiumStatus {
+  has_premium: boolean;
+  user_id: string;
+  error?: string | null;
+  subscription_end_date?: string | null;
+  analysis_count?: number;
+  post_generation_count?: number;
+}
+
+// Добавляем отсутствующие функции для использования в компоненте
+const getRawPremiumStatus = async (userId: string | null, nocache?: string): Promise<PremiumStatus> => {
+  if (!userId) {
+    throw new Error('ID пользователя не предоставлен');
+  }
+
+  console.log(`[API] Запрос RAW статуса премиума для пользователя ID: ${userId}`);
+  
+  try {
+    // Используем необычный URL, который не должен быть перехватан SPA роутером
+    const response = await fetch(`/raw-api-data/xyz123/premium-data/${userId}?${nocache || ''}`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      },
+      cache: 'no-store'
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ошибка API: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log(`[API] Получен RAW ответ о премиуме:`, data);
+    
+    return data;
+  } catch (error) {
+    console.error('[API] Ошибка при получении RAW статуса премиума:', error);
+    
+    // Возвращаем базовые данные при ошибке
+    return {
+      has_premium: false,
+      user_id: userId,
+      error: error instanceof Error ? error.message : 'Неизвестная ошибка'
     };
   }
+};
+
+const getDirectPremiumStatus = async (userId: string | null): Promise<PremiumStatus> => {
+  if (!userId) {
+    throw new Error('ID пользователя не предоставлен');
+  }
+
+  console.log(`[API] Запрос прямого премиум-статуса для пользователя ID: ${userId}`);
+  
+  try {
+    // Добавляем случайный параметр для предотвращения кэширования
+    const nocache = `_nocache=${new Date().getTime()}`;
+    
+    // Используем URL, который гарантированно не будет перехвачен SPA роутером
+    const response = await fetch(`/raw-api-data/xyz123/premium-data/${userId}?${nocache}`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      },
+      cache: 'no-store'
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ошибка API: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log(`[API] Получен прямой ответ о премиуме:`, data);
+    
+    return data;
+  } catch (error) {
+    console.error('[API] Ошибка при получении прямого премиум-статуса:', error);
+    
+    // Возвращаем базовые данные при ошибке
+    return {
+      has_premium: false,
+      user_id: userId,
+      error: error instanceof Error ? error.message : 'Неизвестная ошибка'
+    };
+  }
+};
+
+const openPremiumStatusPage = (userId: string | null, newWindow: boolean = false): void => {
+  if (!userId) {
+    console.error('[API] Попытка открыть страницу премиум-статуса без userId');
+    return;
+  }
+  
+  const url = `/premium-page/${userId}`;
+  
+  if (newWindow) {
+    window.open(url, '_blank');
+  } else {
+    window.location.href = url;
+  }
+};
+
+const checkPremiumViaBot = (botName: string = 'SmartContentHelperBot'): void => {
+  try {
+    // Формируем URL для открытия чата с ботом и отправки команды
+    const url = `https://t.me/${botName}?start=check_premium`;
+    
+    console.log(`[API] Открываем чат с ботом для проверки премиума: ${url}`);
+    
+    // Если мы внутри Telegram WebApp, используем специальный метод
+    if (window.Telegram?.WebApp?.openTelegramLink) {
+      window.Telegram.WebApp.openTelegramLink(url);
+    } else {
+      // Обычное открытие в новой вкладке
+      window.open(url, '_blank');
+    }
+  } catch (e) {
+    console.error('[API] Ошибка при открытии чата с ботом:', e);
+  }
+};
+
+// Расширение интерфейса Window для поддержки INJECTED_USER_ID
+interface Window {
+  INJECTED_USER_ID?: string;
+  Telegram?: {
+    WebApp?: {
+      initDataUnsafe?: {
+        user?: {
+          id?: number;
+        };
+      };
+      ready?: () => void;
+      initData?: string;
+      openTelegramLink?: (url: string) => void;
+    };
+  };
 }
 
 interface SubscriptionWidgetProps {
@@ -64,6 +194,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 1; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
+  const [showBotCheckButton, setShowBotCheckButton] = useState(false);
   
   // Сохраняем userId в ref для предотвращения нежелательных перерисовок
   const userIdRef = useRef<string | null>(null);
@@ -277,48 +408,70 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     console.log(`Запрос статуса подписки для ID: ${userIdRef.current}`);
     
     try {
-      // Сначала пробуем новый raw-метод, который не должен перехватываться SPA-роутером
+      // Используем каскадную проверку через несколько методов
+      // Сначала пробуем новый метод прямого доступа
       try {
+        console.log('[SubscriptionWidget] Пробуем прямой метод проверки...');
+        const directStatus = await getDirectPremiumStatus(userIdRef.current);
+        
+        if (directStatus) {
+          console.log('[SubscriptionWidget] Получен статус через прямой метод:', directStatus);
+          setStatus({
+            has_subscription: directStatus.has_premium,
+            analysis_count: directStatus.analysis_count || 3,
+            post_generation_count: directStatus.post_generation_count || 1,
+            subscription_end_date: directStatus.subscription_end_date
+          });
+          setError(null);
+          setLoading(false);
+          return;
+        }
+      } catch (directError) {
+        console.error('[SubscriptionWidget] Ошибка прямого метода:', directError);
+      }
+      
+      // Затем пробуем RAW метод
+      try {
+        console.log('[SubscriptionWidget] Пробуем RAW метод проверки...');
         const rawStatus = await getRawPremiumStatus(userIdRef.current, `_nocache=${Date.now()}`);
-        console.log('Получен RAW статус подписки:', rawStatus);
         
         if (rawStatus) {
+          console.log('[SubscriptionWidget] Получен RAW статус подписки:', rawStatus);
           setStatus({
             has_subscription: rawStatus.has_premium,
-            analysis_count: rawStatus.analysis_count || 0,
-            post_generation_count: rawStatus.post_generation_count || 0,
-            subscription_end_date: rawStatus.subscription_end_date || null
+            analysis_count: rawStatus.analysis_count || 3,
+            post_generation_count: rawStatus.post_generation_count || 1,
+            subscription_end_date: rawStatus.subscription_end_date
           });
           setError(null);
           setLoading(false);
           return;
         }
       } catch (rawError) {
-        console.error('Ошибка при получении RAW статуса:', rawError);
-        console.log('Переключение на обычный API...');
+        console.error('[SubscriptionWidget] Ошибка RAW метода:', rawError);
       }
       
-      // Если RAW-метод не сработал, пробуем обычный API
-      const status = await getSubscriptionStatusV2(userIdRef.current);
-      console.log('Получен статус подписки:', status);
-      
-      // Проверяем, не получили ли мы HTML вместо JSON
-      if (typeof status === 'string' && 
-          (status.includes('<!doctype html>') || status.includes('<html>'))) {
-        console.error('Получен HTML вместо JSON (SPA перехват). Открываем отдельную страницу...');
-        // Открываем отдельную страницу со статусом, если получили HTML
-        openPremiumStatusPage(userIdRef.current, true);
-        throw new Error('API вернул HTML вместо JSON (проблема маршрутизации)');
+      // Если предыдущие методы не сработали, используем универсальный метод
+      try {
+        console.log('[SubscriptionWidget] Пробуем универсальный метод проверки...');
+        const status = await getUserSubscriptionStatus(userIdRef.current);
+        console.log('[SubscriptionWidget] Получен статус через универсальный метод:', status);
+        setStatus(status);
+      } catch (apiError) {
+        console.error('[SubscriptionWidget] Ошибка универсального метода:', apiError);
+        throw apiError;
       }
-      
-      setStatus(status);
     } catch (err) {
-      console.error('Ошибка при запросе статуса подписки:', err);
+      console.error('[SubscriptionWidget] Все методы проверки не сработали:', err);
       if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError('Неизвестная ошибка при запросе статуса подписки');
+        setError('Не удалось получить информацию о подписке');
       }
+      
+      // Fallback для пользователя: открыть чат с ботом
+      console.log('[SubscriptionWidget] Предлагаем проверку через бота...');
+      setShowBotCheckButton(true);
     } finally {
       setLoading(false);
     }

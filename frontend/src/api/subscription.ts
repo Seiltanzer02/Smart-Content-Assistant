@@ -31,32 +31,86 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
     throw new Error('ID пользователя не предоставлен');
   }
 
-  console.log(`[API] Запрос статуса подписки для пользователя ID: ${userId}`);
+  console.log(`[API] Основной запрос статуса подписки для пользователя ID: ${userId}`);
   
+  // Пробуем разные способы получения данных о подписке последовательно
   try {
-    // Добавляем случайный параметр для предотвращения кэширования
-    const nocache = new Date().getTime();
+    // Метод 1: Прямой доступ к API с необычным URL
+    try {
+      const directData = await getDirectPremiumStatus(userId);
+      console.log(`[API] Успешно получены данные через прямой API`);
+      
+      return {
+        has_subscription: directData.has_premium,
+        analysis_count: directData.analysis_count || 3,
+        post_generation_count: directData.post_generation_count || 1,
+        subscription_end_date: directData.subscription_end_date
+      };
+    } catch (directError) {
+      console.warn(`[API] Не удалось получить данные через прямой API:`, directError);
+    }
     
-    // Получаем Telegram WebApp initData, если доступен
-    const telegramInitData = window.Telegram?.WebApp?.initData || '';
+    // Метод 2: Новый V2 API
+    try {
+      const subscriptionData = await getSubscriptionStatusV2(userId);
+      console.log(`[API] Успешно получены данные через V2 API`);
+      return subscriptionData;
+    } catch (v2Error) {
+      console.warn(`[API] Не удалось получить данные через V2 API:`, v2Error);
+    }
     
-    const response = await axios.get(`${API_URL}/subscription/status?nocache=${nocache}`, {
-      headers: { 
-        'x-telegram-user-id': userId,
-        // Отправляем initData для безопасной аутентификации
-        'x-telegram-init-data': telegramInitData,
-        // Отключаем кэширование
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
-      }
-    });
+    // Метод 3: Проверка премиума и преобразование в формат SubscriptionStatus
+    try {
+      const premiumData = await getPremiumStatus(userId);
+      console.log(`[API] Успешно получены данные через премиум API`);
+      
+      return {
+        has_subscription: premiumData.has_premium,
+        analysis_count: premiumData.analysis_count || 3,
+        post_generation_count: premiumData.post_generation_count || 1,
+        subscription_end_date: premiumData.subscription_end_date
+      };
+    } catch (premiumError) {
+      console.warn(`[API] Не удалось получить данные через премиум API:`, premiumError);
+    }
     
-    console.log(`[API] Получен ответ о подписке:`, response.data);
-    return response.data;
+    // Метод 4: Старый API (оставляем для обратной совместимости)
+    try {
+      const nocache = new Date().getTime();
+      const response = await axios.get(`${API_URL}/subscription/status?user_id=${userId}&nocache=${nocache}`, {
+        headers: { 
+          'x-telegram-user-id': userId,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'Accept': 'application/json'
+        }
+      });
+      
+      console.log(`[API] Успешно получены данные через старый API:`, response.data);
+      return response.data;
+    } catch (oldApiError) {
+      console.warn(`[API] Не удалось получить данные через старый API:`, oldApiError);
+    }
+    
+    // Если все методы не сработали, возвращаем базовые данные
+    console.warn(`[API] Все методы получения подписки не сработали, возвращаем базовые данные`);
+    return {
+      has_subscription: false,
+      analysis_count: 3,
+      post_generation_count: 1,
+      error: 'Все методы получения статуса подписки не сработали'
+    };
   } catch (error) {
-    console.error('Ошибка при получении статуса подписки:', error);
-    throw error;
+    console.error('[API] Критическая ошибка при получении статуса подписки:', error);
+    
+    // Возвращаем базовые данные в случае полного сбоя
+    return {
+      has_subscription: false,
+      analysis_count: 3,
+      post_generation_count: 1,
+      error: error instanceof Error ? error.message : 'Неизвестная ошибка'
+    };
   }
 };
 
@@ -290,5 +344,55 @@ export const checkPremiumViaBot = (botName: string = 'SmartContentHelperBot'): v
     }
   } catch (e) {
     console.error('[API] Ошибка при открытии чата с ботом:', e);
+  }
+};
+
+/**
+ * Используем гарантированный метод для получения статуса премиума с необычным URL
+ * Путь специально сделан необычным, чтобы не был перехвачен SPA роутером
+ * 
+ * @param userId ID пользователя Telegram
+ * @returns Promise с данными о премиум-статусе
+ */
+export const getDirectPremiumStatus = async (userId: string | null): Promise<PremiumStatus> => {
+  if (!userId) {
+    throw new Error('ID пользователя не предоставлен');
+  }
+
+  console.log(`[API] Запрос прямого премиум-статуса для пользователя ID: ${userId}`);
+  
+  try {
+    // Добавляем случайный параметр для предотвращения кэширования
+    const nocache = `_nocache=${new Date().getTime()}`;
+    
+    // Используем URL, который гарантированно не будет перехвачен SPA роутером
+    const response = await fetch(`/raw-api-data/xyz123/premium-data/${userId}?${nocache}`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      },
+      cache: 'no-store'
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ошибка API: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log(`[API] Получен прямой ответ о премиуме:`, data);
+    
+    return data;
+  } catch (error) {
+    console.error('[API] Ошибка при получении прямого премиум-статуса:', error);
+    
+    // Возвращаем базовые данные при ошибке
+    return {
+      has_premium: false,
+      user_id: userId,
+      error: error instanceof Error ? error.message : 'Неизвестная ошибка'
+    };
   }
 }; 
