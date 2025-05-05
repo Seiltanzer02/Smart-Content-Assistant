@@ -3877,3 +3877,22 @@ async def raw_premium_data(user_id: str, request: Request):
     """
     return await direct_premium_check(request, user_id)
 
+# Добавляем эндпоинт для проверки статуса подписки (для совместимости с клиентским кодом)
+@app.get("/subscription/status")
+async def subscription_status(request: Request, user_id: Optional[str] = None):
+    """
+    Проверка статуса подписки.
+    Поддерживается для совместимости с клиентским кодом.
+    Дублирует функциональность direct_premium_check.
+    """
+    logger.info(f"Запрос /subscription/status для user_id: {user_id}")
+    result = await direct_premium_check(request, user_id)
+    
+    # Преобразуем формат ответа для совместимости с интерфейсом клиента
+    return {
+        "has_subscription": result.get("has_premium", False),
+        "analysis_count": result.get("analysis_count", 3),
+        "post_generation_count": result.get("post_generation_count", 1),
+        "subscription_end_date": result.get("subscription_end_date")
+    }
+
