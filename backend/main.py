@@ -2896,7 +2896,6 @@ async def save_suggested_idea(idea_data: Dict[str, Any], request: Request):
 async def check_db_tables():
     """Проверка и создание необходимых таблиц в базе данных."""
     try:
-        # Получаем URL базы данных
         db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL")
         if not db_url:
             logger.error("Отсутствуют SUPABASE_URL и DATABASE_URL в переменных окружения при проверке таблиц БД")
@@ -2909,8 +2908,8 @@ async def check_db_tables():
             
         # Для проверки просто запрашиваем одну строку из таблицы, чтобы убедиться, что соединение работает
         try:
-        result = supabase.table("suggested_ideas").select("id").limit(1).execute()
-        logger.info("Таблица suggested_ideas существует и доступна.")
+            result = supabase.table("suggested_ideas").select("id").limit(1).execute()
+            logger.info("Таблица suggested_ideas существует и доступна.")
         except Exception as e:
             logger.error(f"Ошибка при проверке соединения с Supabase: {e}")
             return False
