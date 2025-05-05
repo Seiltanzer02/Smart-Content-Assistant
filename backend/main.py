@@ -381,7 +381,7 @@ async def telegram_webhook(request: Request):
     """Вебхук для обработки обновлений от бота Telegram."""
     try:
         # Получаем данные запроса
-        data = await request.json()
+    data = await request.json()
         logger.info(f"Получен вебхук от Telegram: {data}")
         
         # Проверяем, есть ли сообщение
@@ -480,7 +480,7 @@ async def telegram_webhook(request: Request):
                             "Content-Type": "application/json"
                         }
                         
-                        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient() as client:
                             response = await client.get(
                                 f"{supabase_url}/rest/v1/user_subscription",
                                 headers=headers,
@@ -489,7 +489,7 @@ async def telegram_webhook(request: Request):
                                     "user_id": f"eq.{user_id}",
                                     "is_active": "eq.true"
                                 }
-                            )
+            )
                             
                             if response.status_code == 200:
                                 subscriptions = response.json()
@@ -531,7 +531,7 @@ async def telegram_webhook(request: Request):
                                 # Формируем текст ответа
                                 if has_premium:
                                     reply_text = f"✅ У вас активирован ПРЕМИУМ доступ!\nДействует до: {end_date_str}\nОбновите страницу приложения, чтобы увидеть изменения."
-                                else:
+            else:
                                     reply_text = "❌ У вас нет активной ПРЕМИУМ подписки.\nДля получения премиум-доступа оформите подписку в приложении."
                                 
                                 # Отправляем ответ пользователю
@@ -547,14 +547,14 @@ async def telegram_webhook(request: Request):
                         await send_telegram_message(user_id, "Ошибка подключения к базе данных. Пожалуйста, попробуйте позже.")
                         return {"ok": False, "error": str(httpx_error)}
             
-            except Exception as e:
+        except Exception as e:
                 logger.error(f"Ошибка при проверке премиум-статуса: {e}")
                 await send_telegram_message(user_id, f"Произошла ошибка при проверке статуса подписки. Пожалуйста, попробуйте позже.")
                 return {"ok": False, "error": str(e)}
         
         # ... остальная обработка вебхуков ...
         
-        return {"ok": True}
+    return {"ok": True}
     except Exception as e:
         logger.error(f"Ошибка при обработке вебхука Telegram: {e}")
         return {"ok": False, "error": str(e)}
@@ -2909,8 +2909,8 @@ async def check_db_tables():
             
         # Для проверки просто запрашиваем одну строку из таблицы, чтобы убедиться, что соединение работает
         try:
-            result = supabase.table("suggested_ideas").select("id").limit(1).execute()
-            logger.info("Таблица suggested_ideas существует и доступна.")
+        result = supabase.table("suggested_ideas").select("id").limit(1).execute()
+        logger.info("Таблица suggested_ideas существует и доступна.")
         except Exception as e:
             logger.error(f"Ошибка при проверке соединения с Supabase: {e}")
             return False
@@ -3916,4 +3916,128 @@ async def subscription_status(request: Request, user_id: Optional[str] = None):
             "Content-Type": "application/json"
         }
     )
+
+# Добавляем новый эндпоинт для прямого доступа к базе данных для проверки премиум, как это делает бот
+@app.get("/bot-style-premium-check/{user_id}", status_code=200)
+async def bot_style_premium_check(user_id: str, request: Request):
+    """
+    Прямая проверка премиум-статуса через базу данных, используя тот же метод, который использует бот.
+    Этот эндпоинт игнорирует кэширование и промежуточные слои, работая напрямую с базой данных.
+    """
+    try:
+        logger.info(f"[BOT-STYLE] Запрос премиум-статуса для пользователя: {user_id}")
+        
+        # Проверяем, что user_id предоставлен и преобразуем его в int
+        if not user_id:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "ID пользователя не указан"}
+            )
+        
+        try:
+            user_id_int = int(user_id)
+        except ValueError:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "ID пользователя должен быть числом"}
+            )
+        
+        # Проверяем, что у нас есть доступ к базе данных
+        db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("RENDER_DATABASE_URL")
+        if not db_url:
+            logger.error("[BOT-STYLE] Отсутствуют SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL")
+            return JSONResponse(
+                status_code=500,
+                content={"success": False, "error": "Отсутствуют настройки подключения к базе данных"}
+            )
+            
+        # Нормализуем URL базы данных
+        db_url = normalize_db_url(db_url)
+        
+        # Подключаемся напрямую к базе данных (так же, как это делает бот)
+        conn = await asyncpg.connect(db_url)
+        try:
+            # Проверяем наличие активной подписки
+            query = """
+            SELECT
+                id,
+                user_id,
+                start_date,
+                end_date,
+                is_active,
+                payment_id,
+                created_at,
+                updated_at
+            FROM user_subscription 
+            WHERE user_id = $1 
+              AND is_active = TRUE 
+              AND end_date > NOW()
+            ORDER BY end_date DESC
+            LIMIT 1
+            """
+            
+            subscription = await conn.fetchrow(query, user_id_int)
+            
+            # Проверяем результат
+            if subscription:
+                # Подписка существует и активна
+                has_premium = True
+                subscription_end_date = subscription["end_date"].strftime('%Y-%m-%d %H:%M:%S') if subscription["end_date"] else None
+                
+                # Форматируем subscription в словарь
+                subscription_data = {
+                    "id": subscription["id"],
+                    "user_id": subscription["user_id"],
+                    "start_date": subscription["start_date"].strftime('%Y-%m-%d %H:%M:%S') if subscription["start_date"] else None,
+                    "end_date": subscription_end_date,
+                    "is_active": subscription["is_active"],
+                    "payment_id": subscription["payment_id"],
+                    "created_at": subscription["created_at"].strftime('%Y-%m-%d %H:%M:%S') if subscription["created_at"] else None,
+                    "updated_at": subscription["updated_at"].strftime('%Y-%m-%d %H:%M:%S') if subscription["updated_at"] else None
+                }
+            else:
+                # Подписка не существует или не активна
+                has_premium = False
+                subscription_data = None
+                subscription_end_date = None
+            
+            # Получаем лимиты в зависимости от статуса подписки
+            analysis_count = 9999 if has_premium else 3
+            post_generation_count = 9999 if has_premium else 1
+            
+            # Формируем ответ
+            response = {
+                "success": True,
+                "user_id": user_id_int,
+                "has_premium": has_premium,
+                "analysis_count": analysis_count,
+                "post_generation_count": post_generation_count,
+                "subscription": subscription_data
+            }
+            
+            # Добавляем дату окончания подписки если есть
+            if subscription_end_date:
+                response["subscription_end_date"] = subscription_end_date
+            
+            # Возвращаем ответ с заголовками CORS
+            return JSONResponse(
+                content=response,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                    "Content-Type": "application/json"
+                }
+            )
+            
+        finally:
+            # Закрываем соединение с базой данных
+            await conn.close()
+        
+    except Exception as e:
+        logger.error(f"[BOT-STYLE] Ошибка при проверке премиум-статуса: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
 

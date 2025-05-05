@@ -5,10 +5,6 @@ import {
   SubscriptionStatus, 
   getSubscriptionStatusV2, 
   getPremiumStatus, 
-  getRawPremiumStatus,
-  openPremiumStatusPage,
-  getDirectPremiumStatus,
-  checkPremiumViaBot,
   generateInvoice
 } from './subscription';
 
@@ -23,16 +19,19 @@ interface PremiumStatus {
 }
 
 // Добавляем отсутствующие функции для использования в компоненте
-const getRawPremiumStatus = async (userId: string | null, nocache?: string): Promise<PremiumStatus> => {
+const getBotStylePremiumStatus = async (userId: string | null): Promise<PremiumStatus> => {
   if (!userId) {
     throw new Error('ID пользователя не предоставлен');
   }
 
-  console.log(`[API] Запрос RAW статуса премиума для пользователя ID: ${userId}`);
+  console.log(`[API] Запрос премиум-статуса через бот-стиль API для пользователя ID: ${userId}`);
   
   try {
-    // Используем необычный URL, который не должен быть перехватан SPA роутером
-    const response = await fetch(`/raw-api-data/xyz123/premium-data/${userId}?${nocache || ''}`, {
+    // Добавляем случайный параметр для предотвращения кэширования
+    const nocache = `_nocache=${new Date().getTime()}`;
+    
+    // Используем прямой URL, который работает как в боте
+    const response = await fetch(`/bot-style-premium-check/${userId}?${nocache}`, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
@@ -48,11 +47,19 @@ const getRawPremiumStatus = async (userId: string | null, nocache?: string): Pro
     }
     
     const data = await response.json();
-    console.log(`[API] Получен RAW ответ о премиуме:`, data);
+    console.log(`[API] Получен ответ из бот-стиль API:`, data);
     
-    return data;
+    // Приводим ответ к формату PremiumStatus
+    return {
+      has_premium: data.has_premium,
+      user_id: userId,
+      error: data.error || null,
+      subscription_end_date: data.subscription_end_date || null,
+      analysis_count: data.analysis_count,
+      post_generation_count: data.post_generation_count
+    };
   } catch (error) {
-    console.error('[API] Ошибка при получении RAW статуса премиума:', error);
+    console.error('[API] Ошибка при получении премиум-статуса через бот-стиль API:', error);
     
     // Возвращаем базовые данные при ошибке
     return {
@@ -75,7 +82,7 @@ const getDirectPremiumStatus = async (userId: string | null): Promise<PremiumSta
     const nocache = `_nocache=${new Date().getTime()}`;
     
     // Используем URL, который гарантированно не будет перехвачен SPA роутером
-    const response = await fetch(`/raw-api-data/xyz123/premium-data/${userId}?${nocache}`, {
+    const response = await fetch(`/direct_premium_check?user_id=${userId}&${nocache}`, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
@@ -106,21 +113,6 @@ const getDirectPremiumStatus = async (userId: string | null): Promise<PremiumSta
   }
 };
 
-const openPremiumStatusPage = (userId: string | null, newWindow: boolean = false): void => {
-  if (!userId) {
-    console.error('[API] Попытка открыть страницу премиум-статуса без userId');
-    return;
-  }
-  
-  const url = `/premium-page/${userId}`;
-  
-  if (newWindow) {
-    window.open(url, '_blank');
-  } else {
-    window.location.href = url;
-  }
-};
-
 const checkPremiumViaBot = (botName: string = 'SmartContentHelperBot'): void => {
   try {
     // Формируем URL для открытия чата с ботом и отправки команды
@@ -140,21 +132,23 @@ const checkPremiumViaBot = (botName: string = 'SmartContentHelperBot'): void => 
   }
 };
 
-// Расширение интерфейса Window для поддержки INJECTED_USER_ID
-interface Window {
-  INJECTED_USER_ID?: string;
-  Telegram?: {
-    WebApp?: {
-      initDataUnsafe?: {
-        user?: {
-          id?: number;
+// Расширение интерфейса Window для поддержки Telegram WebApp
+declare global {
+  interface Window {
+    Telegram?: {
+      WebApp?: {
+        initDataUnsafe?: {
+          user?: {
+            id?: number;
+          };
         };
+        ready?: () => void;
+        initData?: string;
+        openTelegramLink?: (url: string) => void;
       };
-      ready?: () => void;
-      initData?: string;
-      openTelegramLink?: (url: string) => void;
     };
-  };
+    INJECTED_USER_ID?: string;
+  }
 }
 
 interface SubscriptionWidgetProps {
@@ -409,7 +403,28 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     
     try {
       // Используем каскадную проверку через несколько методов
-      // Сначала пробуем новый метод прямого доступа
+      // НОВЫЙ ПРИОРИТЕТНЫЙ МЕТОД: пробуем бот-стиль метод для прямого доступа к БД
+      try {
+        console.log('[SubscriptionWidget] Пробуем бот-стиль метод проверки...');
+        const botStyleStatus = await getBotStylePremiumStatus(userIdRef.current);
+        
+        if (botStyleStatus) {
+          console.log('[SubscriptionWidget] Получен статус через бот-стиль метод:', botStyleStatus);
+          setStatus({
+            has_subscription: botStyleStatus.has_premium,
+            analysis_count: botStyleStatus.analysis_count || 3,
+            post_generation_count: botStyleStatus.post_generation_count || 1,
+            subscription_end_date: botStyleStatus.subscription_end_date
+          });
+          setError(null);
+          setLoading(false);
+          return;
+        }
+      } catch (botStyleError) {
+        console.error('[SubscriptionWidget] Ошибка бот-стиль метода:', botStyleError);
+      }
+      
+      // Затем пробуем прямой метод
       try {
         console.log('[SubscriptionWidget] Пробуем прямой метод проверки...');
         const directStatus = await getDirectPremiumStatus(userIdRef.current);

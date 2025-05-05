@@ -395,4 +395,60 @@ export const getDirectPremiumStatus = async (userId: string | null): Promise<Pre
       error: error instanceof Error ? error.message : 'Неизвестная ошибка'
     };
   }
+};
+
+/**
+ * Проверяет статус премиум-подписки напрямую через бот-стиль API, который работает так же, как и бот
+ * @param userId ID пользователя Telegram
+ * @returns Promise с данными о премиум-статусе в формате, совместимом с форматом ответа из бота
+ */
+export const getBotStylePremiumStatus = async (userId: string | null): Promise<PremiumStatus> => {
+  if (!userId) {
+    throw new Error('ID пользователя не предоставлен');
+  }
+
+  console.log(`[API] Запрос премиум-статуса через бот-стиль API для пользователя ID: ${userId}`);
+  
+  try {
+    // Добавляем случайный параметр для предотвращения кэширования
+    const nocache = `_nocache=${new Date().getTime()}`;
+    
+    // Используем прямой URL, который работает как в боте
+    const response = await fetch(`/bot-style-premium-check/${userId}?${nocache}`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      },
+      cache: 'no-store'
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ошибка API: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log(`[API] Получен ответ из бот-стиль API:`, data);
+    
+    // Приводим ответ к формату PremiumStatus
+    return {
+      has_premium: data.has_premium,
+      user_id: userId,
+      error: data.error || null,
+      subscription_end_date: data.subscription_end_date || null,
+      analysis_count: data.analysis_count,
+      post_generation_count: data.post_generation_count
+    };
+  } catch (error) {
+    console.error('[API] Ошибка при получении премиум-статуса через бот-стиль API:', error);
+    
+    // Возвращаем базовые данные при ошибке
+    return {
+      has_premium: false,
+      user_id: userId,
+      error: error instanceof Error ? error.message : 'Неизвестная ошибка'
+    };
+  }
 }; 
