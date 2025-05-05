@@ -2937,7 +2937,7 @@ async def check_db_tables():
         if not supabase:
             logger.error("Клиент Supabase не инициализирован для проверки таблиц")
             return False
-        
+            
         # Для проверки просто запрашиваем одну строку из таблицы, чтобы убедиться, что соединение работает
         try:
             result = supabase.table("suggested_ideas").select("id").limit(1).execute()
@@ -2982,10 +2982,9 @@ async def check_db_tables():
                         logger.warning(f"Ошибка при добавлении столбца updated_at: {response.status_code} - {response.text}")
             except Exception as column_e:
                 logger.warning(f"Ошибка при явном добавлении столбца updated_at: {str(column_e)}")
-        
         except Exception as e:
             logger.warning(f"Ошибка при добавлении недостающих столбцов: {str(e)}")
-        
+            
         return True
     except Exception as e:
         logger.error(f"Ошибка при проверке таблиц базы данных: {e}")
