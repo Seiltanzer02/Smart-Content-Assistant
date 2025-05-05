@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/SubscriptionWidget.css';
-import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice, checkPremiumViaBot, forcePremiumStatus, hasLocalPremium } from '../api/subscription';
+import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice, checkPremiumViaBot } from '../api/subscription';
 
 interface SubscriptionWidgetProps {
   userId: string | null;
@@ -40,7 +40,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const SUBSCRIPTION_PRICE = 1; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [validatedUserId, setValidatedUserId] = useState<string | null>(null);
-  const [hasLocalPremiumStatus, setHasLocalPremiumStatus] = useState<boolean>(false);
   
   // Проверка и валидация ID пользователя
   useEffect(() => {
@@ -119,15 +118,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       }
     };
   }, [userId, validatedUserId]); // Добавляем validatedUserId в зависимости, чтобы остановить поллинг, если ID получен
-  
-  // Проверяем локальный премиум-статус при каждом изменении userId
-  useEffect(() => {
-    if (validatedUserId) {
-      const localPremium = hasLocalPremium(validatedUserId);
-      setHasLocalPremiumStatus(localPremium);
-      console.log(`[SubscriptionWidget] Локальный премиум-статус для ${validatedUserId}: ${localPremium}`);
-    }
-  }, [validatedUserId]);
   
   // Инициализация и настройка Telegram WebApp
   useEffect(() => {
@@ -250,66 +240,57 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     }
     
     setLoading(true);
+    
     try {
-      console.log(`[SubscriptionWidget] Запрос статуса подписки для ID: ${effectiveUserId}`);
-      // Используем функцию из API вместо прямого запроса
-      const subscriptionData = await getUserSubscriptionStatus(effectiveUserId);
-      console.log('[SubscriptionWidget] Получен статус подписки:', subscriptionData);
-      setStatus(subscriptionData);
+      const result = await getUserSubscriptionStatus(effectiveUserId);
+      setStatus(result);
+      setError(null);
       
-      // Если userId найден альтернативным способом, сохраняем его как validatedUserId
-      if (effectiveUserId !== validatedUserId) {
-        setValidatedUserId(effectiveUserId);
-      }
-      
-      // Показываем/скрываем главную кнопку в зависимости от статуса подписки
+      // Обновляем видимость MainButton в зависимости от статуса подписки
       if (window.Telegram?.WebApp?.MainButton) {
-        if (!subscriptionData.has_subscription && !isActive) {
-          window.Telegram.WebApp.MainButton.show();
-        } else {
+        if (result.has_subscription) {
           window.Telegram.WebApp.MainButton.hide();
+        } else if (!isActive) {
+          window.Telegram.WebApp.MainButton.show();
         }
       }
       
-      return subscriptionData.has_subscription;
-    } catch (err: any) {
-      console.error('[SubscriptionWidget] Ошибка при получении статуса подписки:', err);
-      setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке статуса подписки');
-      return false;
-    } finally {
       setLoading(false);
+      return true;
+    } catch (err) {
+      console.error('Ошибка при получении статуса подписки:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Неизвестная ошибка';
+      
+      setError(`Не удалось получить статус подписки: ${errorMessage}`);
+      setLoading(false);
+      return false;
     }
   };
   
-  // Функция для запуска платежа через MainButton
   const handleSubscribeViaMainButton = () => {
-    console.log('Нажата главная кнопка в Telegram WebApp');
-    
-    // Показываем подтверждение через Telegram WebApp
-    if (window.Telegram?.WebApp?.showConfirm) {
-      window.Telegram.WebApp.showConfirm(
-        'Вы хотите оформить подписку за ' + SUBSCRIPTION_PRICE + ' Stars?',
-        (confirmed) => {
-          if (confirmed) {
-            handleSubscribe();
-          }
-        }
-      );
-    } else {
-      // Если метод showConfirm недоступен, просто продолжаем
-      handleSubscribe();
+    try {
+      // Получаем ID пользователя из Telegram WebApp
+      const userId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
+      
+      if (!userId) {
+        setError('Не удалось получить ID пользователя');
+        return;
+      }
+      
+      // Генерируем инвойс для оплаты
+      handleInvoiceGeneration(Number(userId));
+    } catch (error) {
+      console.error('Ошибка при подписке через главную кнопку:', error);
+      setError(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
     }
   };
   
   const handleInvoiceGeneration = async (userId: number) => {
+    setIsSubscribing(true);
+    setError(null);
+    
     try {
-      if (!validatedUserId) {
-        setError('Не удалось определить ID пользователя');
-        return;
-      }
-      
-      setIsSubscribing(true);
-      // Получаем invoice_link с backend
+      // Используем Fetch API для генерации инвойса через Stars
       const response = await fetch('/generate-stars-invoice-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -373,17 +354,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     }
   };
   
-  // Добавляем функцию для форсирования премиум-статуса локально
-  const handleForceLocalPremium = () => {
-    if (validatedUserId) {
-      forcePremiumStatus(validatedUserId, true, 30);
-      setHasLocalPremiumStatus(true);
-      alert('Премиум-статус активирован локально на 30 дней!');
-    } else {
-      alert('Ошибка: не удалось определить ID пользователя');
-    }
-  };
-  
   // Добавляем функцию для проверки премиума через бота
   const handleCheckPremiumViaBot = () => {
     checkPremiumViaBot();
@@ -428,20 +398,11 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
             >
               Повторить проверку
             </button>
-            
-            {validatedUserId && (
-              <button 
-                className="alternative-action-button" 
-                onClick={handleForceLocalPremium}
-              >
-                Активировать премиум локально
-              </button>
-            )}
           </div>
         </div>
       ) : (
         <div className="subscription-details">
-          {status?.has_subscription || hasLocalPremiumStatus ? (
+          {status?.has_subscription ? (
             <div className="premium-status">
               <p className="status-label">Премиум</p>
               {status?.subscription_end_date && (
@@ -454,11 +415,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
                 <br />
                 Доступно генераций постов: {status?.post_generation_count || 'Неограниченно'}
               </p>
-              
-              {/* Добавляем примечание о статусе */}
-              {!status?.has_subscription && hasLocalPremiumStatus && (
-                <p className="note">Примечание: премиум активирован локально</p>
-              )}
             </div>
           ) : (
             <div className="free-status">
@@ -486,15 +442,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
                 >
                   Проверить через бота
                 </button>
-                
-                {validatedUserId && (
-                  <button 
-                    className="alternative-action-button" 
-                    onClick={handleForceLocalPremium}
-                  >
-                    Активировать премиум (тест)
-                  </button>
-                )}
               </div>
             </div>
           )}
