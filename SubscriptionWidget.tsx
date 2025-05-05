@@ -100,20 +100,6 @@ const getDirectPremiumStatus = async (userId: string | null): Promise<PremiumSta
     const data = await response.json();
     console.log(`[API] Получен прямой ответ о премиуме:`, data);
     
-    // Если подписка не активна, очищаем все данные о премиуме из localStorage
-    if (!data.has_premium) {
-      console.log('[API] Подписка неактивна, очищаем localStorage от премиум-данных');
-      localStorage.removeItem('premium_status');
-      localStorage.removeItem('premium_expiry');
-      localStorage.removeItem('subscription_data');
-      // Очищаем все ключи, содержащие "premium" или "subscription"
-      Object.keys(localStorage).forEach(key => {
-        if (key.includes('premium') || key.includes('subscription')) {
-          localStorage.removeItem(key);
-        }
-      });
-    }
-    
     return data;
   } catch (error) {
     console.error('[API] Ошибка при получении прямого премиум-статуса:', error);
@@ -358,20 +344,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
         const subscriptionData = await getUserSubscriptionStatus(userIdRef.current);
         
         console.log(`[SubscriptionWidget] Получен статус подписки:`, subscriptionData);
-        
-        // Если подписка не активна, очищаем все данные о премиуме из localStorage
-        if (!subscriptionData.has_subscription) {
-          console.log('[SubscriptionWidget] Подписка неактивна, очищаем localStorage от премиум-данных');
-          localStorage.removeItem('premium_status');
-          localStorage.removeItem('premium_expiry');
-          localStorage.removeItem('subscription_data');
-          // Очищаем все ключи, содержащие "premium" или "subscription"
-          Object.keys(localStorage).forEach(key => {
-            if (key.includes('premium') || key.includes('subscription')) {
-              localStorage.removeItem(key);
-            }
-          });
-        }
         
         setStatus(subscriptionData);
         setLoading(false);
