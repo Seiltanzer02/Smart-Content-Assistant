@@ -381,7 +381,7 @@ async def telegram_webhook(request: Request):
     """Вебхук для обработки обновлений от бота Telegram."""
     try:
         # Получаем данные запроса
-    data = await request.json()
+        data = await request.json()
         logger.info(f"Получен вебхук от Telegram: {data}")
         
         # Проверяем, есть ли сообщение
@@ -480,7 +480,7 @@ async def telegram_webhook(request: Request):
                             "Content-Type": "application/json"
                         }
                         
-        async with httpx.AsyncClient() as client:
+                        async with httpx.AsyncClient() as client:
                             response = await client.get(
                                 f"{supabase_url}/rest/v1/user_subscription",
                                 headers=headers,
@@ -489,7 +489,7 @@ async def telegram_webhook(request: Request):
                                     "user_id": f"eq.{user_id}",
                                     "is_active": "eq.true"
                                 }
-            )
+                            )
                             
                             if response.status_code == 200:
                                 subscriptions = response.json()
@@ -531,7 +531,7 @@ async def telegram_webhook(request: Request):
                                 # Формируем текст ответа
                                 if has_premium:
                                     reply_text = f"✅ У вас активирован ПРЕМИУМ доступ!\nДействует до: {end_date_str}\nОбновите страницу приложения, чтобы увидеть изменения."
-            else:
+                                else:
                                     reply_text = "❌ У вас нет активной ПРЕМИУМ подписки.\nДля получения премиум-доступа оформите подписку в приложении."
                                 
                                 # Отправляем ответ пользователю
@@ -547,14 +547,14 @@ async def telegram_webhook(request: Request):
                         await send_telegram_message(user_id, "Ошибка подключения к базе данных. Пожалуйста, попробуйте позже.")
                         return {"ok": False, "error": str(httpx_error)}
             
-        except Exception as e:
+            except Exception as e:
                 logger.error(f"Ошибка при проверке премиум-статуса: {e}")
                 await send_telegram_message(user_id, f"Произошла ошибка при проверке статуса подписки. Пожалуйста, попробуйте позже.")
                 return {"ok": False, "error": str(e)}
         
         # ... остальная обработка вебхуков ...
         
-    return {"ok": True}
+        return {"ok": True}
     except Exception as e:
         logger.error(f"Ошибка при обработке вебхука Telegram: {e}")
         return {"ok": False, "error": str(e)}
