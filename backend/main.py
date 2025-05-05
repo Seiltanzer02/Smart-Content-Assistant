@@ -2909,8 +2909,8 @@ async def check_db_tables():
             
         # Для проверки просто запрашиваем одну строку из таблицы, чтобы убедиться, что соединение работает
         try:
-        result = supabase.table("suggested_ideas").select("id").limit(1).execute()
-        logger.info("Таблица suggested_ideas существует и доступна.")
+            result = supabase.table("suggested_ideas").select("id").limit(1).execute()
+            logger.info("Таблица suggested_ideas существует и доступна.")
         except Exception as e:
             logger.error(f"Ошибка при проверке соединения с Supabase: {e}")
             return False
