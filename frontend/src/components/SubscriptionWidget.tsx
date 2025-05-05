@@ -325,6 +325,12 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       setStatus(result);
       setError(null);
       setLoading(false);
+      // --- ДОБАВЛЕНО: если подписка неактивна, очищаем localStorage и локальный статус ---
+      if (!result.has_subscription) {
+        localStorage.removeItem(PREMIUM_STATUS_KEY);
+        setLocalPremiumStatus(false);
+        setLocalEndDate(null);
+      }
       return true;
     } catch (err) {
       console.error('Ошибка при получении статуса подписки:', err);
