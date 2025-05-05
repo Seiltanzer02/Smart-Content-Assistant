@@ -255,7 +255,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   }, [validatedUserId]);
   
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
-    // Дополнительная проверка и получение userId из всех доступных источников
     let effectiveUserId = validatedUserId;
     
     if (!effectiveUserId) {
@@ -295,35 +294,33 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     setLoading(true);
     
     try {
-      // Проверяем, есть ли локальные данные о премиум-статусе
-      if (localPremiumStatus === true) {
-        console.log('[SubscriptionWidget] Используем локальный премиум-статус');
-        const result: SubscriptionStatus = {
-          has_subscription: true,
-          analysis_count: 9999,
-          post_generation_count: 9999,
-          subscription_end_date: localEndDate || undefined
-        };
-        setStatus(result);
-        setError(null);
-        setLoading(false);
-        return true;
-      }
-      
-      const result = await getUserSubscriptionStatus(effectiveUserId);
-      console.log('[SubscriptionWidget] Получен статус подписки:', result);
-      setStatus(result);
-      setError(null);
-      
-      // Обновляем видимость MainButton в зависимости от статуса подписки
-      if (window.Telegram?.WebApp?.MainButton) {
-        if (result.has_subscription) {
-          window.Telegram.WebApp.MainButton.hide();
-        } else if (!isActive) {
-          window.Telegram.WebApp.MainButton.show();
+      let result: SubscriptionStatus | null = null;
+      try {
+        result = await getUserSubscriptionStatus(effectiveUserId);
+      } catch (apiError) {
+        // fallback: пробуем взять из localStorage
+        const savedData = localStorage.getItem('premium_status_data');
+        if (savedData) {
+          const parsed = JSON.parse(savedData);
+          if (parsed.userId === effectiveUserId && parsed.hasPremium) {
+            result = {
+              has_subscription: true,
+              analysis_count: 9999,
+              post_generation_count: 9999,
+              subscription_end_date: parsed.endDate || undefined
+            };
+          }
         }
       }
-      
+      if (!result) {
+        result = {
+          has_subscription: false,
+          analysis_count: 3,
+          post_generation_count: 1
+        };
+      }
+      setStatus(result);
+      setError(null);
       setLoading(false);
       return true;
     } catch (err) {
