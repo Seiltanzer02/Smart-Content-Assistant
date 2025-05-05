@@ -55,6 +55,8 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   // Состояние для отображения локально сохраненного статуса подписки
   const [localPremiumStatus, setLocalPremiumStatus] = useState<boolean | null>(null);
   const [localEndDate, setLocalEndDate] = useState<string | null>(null);
+  // 1. ДОБАВЛЯЮ состояние initialLoading для первой загрузки
+  const [initialLoading, setInitialLoading] = useState(true);
   
   // Проверка и валидация ID пользователя
   useEffect(() => {
@@ -224,11 +226,12 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     checkLocalStorage();
   }, [validatedUserId, checkedViaBot]);
   
+  // Модифицирую useEffect для первой загрузки
   useEffect(() => {
     if (userId) {
-      fetchSubscriptionStatus();
+      setInitialLoading(true);
+      fetchSubscriptionStatus().finally(() => setInitialLoading(false));
     }
-    
     // Добавляем логирование статуса Telegram WebApp при загрузке компонента
     console.log('SubscriptionWidget загружен, проверка Telegram.WebApp:');
     console.log('window.Telegram существует:', !!window.Telegram);
@@ -238,22 +241,15 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     }
   }, [userId]);
   
-  // Периодическое обновление статуса подписки
+  // Модифицирую периодическое обновление: не трогаем initialLoading
   useEffect(() => {
     let intervalId: number | null = null;
-    
     if (validatedUserId) {
-      // Сразу запрашиваем статус
       fetchSubscriptionStatus();
-      
-      // Устанавливаем интервал обновления - каждые 15 секунд
       intervalId = window.setInterval(() => {
-        console.log('Регулярное обновление статуса подписки...');
         fetchSubscriptionStatus();
       }, 15000);
     }
-    
-    // Очистка при размонтировании
     return () => {
       if (intervalId !== null) {
         window.clearInterval(intervalId);
@@ -539,37 +535,41 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     };
   }, [checkedViaBot, validatedUserId]);
   
-  if (loading) {
+  // --- UI ---
+  if (initialLoading) {
     return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
   }
-  
   if (error) {
     return (
       <div className="subscription-widget error">
         <p>Ошибка: {error}</p>
-        <button onClick={fetchSubscriptionStatus}>Повторить</button>
+        <button onClick={() => { setInitialLoading(true); fetchSubscriptionStatus().finally(() => setInitialLoading(false)); }}>Повторить</button>
       </div>
     );
   }
-  
-  // Основной индикатор статуса подписки — только "Прямая проверка"
+  // --- Новый красивый UI ---
+  const isPremium = localPremiumStatus === true;
   return (
-    <div className="subscription-widget">
-      <h3>Статус подписки</h3>
-      <div className="direct-check-section main-status">
-        <h4>Статус подписки (Прямая проверка)</h4>
-        <p className="direct-check-status">
-          Прямая проверка: Статус {localPremiumStatus === true ? 'Premium' : 'Free'}
-        </p>
-        <p className="user-id">User ID: {validatedUserId}</p>
-        {localPremiumStatus === true && localEndDate && (
-          <p className="end-date">
-            Действует до: {formatDate(localEndDate)}
-          </p>
+    <div className={`subscription-widget modern ${isPremium ? 'premium' : 'free'}`}> {/* добавляем класс для стилей */}
+      <div className="status-header">
+        {isPremium ? (
+          <>
+            <span className="status-icon" role="img" aria-label="Premium">🌟</span>
+            <span className="status-title">Premium-подписка активна</span>
+          </>
+        ) : (
+          <>
+            <span className="status-icon" role="img" aria-label="Free">⭐</span>
+            <span className="status-title">Базовый доступ</span>
+          </>
         )}
       </div>
-      {/* Кнопка покупки — только если нет премиума */}
-      {localPremiumStatus !== true && (
+      {isPremium && localEndDate && (
+        <div className="premium-info">
+          <span>Действует до: <b>{formatDate(localEndDate)}</b></span>
+        </div>
+      )}
+      {!isPremium && (
         <div className="buy-section">
           <button 
             className="subscribe-button"
