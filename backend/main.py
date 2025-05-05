@@ -12,8 +12,8 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 
 # FastAPI компоненты
-from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends, Form
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 # Telethon
@@ -3622,12 +3622,20 @@ if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
 
 # Добавляем прямой эндпоинт для проверки и обновления статуса подписки из клиента
-@app.get("/direct_premium_check")
+@app.get("/direct_premium_check", status_code=200)
 async def direct_premium_check(request: Request, user_id: Optional[str] = None):
     """
     Прямая проверка премиум-статуса для клиента.
     Принимает user_id в параметре запроса или берет его из заголовка x-telegram-user-id.
     """
+    # Добавляем заголовки CORS чтобы API работало корректно
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Content-Type": "application/json"
+    }
+    
     try:
         effective_user_id = user_id
         
@@ -3643,23 +3651,29 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
         logger.info(f"Прямая проверка премиум-статуса для user_id: {effective_user_id}")
             
         if not effective_user_id:
-            return {
-                "has_premium": False,
-                "user_id": None,
-                "error": "ID пользователя не предоставлен",
-                "message": "Не удалось определить ID пользователя"
-            }
+            return JSONResponse(
+                content={
+                    "has_premium": False,
+                    "user_id": None,
+                    "error": "ID пользователя не предоставлен",
+                    "message": "Не удалось определить ID пользователя"
+                },
+                headers=headers
+            )
             
         # Проверяем премиум-статус через REST API
         try:
             # Проверяем, инициализирован ли Supabase клиент
             if not supabase:
                 logger.error("Supabase клиент не инициализирован")
-                return {
-                    "has_premium": False,
-                    "user_id": effective_user_id,
-                    "error": "Supabase client not initialized"
-                }
+                return JSONResponse(
+                    content={
+                        "has_premium": False,
+                        "user_id": effective_user_id,
+                        "error": "Supabase client not initialized"
+                    },
+                    headers=headers
+                )
             
             # Запрашиваем активные подписки для пользователя через REST API
             subscription_query = supabase.table("user_subscription").select("*").eq("user_id", effective_user_id).eq("is_active", True).execute()
@@ -3726,7 +3740,7 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
             if subscription_end_date:
                 response_data["subscription_end_date"] = subscription_end_date
             
-            return response_data
+            return JSONResponse(content=response_data, headers=headers)
             
         except Exception as e:
             logger.error(f"Ошибка при прямой проверке премиум-статуса через REST API: {e}")
@@ -3740,7 +3754,7 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
                     raise ValueError("Отсутствуют SUPABASE_URL или SUPABASE_KEY")
                 
                 # Формируем запрос к REST API Supabase
-                headers = {
+                httpx_headers = {
                     "apikey": supabase_key,
                     "Authorization": f"Bearer {supabase_key}",
                     "Content-Type": "application/json"
@@ -3749,7 +3763,7 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
                 async with httpx.AsyncClient() as client:
                     response = await client.get(
                         f"{supabase_url}/rest/v1/user_subscription",
-                        headers=headers,
+                        headers=httpx_headers,
                         params={
                             "select": "*",
                             "user_id": f"eq.{effective_user_id}",
@@ -3817,60 +3831,48 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
                         if subscription_end_date:
                             response_data["subscription_end_date"] = subscription_end_date
                         
-                        return response_data
+                        return JSONResponse(content=response_data, headers=headers)
                     else:
                         logger.error(f"Ошибка при запросе к Supabase REST API: {response.status_code} - {response.text}")
-                        return {
-                            "has_premium": False,
-                            "user_id": effective_user_id,
-                            "error": f"HTTP Error: {response.status_code}"
-                        }
+                        return JSONResponse(
+                            content={
+                                "has_premium": False,
+                                "user_id": effective_user_id,
+                                "error": f"HTTP Error: {response.status_code}"
+                            },
+                            headers=headers
+                        )
             
             except Exception as httpx_error:
                 logger.error(f"Ошибка при проверке премиум-статуса через httpx: {httpx_error}")
-                return {
-                    "has_premium": False,
-                    "user_id": effective_user_id,
-                    "error": str(httpx_error)
-                }
+                return JSONResponse(
+                    content={
+                        "has_premium": False,
+                        "user_id": effective_user_id,
+                        "error": str(httpx_error)
+                    },
+                    headers=headers
+                )
     
     except Exception as e:
         logger.error(f"Ошибка при прямой проверке премиум-статуса: {e}")
-        return {
-            "has_premium": False,
-            "user_id": effective_user_id if 'effective_user_id' in locals() else None,
-            "error": str(e)
-        }
+        return JSONResponse(
+            content={
+                "has_premium": False,
+                "user_id": effective_user_id if 'effective_user_id' in locals() else None,
+                "error": str(e)
+            },
+            headers=headers
+        )
 
 # Добавляем эндпоинт для API v2 для проверки премиум-статуса
-@app.get("/api-v2/premium/check")
+@app.get("/api-v2/premium/check", status_code=200)
 async def premium_check_v2(request: Request, user_id: Optional[str] = None):
     """Альтернативный эндпоинт для проверки премиум-статуса (API v2)"""
     return await direct_premium_check(request, user_id)
 
-# Добавляем эндпоинт для отправки тестового сообщения через бота
-@app.get("/test-bot-message/{user_id}")
-async def test_bot_message(user_id: int, request: Request, message: str = "Тестовое сообщение от бота"):
-    """
-    Отправляет тестовое сообщение пользователю для проверки работы бота.
-    """
-    try:
-        result = await send_telegram_message(
-            user_id, 
-            f"<b>Тест системы уведомлений</b>\n\n{message}\n\nВремя отправки: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        )
-        return {
-            "success": result,
-            "user_id": user_id,
-            "message": message,
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }
-    except Exception as e:
-        logger.error(f"Ошибка при отправке тестового сообщения: {e}")
-        return {"success": False, "error": str(e)}
-
 # Добавляем raw API эндпоинт для обхода SPA роутера
-@app.get("/raw-api-data/xyz123/premium-data/{user_id}")
+@app.get("/raw-api-data/xyz123/premium-data/{user_id}", status_code=200)
 async def raw_premium_data(user_id: str, request: Request):
     """
     Специальный нестандартный URL для получения премиум-статуса в обход SPA роутера.
@@ -3878,7 +3880,7 @@ async def raw_premium_data(user_id: str, request: Request):
     return await direct_premium_check(request, user_id)
 
 # Добавляем эндпоинт для проверки статуса подписки (для совместимости с клиентским кодом)
-@app.get("/subscription/status")
+@app.get("/subscription/status", status_code=200)
 async def subscription_status(request: Request, user_id: Optional[str] = None):
     """
     Проверка статуса подписки.
@@ -3889,10 +3891,29 @@ async def subscription_status(request: Request, user_id: Optional[str] = None):
     result = await direct_premium_check(request, user_id)
     
     # Преобразуем формат ответа для совместимости с интерфейсом клиента
-    return {
-        "has_subscription": result.get("has_premium", False),
-        "analysis_count": result.get("analysis_count", 3),
-        "post_generation_count": result.get("post_generation_count", 1),
-        "subscription_end_date": result.get("subscription_end_date")
-    }
+    if isinstance(result, JSONResponse):
+        data = result.body
+        if isinstance(data, bytes):
+            import json
+            try:
+                data = json.loads(data.decode('utf-8'))
+            except:
+                data = {}
+    else:
+        data = result
+    
+    return JSONResponse(
+        content={
+            "has_subscription": data.get("has_premium", False),
+            "analysis_count": data.get("analysis_count", 3),
+            "post_generation_count": data.get("post_generation_count", 1),
+            "subscription_end_date": data.get("subscription_end_date")
+        },
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Content-Type": "application/json"
+        }
+    )
 
