@@ -325,16 +325,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       setStatus(result);
       setError(null);
       setLoading(false);
-
-      // --- ДОБАВЛЕНО: Очистка localStorage и локального состояния при отсутствии подписки ---
-      if (result.has_subscription === false) {
-        console.log('[SubscriptionWidget] API вернул has_subscription: false, очищаем локальные данные.');
-        localStorage.removeItem(PREMIUM_STATUS_KEY);
-        setLocalPremiumStatus(null);
-        setLocalEndDate(null);
-      }
-      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
-
       return true;
     } catch (err) {
       console.error('Ошибка при получении статуса подписки:', err);
