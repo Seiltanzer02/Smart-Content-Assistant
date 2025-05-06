@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Toaster, toast } from 'react-hot-toast';
 import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
+import DirectPremiumStatus from './components/DirectPremiumStatus'; // <-- Импортируем новый компонент
 
 // Определяем базовый URL API
 // Так как фронтенд и API на одном домене, используем пустую строку
@@ -67,7 +68,9 @@ class SimpleErrorBoundary extends React.Component<
 // Типы для typescript
 declare global {
   interface Window {
-    Telegram?: any;
+    Telegram?: {
+      WebApp?: any;
+    };
   }
 }
 
@@ -1318,6 +1321,7 @@ function App() {
       {showSubscription && (
         <>
           <SubscriptionWidget userId={userId} isActive={true}/> {/* Передаем isActive в старый виджет */} 
+          <DirectPremiumStatus userId={userId} /> {/* <-- Добавляем новый компонент */} 
         </>
       )}
 
