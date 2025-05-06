@@ -22,24 +22,15 @@ const PREMIUM_STATUS_KEY = 'premium_status_data';
 
 // Функция для форматирования даты с часовым поясом
 const formatDate = (isoDateString: string): string => {
-  try {
-    const date = new Date(isoDateString);
-    
-    // Форматируем дату с временем и часовым поясом для консистентного отображения
-    const options: Intl.DateTimeFormatOptions = {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZoneName: 'short'
-    };
-    
-    return date.toLocaleDateString('ru-RU', options);
-  } catch (e) {
-    console.error('Ошибка при форматировании даты:', e);
-    return 'Дата неизвестна';
-  }
+  if (!isoDateString) return '';
+  const date = new Date(isoDateString);
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 };
 
 const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActive }) => {
@@ -403,34 +394,37 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     );
   }
   
-  // Основной индикатор статуса подписки — только по API
+  // Основной индикатор статуса подписки — только по API, localStorage как резерв
+  const hasPremium = status?.has_subscription || false;
+  const endDate = status?.subscription_end_date || localEndDate;
+
   return (
     <div className="subscription-widget">
       <h3>Статус подписки</h3>
-      <div className="direct-check-section main-status">
-        <h4>Статус подписки (Прямая проверка)</h4>
-        <p className="direct-check-status">
-          Прямая проверка: Статус {status?.has_subscription ? 'Premium' : 'Free'}
-        </p>
-        <p className="user-id">User ID: {validatedUserId}</p>
-        {status?.has_subscription && (status.subscription_end_date || localEndDate) && (
-          <p className="end-date">
-            Действует до: {formatDate(status.subscription_end_date || localEndDate!)}
-          </p>
-        )}
-      </div>
-      {/* Кнопка покупки — только если нет премиума */}
-      {!status?.has_subscription && (
-        <div className="buy-section">
-          <button 
-            className="subscribe-button"
-            onClick={handleSubscribe}
-            disabled={isSubscribing}
-          >
-            {isSubscribing ? 'Обработка...' : 'Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars'}
-          </button>
+      {hasPremium ? (
+        <div className="premium-block">
+          <h4>Премиум активен</h4>
+          <p>Вам доступны все функции!</p>
+          {endDate && (
+            <p className="end-date">Действует до: {formatDate(endDate)}</p>
+          )}
+        </div>
+      ) : (
+        <div className="free-block">
+          <h4>Бесплатный доступ</h4>
+          <p>Для доступа к премиум-функциям оформите подписку.</p>
+          <div className="buy-section">
+            <button
+              className="subscribe-button"
+              onClick={handleSubscribe}
+              disabled={isSubscribing}
+            >
+              {isSubscribing ? 'Обработка...' : 'Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars'}
+            </button>
+          </div>
         </div>
       )}
+      <p className="user-id">User ID: {validatedUserId}</p>
     </div>
   );
 };
