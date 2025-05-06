@@ -205,6 +205,85 @@ app.add_middleware(
     expose_headers=["X-Telegram-User-Id"]  # Позволяем читать этот заголовок
 )
 
+# --- ВАЖНО: API-эндпоинты для проверки подписки ПЕРЕД SPA-маршрутами ---
+@app.get("/bot-style-premium-check/{user_id}", status_code=200)
+async def bot_style_premium_check(user_id: str, request: Request):
+    """
+    Прямая проверка премиум-статуса через базу данных, используя тот же метод, который использует бот.
+    Этот эндпоинт игнорирует кэширование и промежуточные слои, работая напрямую с базой данных.
+    """
+    try:
+        logger.info(f"[BOT-STYLE] Запрос премиум-статуса для пользователя: {user_id}")
+        if not user_id:
+            return JSONResponse(status_code=400, content={"success": False, "error": "ID пользователя не указан"})
+        try:
+            user_id_int = int(user_id)
+        except ValueError:
+            return JSONResponse(status_code=400, content={"success": False, "error": "ID пользователя должен быть числом"})
+        db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("RENDER_DATABASE_URL")
+        if not db_url:
+            logger.error("[BOT-STYLE] Отсутствуют SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL")
+            return JSONResponse(status_code=500, content={"success": False, "error": "Отсутствуют настройки подключения к базе данных"})
+        db_url = normalize_db_url(db_url)
+        conn = await asyncpg.connect(db_url)
+        try:
+            query = """
+            SELECT id, user_id, start_date, end_date, is_active, payment_id, created_at, updated_at
+            FROM user_subscription 
+            WHERE user_id = $1 
+              AND is_active = TRUE 
+              AND end_date > NOW()
+            ORDER BY end_date DESC
+            LIMIT 1
+            """
+            subscription = await conn.fetchrow(query, user_id_int)
+            if subscription:
+                has_premium = True
+                subscription_end_date = subscription["end_date"].strftime('%Y-%m-%d %H:%M:%S') if subscription["end_date"] else None
+                subscription_data = {
+                    "id": subscription["id"],
+                    "user_id": subscription["user_id"],
+                    "start_date": subscription["start_date"].strftime('%Y-%m-%d %H:%M:%S') if subscription["start_date"] else None,
+                    "end_date": subscription_end_date,
+                    "is_active": subscription["is_active"],
+                    "payment_id": subscription["payment_id"],
+                    "created_at": subscription["created_at"].strftime('%Y-%m-%d %H:%M:%S') if subscription["created_at"] else None,
+                    "updated_at": subscription["updated_at"].strftime('%Y-%m-%d %H:%M:%S') if subscription["updated_at"] else None
+                }
+            else:
+                has_premium = False
+                subscription_data = None
+                subscription_end_date = None
+            analysis_count = 9999 if has_premium else 3
+            post_generation_count = 9999 if has_premium else 1
+            response = {
+                "success": True,
+                "user_id": user_id_int,
+                "has_premium": has_premium,
+                "analysis_count": analysis_count,
+                "post_generation_count": post_generation_count,
+                "subscription": subscription_data
+            }
+            if subscription_end_date:
+                response["subscription_end_date"] = subscription_end_date
+            return JSONResponse(
+                content=response,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                    "Content-Type": "application/json"
+                }
+            )
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.error(f"[BOT-STYLE] Ошибка при проверке премиум-статуса: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
+
 @app.post("/generate-invoice", response_model=Dict[str, Any])
 async def generate_invoice(request: Request):
     """Генерирует invoice_url через Telegram Bot API createInvoiceLink"""
@@ -3632,81 +3711,91 @@ if __name__ == "__main__":
     logger.info(f"Запуск сервера на порту {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
 
-# ВАЖНО: Размещаем API-эндпоинты для проверки подписки ПЕРЕД SPA-маршрутами
-# Добавляем новый эндпоинт для прямого доступа к базе данных для проверки премиум, как это делает бот
-@app.get("/bot-style-premium-check/{user_id}", status_code=200)
-async def bot_style_premium_check(user_id: str, request: Request):
+# Добавляем эндпоинт для API v2 для проверки премиум-статуса
+@app.get("/api-v2/premium/check", status_code=200)
+async def premium_check_v2(request: Request, user_id: Optional[str] = None):
+    """Альтернативный эндпоинт для проверки премиум-статуса (API v2)"""
+    return await direct_premium_check(request, user_id)
+
+# Добавляем raw API эндпоинт для обхода SPA роутера
+@app.get("/raw-api-data/xyz123/premium-data/{user_id}", status_code=200)
+async def raw_premium_data(user_id: str, request: Request):
     """
-    Прямая проверка премиум-статуса через базу данных, используя тот же метод, который использует бот.
-    Этот эндпоинт игнорирует кэширование и промежуточные слои, работая напрямую с базой данных.
+    Специальный нестандартный URL для получения премиум-статуса в обход SPA роутера.
     """
+    return await direct_premium_check(request, user_id)
+
+# Добавляем эндпоинт для проверки статуса подписки (для совместимости с клиентским кодом)
+@app.get("/subscription/status", status_code=200)
+async def subscription_status(request: Request, user_id: Optional[str] = None):
+    """
+    Проверка статуса подписки.
+    Поддерживается для совместимости с клиентским кодом.
+    Дублирует функциональность direct_premium_check.
+    """
+    logger.info(f"Запрос /subscription/status для user_id: {user_id}")
+    result = await direct_premium_check(request, user_id)
+    
+    # Преобразуем формат ответа для совместимости с интерфейсом клиента
+    if isinstance(result, JSONResponse):
+        data = result.body
+        if isinstance(data, bytes):
+            import json
+            try:
+                data = json.loads(data.decode('utf-8'))
+            except:
+                data = {}
+    else:
+        data = result
+    
+    return JSONResponse(
+        content={
+            "has_subscription": data.get("has_premium", False),
+            "analysis_count": data.get("analysis_count", 3),
+            "post_generation_count": data.get("post_generation_count", 1),
+            "subscription_end_date": data.get("subscription_end_date")
+        },
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Content-Type": "application/json"
+        }
+    )
+
+@app.get("/subscription/status")
+async def get_subscription_status(request: Request):
+    user_id = request.query_params.get("user_id")
+    logger.info(f'Запрос /subscription/status для user_id: {user_id}')
+    if not user_id:
+        return {"error": "user_id обязателен"}
     try:
-        logger.info(f"[BOT-STYLE] Запрос премиум-статуса для пользователя: {user_id}")
-        if not user_id:
-            return JSONResponse(status_code=400, content={"success": False, "error": "ID пользователя не указан"})
-        try:
-            user_id_int = int(user_id)
-        except ValueError:
-            return JSONResponse(status_code=400, content={"success": False, "error": "ID пользователя должен быть числом"})
-        db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("RENDER_DATABASE_URL")
-        if not db_url:
-            logger.error("[BOT-STYLE] Отсутствуют SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL")
-            return JSONResponse(status_code=500, content={"success": False, "error": "Отсутствуют настройки подключения к базе данных"})
-        db_url = normalize_db_url(db_url)
-        conn = await asyncpg.connect(db_url)
-        try:
-            query = """
-            SELECT id, user_id, start_date, end_date, is_active, payment_id, created_at, updated_at
-            FROM user_subscription 
-            WHERE user_id = $1 
-              AND is_active = TRUE 
-              AND end_date > NOW()
-            ORDER BY end_date DESC
-            LIMIT 1
-            """
-            subscription = await conn.fetchrow(query, user_id_int)
-            if subscription:
-                has_premium = True
-                subscription_end_date = subscription["end_date"].strftime('%Y-%m-%d %H:%M:%S') if subscription["end_date"] else None
-                subscription_data = {
-                    "id": subscription["id"],
-                    "user_id": subscription["user_id"],
-                    "start_date": subscription["start_date"].strftime('%Y-%m-%d %H:%M:%S') if subscription["start_date"] else None,
-                    "end_date": subscription_end_date,
-                    "is_active": subscription["is_active"],
-                    "payment_id": subscription["payment_id"],
-                    "created_at": subscription["created_at"].strftime('%Y-%m-%d %H:%M:%S') if subscription["created_at"] else None,
-                    "updated_at": subscription["updated_at"].strftime('%Y-%m-%d %H:%M:%S') if subscription["updated_at"] else None
-                }
-            else:
-                has_premium = False
-                subscription_data = None
-                subscription_end_date = None
-            analysis_count = 9999 if has_premium else 3
-            post_generation_count = 9999 if has_premium else 1
-            response = {
-                "success": True,
-                "user_id": user_id_int,
-                "has_premium": has_premium,
-                "analysis_count": analysis_count,
-                "post_generation_count": post_generation_count,
-                "subscription": subscription_data
+        result = supabase.table("user_subscription").select("*").eq("user_id", int(user_id)).maybe_single().execute()
+        logger.info(f'Результат запроса к user_subscription: {result.data}')
+        if result.data:
+            sub = result.data
+            now = datetime.utcnow()
+            is_active = sub.get("is_active", False) and sub.get("end_date") and datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00")) > now
+            response_data = {
+                "has_subscription": is_active,
+                "is_active": is_active,
+                "subscription_end_date": sub.get("end_date")
             }
-            if subscription_end_date:
-                response["subscription_end_date"] = subscription_end_date
-            return JSONResponse(
-                content=response,
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "GET, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-                    "Content-Type": "application/json"
-                }
-            )
-        finally:
-            await conn.close()
+            logger.info(f'Возвращаем статус для user_id {user_id}: {response_data}')
+            return response_data
+        else:
+            response_data = {
+                "has_subscription": False,
+                "is_active": False,
+                "subscription_end_date": None
+            }
+            logger.info(f'Подписка не найдена для user_id {user_id}, возвращаем: {response_data}')
+            return response_data
     except Exception as e:
-        logger.error(f"[BOT-STYLE] Ошибка при проверке премиум-статуса: {e}")
+        logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True)
+        return {"error": str(e)}
+
+# ... existing code ...
         return JSONResponse(
             status_code=500,
             content={"success": False, "error": str(e)}
@@ -3855,87 +3944,41 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
             headers=headers
         )
 
-# Добавляем эндпоинт для API v2 для проверки премиум-статуса
-@app.get("/api-v2/premium/check", status_code=200)
-async def premium_check_v2(request: Request, user_id: Optional[str] = None):
-    """Альтернативный эндпоинт для проверки премиум-статуса (API v2)"""
-    return await direct_premium_check(request, user_id)
-
-# Добавляем raw API эндпоинт для обхода SPA роутера
-@app.get("/raw-api-data/xyz123/premium-data/{user_id}", status_code=200)
-async def raw_premium_data(user_id: str, request: Request):
-    """
-    Специальный нестандартный URL для получения премиум-статуса в обход SPA роутера.
-    """
-    return await direct_premium_check(request, user_id)
-
-# Добавляем эндпоинт для проверки статуса подписки (для совместимости с клиентским кодом)
-@app.get("/subscription/status", status_code=200)
-async def subscription_status(request: Request, user_id: Optional[str] = None):
-    """
-    Проверка статуса подписки.
-    Поддерживается для совместимости с клиентским кодом.
-    Дублирует функциональность direct_premium_check.
-    """
-    logger.info(f"Запрос /subscription/status для user_id: {user_id}")
-    result = await direct_premium_check(request, user_id)
-    
-    # Преобразуем формат ответа для совместимости с интерфейсом клиента
-    if isinstance(result, JSONResponse):
-        data = result.body
-        if isinstance(data, bytes):
-            import json
-            try:
-                data = json.loads(data.decode('utf-8'))
-            except:
-                data = {}
-    else:
-        data = result
-    
-    return JSONResponse(
-        content={
-            "has_subscription": data.get("has_premium", False),
-            "analysis_count": data.get("analysis_count", 3),
-            "post_generation_count": data.get("post_generation_count", 1),
-            "subscription_end_date": data.get("subscription_end_date")
-        },
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
-            "Content-Type": "application/json"
-        }
-    )
-
-@app.get("/subscription/status")
-async def get_subscription_status(request: Request):
-    user_id = request.query_params.get("user_id")
-    logger.info(f'Запрос /subscription/status для user_id: {user_id}')
-    if not user_id:
-        return {"error": "user_id обязателен"}
+@app.post("/generate-invoice", response_model=Dict[str, Any])
+async def generate_invoice(request: Request):
+    """Генерирует invoice_url через Telegram Bot API createInvoiceLink"""
     try:
-        result = supabase.table("user_subscription").select("*").eq("user_id", int(user_id)).maybe_single().execute()
-        logger.info(f'Результат запроса к user_subscription: {result.data}')
-        if result.data:
-            sub = result.data
-            now = datetime.utcnow()
-            is_active = sub.get("is_active", False) and sub.get("end_date") and datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00")) > now
-            response_data = {
-                "has_subscription": is_active,
-                "is_active": is_active,
-                "subscription_end_date": sub.get("end_date")
-            }
-            logger.info(f'Возвращаем статус для user_id {user_id}: {response_data}')
-            return response_data
-        else:
-            response_data = {
-                "has_subscription": False,
-                "is_active": False,
-                "subscription_end_date": None
-            }
-            logger.info(f'Подписка не найдена для user_id {user_id}, возвращаем: {response_data}')
-            return response_data
+        data = await request.json()
+        if not data.get("user_id") or not data.get("amount"):
+            raise HTTPException(status_code=400, detail="Отсутствуют обязательные параметры")
+        user_id = data["user_id"]
+        amount = int(data["amount"])
+        payment_id = f"stars_invoice_{int(time.time())}_{user_id}"
+        title = "Подписка Premium"
+        description = "Подписка Premium на Smart Content Assistant на 1 месяц"
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        provider_token = os.getenv("PROVIDER_TOKEN")
+        if not bot_token or not provider_token:
+            raise HTTPException(status_code=500, detail="TELEGRAM_BOT_TOKEN или PROVIDER_TOKEN не заданы в окружении")
+        url = f"https://api.telegram.org/bot{bot_token}/createInvoiceLink"
+        payload = {
+            "title": title,
+            "description": description,
+            "payload": payment_id,
+            "provider_token": provider_token,
+            "currency": "RUB",
+            "prices": [{"label": "Подписка", "amount": amount * 100}],
+            "photo_url": "https://smart-content-assistant.onrender.com/static/premium_sub.jpg"
+        }
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload)
+            tg_data = response.json()
+            if not tg_data.get("ok"):
+                logger.error(f"Ошибка Telegram API: {tg_data}")
+                raise HTTPException(status_code=500, detail=f"Ошибка Telegram API: {tg_data}")
+            invoice_url = tg_data["result"]
+        return {"invoice_url": invoice_url, "payment_id": payment_id}
     except Exception as e:
-        logger.error(f'Ошибка в /subscription/status для user_id {user_id}: {e}', exc_info=True)
-        return {"error": str(e)}
+        logger.error(f"Ошибка при генерации инвойса: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при генерации инвойса: {str(e)}")
 
