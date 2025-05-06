@@ -345,27 +345,55 @@ export const getBotStylePremiumStatus = async (userId: string | null): Promise<P
     // Добавляем случайный параметр для предотвращения кэширования
     const nocache = `_nocache=${new Date().getTime()}`;
     
-    // Используем прямой URL, который работает как в боте
-    const response = await fetch(`/bot-style-premium-check/${userId}?${nocache}`, {
+    // Формируем URL с правильным хостом - для разработки или продакшн
+    const apiUrl = window.location.hostname === 'localhost' 
+      ? `http://localhost:8000/bot-style-premium-check/${userId}?${nocache}`
+      : `/bot-style-premium-check/${userId}?${nocache}`;
+    
+    console.log(`[API] Отправка запроса по URL: ${apiUrl}`);
+    
+    // Расширенные заголовки для предотвращения кеширования и CORS
+    const response = await fetch(apiUrl, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
         'X-Requested-With': 'XMLHttpRequest',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache'
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'X-Client-Time': new Date().toISOString(),
+        'X-Telegram-User-Id': userId
       },
+      mode: 'cors',
       cache: 'no-store'
     });
 
     if (!response.ok) {
       const text = await response.text();
+      console.error(`[API] Ошибка ответа: [${response.status}] ${response.statusText}`);
+      console.error(`[API] Тело ответа: ${text.substring(0, 500)}...`);
+      
       if (text.includes('<!doctype html>') || text.includes('<html>')) {
-        throw new Error('Ошибка API: получен HTML вместо JSON. Проверьте серверный роутинг!');
+        console.error('[API] Получен HTML вместо JSON. Проверьте серверный роутинг!');
+        // Пробуем альтернативный эндпоинт для резервного плана
+        console.log('[API] Пробуем альтернативный эндпоинт...');
+        return getDirectPremiumStatus(userId);
       }
+      
       throw new Error(`Ошибка API: ${response.status} ${text}`);
     }
+    
     const data = await response.json();
     console.log(`[API] Получен ответ из бот-стиль API:`, data);
+    
+    // Сохраняем успешный результат на случай будущих ошибок
+    try {
+      localStorage.setItem(`premium_data_${userId}`, JSON.stringify(data));
+      console.log('[API] Результат сохранен в localStorage');
+    } catch (storageError) {
+      console.warn('[API] Невозможно сохранить результат в localStorage:', storageError);
+    }
+    
     return {
       has_premium: data.has_premium,
       user_id: userId,
@@ -375,6 +403,17 @@ export const getBotStylePremiumStatus = async (userId: string | null): Promise<P
     };
   } catch (error) {
     console.error('[API] Ошибка при получении премиум-статуса через бот-стиль API:', error);
+    
+    // Попытка получить данные из localStorage
+    try {
+      const cachedData = localStorage.getItem(`premium_data_${userId}`);
+      if (cachedData) {
+        console.log('[API] Используем кэшированные данные из localStorage');
+        return JSON.parse(cachedData);
+      }
+    } catch (storageError) {
+      console.warn('[API] Невозможно получить данные из localStorage:', storageError);
+    }
     
     // Возвращаем базовые данные при ошибке
     return {
