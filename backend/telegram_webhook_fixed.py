@@ -1,51 +1,8 @@
-# Основные библиотеки
 import os
-import sys
-import json
-import logging
-import asyncio
 import httpx
-import tempfile
-import shutil
-from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
-from pydantic import BaseModel, Field
+from fastapi import Request
+from log import logger
 
-# FastAPI компоненты
-from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends, Form
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse, RedirectResponse
-from fastapi.middleware.cors import CORSMiddleware
-
-# Telethon
-from telethon import TelegramClient
-from telethon.errors import ChannelInvalidError, ChannelPrivateError, UsernameNotOccupiedError
-
-# Настройка логирования
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# Инициализация FastAPI
-app = FastAPI()
-
-# Настройка CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Можно указать конкретные домены вместо "*"
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Подключение к Telegram (опционально, если нужно)
-telegram_api_id = os.getenv("TELEGRAM_API_ID")
-telegram_api_hash = os.getenv("TELEGRAM_API_HASH")
-telegram_client = None
-
-# Глобальные переменные
-supabase = None
-
-# Эндпоинт для обработки Telegram вебхуков
-@app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
     """Вебхук для обработки обновлений от бота Telegram."""
     try:
@@ -226,4 +183,4 @@ async def telegram_webhook(request: Request):
         return {"ok": True}
     except Exception as e:
         logger.error(f"Ошибка при обработке вебхука Telegram: {e}")
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e)} 
