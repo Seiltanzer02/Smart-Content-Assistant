@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/SubscriptionWidget.css';
-import { getBotStylePremiumStatus, PremiumStatus, generateInvoice } from '../api/subscription';
+import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice } from '../api/subscription';
 
 // Добавляем объявление глобального объекта Telegram для TypeScript
 declare global {
@@ -36,7 +36,7 @@ const formatDate = (isoDateString: string): string => {
 const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActive }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<PremiumStatus | null>(null);
+  const [status, setStatus] = useState<SubscriptionStatus | null>(null);
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 1; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
@@ -208,7 +208,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     };
   }, [validatedUserId]);
   
-  // Используем только прямой запрос к /bot-style-premium-check/{user_id}
+  // Получаем статус только через новый API
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
     const effectiveUserId = validatedUserId;
     if (!effectiveUserId) {
@@ -217,7 +217,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     }
     setLoading(true);
     try {
-      const result = await getBotStylePremiumStatus(effectiveUserId);
+      const result = await getUserSubscriptionStatus(effectiveUserId);
       setStatus(result);
       setError(null);
       setLoading(false);
@@ -311,52 +311,10 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     }
   };
   
-  // Функция для обработки проверки через бота и сохранения результата
-  const handleCheckPremiumViaBot = () => {
-    // Пытаемся получить или сохранить информацию в localStorage
-    if (validatedUserId) {
-      // Предварительно сохраняем информацию в localStorage о том, что проверка была запущена
-      const checkInitiated = {
-        userId: validatedUserId,
-        timestamp: new Date().getTime(),
-        status: 'checking'
-      };
-      localStorage.setItem('premium_check_initiated', JSON.stringify(checkInitiated));
-      
-      // Открываем бота для проверки премиума
-      getBotStylePremiumStatus(validatedUserId);
-    }
-  };
-  
-  // Функция для ручного сохранения премиум-статуса (после проверки через бота)
-  const savePremiumStatusFromBot = (hasPremium: boolean, endDate?: string) => {
-    if (validatedUserId) {
-      const dataToSave = {
-        userId: validatedUserId,
-        hasPremium,
-        endDate: endDate || null,
-        timestamp: new Date().getTime()
-      };
-      localStorage.setItem(PREMIUM_STATUS_KEY, JSON.stringify(dataToSave));
-      setLocalEndDate(endDate || null);
-      // После проверки через бота — всегда обновляем основной статус через API
-      fetchSubscriptionStatus();
-    }
-  };
-  
-  // После возвращения из бота — всегда обновляем статус через API
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        fetchSubscriptionStatus();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [validatedUserId]);
-  
+  // Основной индикатор статуса подписки — только по API
+  const hasPremium = status?.has_subscription && status?.is_active;
+  const endDate = status?.subscription_end_date || null;
+
   if (loading) {
     return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
   }
@@ -369,10 +327,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       </div>
     );
   }
-  
-  // Основной индикатор статуса подписки — только по API, localStorage как резерв
-  const hasPremium = status?.has_premium || false;
-  const endDate = status?.subscription_end_date || null;
 
   return (
     <div className="subscription-widget">
