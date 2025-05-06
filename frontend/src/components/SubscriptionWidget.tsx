@@ -50,10 +50,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const SUBSCRIPTION_PRICE = 1; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [validatedUserId, setValidatedUserId] = useState<string | null>(null);
-  // Состояние для отслеживания, когда пользователь проверил статус через бота
-  const [checkedViaBot, setCheckedViaBot] = useState(false);
-  // Состояние для отображения локально сохраненного статуса подписки
-  const [localPremiumStatus, setLocalPremiumStatus] = useState<boolean | null>(null);
+  // localStorage только как fallback для даты окончания
   const [localEndDate, setLocalEndDate] = useState<string | null>(null);
   
   // Проверка и валидация ID пользователя
@@ -179,50 +176,18 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     };
   }, [isActive]);
   
-  // Проверяем localStorage при загрузке и после проверки через бота
+  // localStorage только как fallback для даты окончания
   useEffect(() => {
-    const checkLocalStorage = () => {
-      const savedData = localStorage.getItem(PREMIUM_STATUS_KEY);
-      if (savedData) {
-        try {
-          const parsedData = JSON.parse(savedData);
-          console.log('[SubscriptionWidget] Найдены сохраненные данные о подписке:', parsedData);
-
-          if (parsedData.userId === validatedUserId && parsedData.timestamp) {
-            // Проверяем, что данные не устарели (24 часа)
-            const now = new Date().getTime();
-            const timestamp = parsedData.timestamp;
-            const isValid = now - timestamp < 24 * 60 * 60 * 1000;
-            
-            if (isValid) {
-              console.log('[SubscriptionWidget] Данные актуальны, используем их');
-              setLocalPremiumStatus(parsedData.hasPremium);
-              setLocalEndDate(parsedData.endDate);
-              // Если мы только что проверили через бота и статус премиум, устанавливаем эти данные и в основной статус
-              if (checkedViaBot && parsedData.hasPremium) {
-                setStatus({
-                  has_subscription: true,
-                  analysis_count: 9999,
-                  post_generation_count: 9999,
-                  subscription_end_date: parsedData.endDate
-                });
-              }
-            } else {
-              console.log('[SubscriptionWidget] Данные устарели, удаляем');
-              localStorage.removeItem(PREMIUM_STATUS_KEY);
-              setLocalPremiumStatus(null);
-              setLocalEndDate(null);
-            }
-          }
-        } catch (e) {
-          console.error('[SubscriptionWidget] Ошибка при разборе данных из localStorage:', e);
-          localStorage.removeItem(PREMIUM_STATUS_KEY);
+    const savedData = localStorage.getItem(PREMIUM_STATUS_KEY);
+    if (savedData) {
+      try {
+        const parsedData = JSON.parse(savedData);
+        if (parsedData.userId === validatedUserId && parsedData.endDate) {
+          setLocalEndDate(parsedData.endDate);
         }
-      }
-    };
-
-    checkLocalStorage();
-  }, [validatedUserId, checkedViaBot]);
+      } catch {}
+    }
+  }, [validatedUserId]);
   
   useEffect(() => {
     if (userId) {
@@ -241,72 +206,32 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   // Периодическое обновление статуса подписки
   useEffect(() => {
     let intervalId: number | null = null;
-    
     if (validatedUserId) {
-      // Сразу запрашиваем статус
       fetchSubscriptionStatus();
-      
-      // Устанавливаем интервал обновления - каждые 15 секунд
       intervalId = window.setInterval(() => {
-        console.log('Регулярное обновление статуса подписки...');
         fetchSubscriptionStatus();
       }, 15000);
     }
-    
-    // Очистка при размонтировании
     return () => {
-      if (intervalId !== null) {
-        window.clearInterval(intervalId);
-      }
+      if (intervalId !== null) window.clearInterval(intervalId);
     };
   }, [validatedUserId]);
   
+  // Основной источник истины — только API
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
     let effectiveUserId = validatedUserId;
-    
     if (!effectiveUserId) {
-      console.log('[SubscriptionWidget] ValidatedUserId отсутствует, пробуем альтернативные источники...');
-      
-      // Попробуем получить из localStorage
-      const storedUserId = localStorage.getItem('contenthelper_user_id');
-      if (storedUserId) {
-        console.log(`[SubscriptionWidget] Найден userId в localStorage: ${storedUserId}`);
-        effectiveUserId = storedUserId;
-      }
-      
-      // Попробуем получить из URL (если страница содержит user_id в параметрах)
-      if (!effectiveUserId) {
-        const urlParams = new URLSearchParams(window.location.search);
-        const urlUserId = urlParams.get('user_id');
-        if (urlUserId) {
-          console.log(`[SubscriptionWidget] Найден userId в параметрах URL: ${urlUserId}`);
-          effectiveUserId = urlUserId;
-        }
-      }
-      
-      // Попробуем получить из Telegram WebApp если доступен
-      if (!effectiveUserId && window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
-        const webAppUserId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
-        console.log(`[SubscriptionWidget] Найден userId в Telegram WebApp: ${webAppUserId}`);
-        effectiveUserId = webAppUserId;
-      }
-    }
-
-    if (!effectiveUserId) {
-      console.error('[SubscriptionWidget] Попытка запроса статуса подписки без валидного userId после всех проверок');
       setError('ID пользователя не определен. Пожалуйста, перезапустите приложение.');
       return false;
     }
-    
     setLoading(true);
-    
     try {
       let result: SubscriptionStatus | null = null;
       try {
         result = await getUserSubscriptionStatus(effectiveUserId);
       } catch (apiError) {
-        // fallback: пробуем взять из localStorage
-        const savedData = localStorage.getItem('premium_status_data');
+        // fallback: localStorage только если API недоступен
+        const savedData = localStorage.getItem(PREMIUM_STATUS_KEY);
         if (savedData) {
           const parsed = JSON.parse(savedData);
           if (parsed.userId === effectiveUserId && parsed.hasPremium) {
@@ -331,10 +256,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       setLoading(false);
       return true;
     } catch (err) {
-      console.error('Ошибка при получении статуса подписки:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Неизвестная ошибка';
-      
-      setError(`Не удалось получить статус подписки: ${errorMessage}`);
+      setError('Не удалось получить статус подписки');
       setLoading(false);
       return false;
     }
@@ -424,9 +346,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   
   // Функция для обработки проверки через бота и сохранения результата
   const handleCheckPremiumViaBot = () => {
-    // Устанавливаем флаг, что пользователь проверил статус через бота
-    setCheckedViaBot(true);
-    
     // Пытаемся получить или сохранить информацию в localStorage
     if (validatedUserId) {
       // Предварительно сохраняем информацию в localStorage о том, что проверка была запущена
@@ -451,88 +370,25 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
         endDate: endDate || null,
         timestamp: new Date().getTime()
       };
-      
       localStorage.setItem(PREMIUM_STATUS_KEY, JSON.stringify(dataToSave));
-      console.log('[SubscriptionWidget] Сохранен премиум-статус в localStorage:', dataToSave);
-      
-      // Обновляем состояния компонента
-      setLocalPremiumStatus(hasPremium);
       setLocalEndDate(endDate || null);
-      
-      // Обновляем основной статус
-      if (hasPremium) {
-        setStatus({
-          has_subscription: true,
-          analysis_count: 9999,
-          post_generation_count: 9999,
-          subscription_end_date: endDate
-        });
-      }
+      // После проверки через бота — всегда обновляем основной статус через API
+      fetchSubscriptionStatus();
     }
   };
   
-  // Обработчик события фокуса, чтобы проверить статус после возвращения из бота
+  // После возвращения из бота — всегда обновляем статус через API
   useEffect(() => {
     const handleVisibilityChange = () => {
-      // Если страница становится видимой и был установлен флаг проверки через бота
-      if (document.visibilityState === 'visible' && checkedViaBot) {
-        console.log('[SubscriptionWidget] Страница снова активна после проверки через бота, обновляем статус');
-        
-        // Проверяем, был ли запрос на проверку через бота
-        const checkInitiatedRaw = localStorage.getItem('premium_check_initiated');
-        if (checkInitiatedRaw) {
-          try {
-            const checkInitiated = JSON.parse(checkInitiatedRaw);
-            const now = new Date().getTime();
-            
-            // Если проверка была запущена не более 5 минут назад
-            if (now - checkInitiated.timestamp < 5 * 60 * 1000) {
-              console.log('[SubscriptionWidget] Обнаружена недавняя проверка через бота, запрашиваем актуальный статус');
-              
-              // Устанавливаем временно статус обновления
-              setLoading(true);
-              setError(null);
-              
-              // Делаем попытку получить статус напрямую через API в стиле бота
-              if (validatedUserId) {
-                getBotStylePremiumStatus(validatedUserId)
-                  .then(botData => {
-                    console.log('[SubscriptionWidget] Получен ответ от бот-стиль API после возвращения из бота:', botData);
-                    
-                    // Если получили премиум-статус, сохраняем его
-                    if (botData.has_premium) {
-                      savePremiumStatusFromBot(true, botData.subscription_end_date || undefined);
-                    }
-                    
-                    // В любом случае обновляем обычный статус
-                    fetchSubscriptionStatus();
-                  })
-                  .catch(error => {
-                    console.error('[SubscriptionWidget] Ошибка при получении статуса через бот-стиль API после возвращения из бота:', error);
-                    // Пробуем обычный метод
-                    fetchSubscriptionStatus();
-                  });
-                
-                // Очищаем флаг инициированной проверки
-                localStorage.removeItem('premium_check_initiated');
-              }
-            }
-          } catch (e) {
-            console.error('[SubscriptionWidget] Ошибка при разборе данных о проверке через бота:', e);
-            localStorage.removeItem('premium_check_initiated');
-          }
-        }
+      if (document.visibilityState === 'visible') {
+        fetchSubscriptionStatus();
       }
     };
-    
-    // Добавляем обработчик события изменения видимости страницы
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    // Очистка при размонтировании
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [checkedViaBot, validatedUserId]);
+  }, [validatedUserId]);
   
   if (loading) {
     return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
@@ -547,24 +403,24 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     );
   }
   
-  // Основной индикатор статуса подписки — только "Прямая проверка"
+  // Основной индикатор статуса подписки — только по API
   return (
     <div className="subscription-widget">
       <h3>Статус подписки</h3>
       <div className="direct-check-section main-status">
         <h4>Статус подписки (Прямая проверка)</h4>
         <p className="direct-check-status">
-          Прямая проверка: Статус {localPremiumStatus === true ? 'Premium' : 'Free'}
+          Прямая проверка: Статус {status?.has_subscription ? 'Premium' : 'Free'}
         </p>
         <p className="user-id">User ID: {validatedUserId}</p>
-        {localPremiumStatus === true && localEndDate && (
+        {status?.has_subscription && (status.subscription_end_date || localEndDate) && (
           <p className="end-date">
-            Действует до: {formatDate(localEndDate)}
+            Действует до: {formatDate(status.subscription_end_date || localEndDate!)}
           </p>
         )}
       </div>
       {/* Кнопка покупки — только если нет премиума */}
-      {localPremiumStatus !== true && (
+      {!status?.has_subscription && (
         <div className="buy-section">
           <button 
             className="subscribe-button"
