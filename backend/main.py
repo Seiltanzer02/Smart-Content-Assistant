@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field
 from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends, Form, Body
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import pathlib
 
 # Telethon
 from telethon import TelegramClient
@@ -43,6 +45,53 @@ telegram_client = None
 
 # Глобальные переменные
 supabase = None
+
+# Настройка обслуживания статических файлов
+static_dir = pathlib.Path("static")
+if static_dir.exists() and static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+    logger.info(f"Статические файлы подключены из директории {static_dir.absolute()}")
+else:
+    logger.warning(f"Директория статических файлов не найдена: {static_dir.absolute()}")
+
+# Корневой маршрут - возвращает HTML страницу или перенаправляет на фронтенд
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    """Обработка корневого маршрута"""
+    try:
+        index_path = pathlib.Path("static/index.html")
+        if index_path.exists():
+            with open(index_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            return HTMLResponse(content=content)
+        else:
+            logger.warning(f"Файл index.html не найден в директории статических файлов")
+            return HTMLResponse(content="""
+            <html>
+                <head>
+                    <title>Smart Content Assistant</title>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1">
+                    <style>
+                        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+                        h1 { color: #333; }
+                    </style>
+                </head>
+                <body>
+                    <h1>Smart Content Assistant</h1>
+                    <p>API сервер работает корректно. Пожалуйста, откройте приложение в Telegram.</p>
+                </body>
+            </html>
+            """)
+    except Exception as e:
+        logger.error(f"Ошибка при обработке корневого маршрута: {e}")
+        return HTMLResponse(content=f"<html><body><h1>Ошибка</h1><p>{str(e)}</p></body></html>")
+
+# Эндпоинт для API статуса
+@app.get("/api/status")
+async def api_status():
+    """Проверка статуса API"""
+    return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 # Эндпоинт для обработки Telegram вебхуков
 @app.post("/telegram/webhook")
@@ -359,6 +408,12 @@ async def telegram_webhook(request: Request):
         logger.error(f"Ошибка при обработке вебхука Telegram: {e}")
         return {"ok": False, "error": str(e)}
 
+# Добавляем дополнительный эндпоинт для работы с вебхуком бота
+@app.post("/telegram/bot/webhook")
+async def telegram_bot_webhook(request: Request):
+    """Альтернативный вебхук для обработки обновлений от бота Telegram."""
+    return await telegram_webhook(request)
+
 # Функция для отправки сообщений пользователям Telegram
 async def send_telegram_message(user_id, text):
     """Отправляет сообщение пользователю Telegram."""
@@ -388,3 +443,48 @@ async def send_telegram_message(user_id, text):
     except Exception as e:
         logger.error(f"Ошибка при отправке сообщения в Telegram: {e}")
         return False
+
+# Инициализируем Supabase клиент при запуске
+@app.on_event("startup")
+async def startup_event():
+    """Выполняется при запуске сервера."""
+    global supabase
+    
+    try:
+        from supabase import create_client, Client
+        
+        logger.info("Инициализация клиента Supabase...")
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_key = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+        
+        if supabase_url and supabase_key:
+            supabase = create_client(supabase_url, supabase_key)
+            logger.info(f"Supabase клиент успешно инициализирован. URL: {supabase_url[:20]}...")
+            
+            # Проверяем соединение
+            try:
+                response = supabase.table("suggested_ideas").select("id").limit(1).execute()
+                logger.info("Соединение с Supabase успешно протестировано")
+            except Exception as connection_error:
+                logger.error(f"Ошибка при тестировании соединения с Supabase: {connection_error}")
+        else:
+            logger.warning("Отсутствуют SUPABASE_URL или SUPABASE_ANON_KEY, Supabase не инициализирован")
+    except Exception as e:
+        logger.error(f"Ошибка при инициализации Supabase: {e}")
+        
+    # Проверяем наличие директории для статических файлов
+    if not static_dir.exists():
+        try:
+            static_dir.mkdir(exist_ok=True)
+            logger.info(f"Создана директория для статических файлов: {static_dir.absolute()}")
+        except Exception as e:
+            logger.error(f"Не удалось создать директорию для статических файлов: {e}")
+
+# Для локального запуска
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", "8000"))
+    host = os.getenv("HOST", "0.0.0.0")
+    
+    logger.info(f"Запуск сервера на {host}:{port}...")
+    uvicorn.run("main:app", host=host, port=port, reload=True)
