@@ -3632,6 +3632,86 @@ if __name__ == "__main__":
     logger.info(f"Запуск сервера на порту {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True) # reload=True для разработки
 
+# ВАЖНО: Размещаем API-эндпоинты для проверки подписки ПЕРЕД SPA-маршрутами
+# Добавляем новый эндпоинт для прямого доступа к базе данных для проверки премиум, как это делает бот
+@app.get("/bot-style-premium-check/{user_id}", status_code=200)
+async def bot_style_premium_check(user_id: str, request: Request):
+    """
+    Прямая проверка премиум-статуса через базу данных, используя тот же метод, который использует бот.
+    Этот эндпоинт игнорирует кэширование и промежуточные слои, работая напрямую с базой данных.
+    """
+    try:
+        logger.info(f"[BOT-STYLE] Запрос премиум-статуса для пользователя: {user_id}")
+        if not user_id:
+            return JSONResponse(status_code=400, content={"success": False, "error": "ID пользователя не указан"})
+        try:
+            user_id_int = int(user_id)
+        except ValueError:
+            return JSONResponse(status_code=400, content={"success": False, "error": "ID пользователя должен быть числом"})
+        db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("RENDER_DATABASE_URL")
+        if not db_url:
+            logger.error("[BOT-STYLE] Отсутствуют SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL")
+            return JSONResponse(status_code=500, content={"success": False, "error": "Отсутствуют настройки подключения к базе данных"})
+        db_url = normalize_db_url(db_url)
+        conn = await asyncpg.connect(db_url)
+        try:
+            query = """
+            SELECT id, user_id, start_date, end_date, is_active, payment_id, created_at, updated_at
+            FROM user_subscription 
+            WHERE user_id = $1 
+              AND is_active = TRUE 
+              AND end_date > NOW()
+            ORDER BY end_date DESC
+            LIMIT 1
+            """
+            subscription = await conn.fetchrow(query, user_id_int)
+            if subscription:
+                has_premium = True
+                subscription_end_date = subscription["end_date"].strftime('%Y-%m-%d %H:%M:%S') if subscription["end_date"] else None
+                subscription_data = {
+                    "id": subscription["id"],
+                    "user_id": subscription["user_id"],
+                    "start_date": subscription["start_date"].strftime('%Y-%m-%d %H:%M:%S') if subscription["start_date"] else None,
+                    "end_date": subscription_end_date,
+                    "is_active": subscription["is_active"],
+                    "payment_id": subscription["payment_id"],
+                    "created_at": subscription["created_at"].strftime('%Y-%m-%d %H:%M:%S') if subscription["created_at"] else None,
+                    "updated_at": subscription["updated_at"].strftime('%Y-%m-%d %H:%M:%S') if subscription["updated_at"] else None
+                }
+            else:
+                has_premium = False
+                subscription_data = None
+                subscription_end_date = None
+            analysis_count = 9999 if has_premium else 3
+            post_generation_count = 9999 if has_premium else 1
+            response = {
+                "success": True,
+                "user_id": user_id_int,
+                "has_premium": has_premium,
+                "analysis_count": analysis_count,
+                "post_generation_count": post_generation_count,
+                "subscription": subscription_data
+            }
+            if subscription_end_date:
+                response["subscription_end_date"] = subscription_end_date
+            return JSONResponse(
+                content=response,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                    "Content-Type": "application/json"
+                }
+            )
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.error(f"[BOT-STYLE] Ошибка при проверке премиум-статуса: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
+
 # Добавляем прямой эндпоинт для проверки и обновления статуса подписки из клиента
 @app.get("/direct_premium_check", status_code=200)
 async def direct_premium_check(request: Request, user_id: Optional[str] = None):
@@ -3826,85 +3906,6 @@ async def subscription_status(request: Request, user_id: Optional[str] = None):
             "Content-Type": "application/json"
         }
     )
-
-# Добавляем новый эндпоинт для прямого доступа к базе данных для проверки премиум, как это делает бот
-@app.get("/bot-style-premium-check/{user_id}", status_code=200)
-async def bot_style_premium_check(user_id: str, request: Request):
-    """
-    Прямая проверка премиум-статуса через базу данных, используя тот же метод, который использует бот.
-    Этот эндпоинт игнорирует кэширование и промежуточные слои, работая напрямую с базой данных.
-    """
-    try:
-        logger.info(f"[BOT-STYLE] Запрос премиум-статуса для пользователя: {user_id}")
-        if not user_id:
-            return JSONResponse(status_code=400, content={"success": False, "error": "ID пользователя не указан"})
-        try:
-            user_id_int = int(user_id)
-        except ValueError:
-            return JSONResponse(status_code=400, content={"success": False, "error": "ID пользователя должен быть числом"})
-        db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("RENDER_DATABASE_URL")
-        if not db_url:
-            logger.error("[BOT-STYLE] Отсутствуют SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL")
-            return JSONResponse(status_code=500, content={"success": False, "error": "Отсутствуют настройки подключения к базе данных"})
-        db_url = normalize_db_url(db_url)
-        conn = await asyncpg.connect(db_url)
-        try:
-            query = """
-            SELECT id, user_id, start_date, end_date, is_active, payment_id, created_at, updated_at
-            FROM user_subscription 
-            WHERE user_id = $1 
-              AND is_active = TRUE 
-              AND end_date > NOW()
-            ORDER BY end_date DESC
-            LIMIT 1
-            """
-            subscription = await conn.fetchrow(query, user_id_int)
-            if subscription:
-                has_premium = True
-                subscription_end_date = subscription["end_date"].strftime('%Y-%m-%d %H:%M:%S') if subscription["end_date"] else None
-                subscription_data = {
-                    "id": subscription["id"],
-                    "user_id": subscription["user_id"],
-                    "start_date": subscription["start_date"].strftime('%Y-%m-%d %H:%M:%S') if subscription["start_date"] else None,
-                    "end_date": subscription_end_date,
-                    "is_active": subscription["is_active"],
-                    "payment_id": subscription["payment_id"],
-                    "created_at": subscription["created_at"].strftime('%Y-%m-%d %H:%M:%S') if subscription["created_at"] else None,
-                    "updated_at": subscription["updated_at"].strftime('%Y-%m-%d %H:%M:%S') if subscription["updated_at"] else None
-                }
-            else:
-                has_premium = False
-                subscription_data = None
-                subscription_end_date = None
-            analysis_count = 9999 if has_premium else 3
-            post_generation_count = 9999 if has_premium else 1
-            response = {
-                "success": True,
-                "user_id": user_id_int,
-                "has_premium": has_premium,
-                "analysis_count": analysis_count,
-                "post_generation_count": post_generation_count,
-                "subscription": subscription_data
-            }
-            if subscription_end_date:
-                response["subscription_end_date"] = subscription_end_date
-            return JSONResponse(
-                content=response,
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "GET, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-                    "Content-Type": "application/json"
-                }
-            )
-        finally:
-            await conn.close()
-    except Exception as e:
-        logger.error(f"[BOT-STYLE] Ошибка при проверке премиум-статуса: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"success": False, "error": str(e)}
-        )
 
 @app.get("/subscription/status")
 async def get_subscription_status(request: Request):
