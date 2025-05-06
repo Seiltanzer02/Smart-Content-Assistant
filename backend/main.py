@@ -415,7 +415,7 @@ async def telegram_webhook(request: Request):
             from datetime import datetime, timedelta
             now = datetime.utcnow()
             start_date = now
-            end_date = now + timedelta(minutes=1)
+            end_date = now + timedelta(minutes=5)
             logger.info(f'[telegram_webhook] Успешная оплата: user_id={user_id} ({type(user_id)}), payment_id={payment_id}, start_date={start_date}, end_date={end_date}')
             try:
                 # Проверяем, есть ли уже подписка
