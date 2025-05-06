@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/SubscriptionWidget.css';
-import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice, checkPremiumViaBot } from '../api/subscription';
+import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice, checkPremiumViaBot, getBotStylePremiumStatus, PremiumStatus } from '../api/subscription';
 
 // Добавляем объявление глобального объекта Telegram для TypeScript
 declare global {
@@ -37,6 +37,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
+  const [premiumStatus, setPremiumStatus] = useState<PremiumStatus | null>(null);  // Добавляем состояние для прямого статуса премиума
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 1; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
@@ -181,8 +182,10 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   }, [validatedUserId]);
   
   useEffect(() => {
-    if (userId) {
+    if (validatedUserId) {
       fetchSubscriptionStatus();
+      // Также запускаем прямую проверку через новый эндпоинт
+      fetchDirectPremiumStatus();
     }
     
     // Добавляем логирование статуса Telegram WebApp при загрузке компонента
@@ -192,15 +195,17 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     if (window.Telegram?.WebApp) {
       console.log('window.Telegram.WebApp методы:', Object.keys(window.Telegram.WebApp));
     }
-  }, [userId]);
+  }, [validatedUserId]);
   
   // Периодическое обновление статуса подписки
   useEffect(() => {
     let intervalId: number | null = null;
     if (validatedUserId) {
       fetchSubscriptionStatus();
+      fetchDirectPremiumStatus(); // Также обновляем прямой статус премиума
       intervalId = window.setInterval(() => {
         fetchSubscriptionStatus();
+        fetchDirectPremiumStatus(); // Также обновляем прямой статус премиума
       }, 15000);
     }
     return () => {
@@ -228,6 +233,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
           if (parsed.userId === effectiveUserId && parsed.hasPremium) {
             result = {
               has_subscription: true,
+              is_active: true,
               analysis_count: 9999,
               post_generation_count: 9999,
               subscription_end_date: parsed.endDate || undefined
@@ -238,6 +244,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       if (!result) {
         result = {
           has_subscription: false,
+          is_active: false,
           analysis_count: 3,
           post_generation_count: 1
         };
@@ -249,6 +256,61 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     } catch (err) {
       setError('Не удалось получить статус подписки');
       setLoading(false);
+      return false;
+    }
+  };
+
+  // Новая функция для прямой проверки премиум-статуса через API
+  const fetchDirectPremiumStatus = async (): Promise<boolean> => {
+    let effectiveUserId = validatedUserId;
+    if (!effectiveUserId) {
+      console.error('[fetchDirectPremiumStatus] ID пользователя не определен.');
+      return false;
+    }
+    
+    try {
+      // Используем новую функцию из API
+      const result = await getBotStylePremiumStatus(effectiveUserId);
+      console.log('[fetchDirectPremiumStatus] Получен результат:', result);
+      setPremiumStatus(result);
+
+      // Если получили положительный ответ, сохраняем в localStorage для резервного доступа
+      if (result.has_premium) {
+        localStorage.setItem(PREMIUM_STATUS_KEY, JSON.stringify({
+          userId: effectiveUserId,
+          hasPremium: true,
+          endDate: result.subscription_end_date,
+          timestamp: new Date().getTime()
+        }));
+      }
+      
+      return true;
+    } catch (err) {
+      console.error('[fetchDirectPremiumStatus] Ошибка:', err);
+      
+      // Пробуем взять из localStorage в случае ошибки
+      try {
+        const savedData = localStorage.getItem(PREMIUM_STATUS_KEY);
+        if (savedData) {
+          const parsed = JSON.parse(savedData);
+          if (parsed.userId === effectiveUserId && parsed.hasPremium) {
+            // Создаем объект премиум-статуса из сохраненных данных
+            const fallbackStatus: PremiumStatus = {
+              has_premium: true,
+              user_id: effectiveUserId,
+              subscription_end_date: parsed.endDate,
+              analysis_count: 9999,
+              post_generation_count: 9999
+            };
+            console.log('[fetchDirectPremiumStatus] Использую сохраненные данные:', fallbackStatus);
+            setPremiumStatus(fallbackStatus);
+            return true;
+          }
+        }
+      } catch (localStorageError) {
+        console.error('[fetchDirectPremiumStatus] Ошибка при чтении из localStorage:', localStorageError);
+      }
+      
       return false;
     }
   };
@@ -288,6 +350,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
           window.Telegram.WebApp.openInvoice(data.invoice_link, (status) => {
             if (status === 'paid') {
               fetchSubscriptionStatus();
+              fetchDirectPremiumStatus(); // Также обновляем прямой статус премиума
               if (window?.Telegram?.WebApp?.showPopup) {
                 window.Telegram.WebApp.showPopup({
                   title: 'Успешная оплата',
@@ -353,6 +416,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         fetchSubscriptionStatus();
+        fetchDirectPremiumStatus(); // Также обновляем прямой статус премиума
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -361,19 +425,33 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     };
   }, [validatedUserId]);
 
-  // Основной индикатор статуса подписки — только по API
-  const hasPremium = status?.has_subscription && status?.is_active;
-  const endDate = status?.subscription_end_date || null;
+  // Используем комбинацию всех доступных проверок премиума
+  // Приоритет: 1) Прямая проверка через bot-style API, 2) Стандартная проверка через subscription/status, 3) localStorage
+  const hasPremium = 
+    // Проверка через прямой API
+    (premiumStatus?.has_premium === true) || 
+    // Проверка через subscription API
+    (status?.has_subscription === true && status?.is_active === true);
+  
+  // Выбираем дату окончания из всех доступных источников
+  const endDate = 
+    premiumStatus?.subscription_end_date || // Приоритет 1: из прямой проверки
+    status?.subscription_end_date || // Приоритет 2: из стандартной проверки
+    localEndDate; // Приоритет 3: из localStorage
 
-  if (loading) {
+  if (loading && !premiumStatus && !status) {
     return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
   }
   
-  if (error) {
+  if (error && !hasPremium) {
     return (
       <div className="subscription-widget error">
         <p>Ошибка: {error}</p>
-        <button onClick={fetchSubscriptionStatus}>Повторить</button>
+        <button onClick={() => {
+          fetchSubscriptionStatus();
+          fetchDirectPremiumStatus();
+        }}>Повторить</button>
+        <button onClick={handleCheckPremiumViaBot}>Проверить через бот</button>
       </div>
     );
   }
@@ -388,6 +466,15 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
           {endDate && (
             <p className="end-date">Действует до: {formatDate(endDate)}</p>
           )}
+          <button 
+            className="refresh-button"
+            onClick={() => {
+              fetchSubscriptionStatus();
+              fetchDirectPremiumStatus();
+            }}
+          >
+            Обновить статус
+          </button>
         </div>
       ) : (
         <div className="free-block">
@@ -400,6 +487,12 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
               disabled={isSubscribing}
             >
               {isSubscribing ? 'Обработка...' : 'Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars'}
+            </button>
+            <button 
+              className="check-button"
+              onClick={handleCheckPremiumViaBot}
+            >
+              Проверить подписку через бот
             </button>
           </div>
         </div>
