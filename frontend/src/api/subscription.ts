@@ -254,7 +254,9 @@ export const getPremiumStatus = async (userId: string | null, nocacheParam?: str
     return {
       has_premium: false,
       user_id: userId,
-      error: error instanceof Error ? error.message : 'Неизвестная ошибка'
+      subscription_end_date: undefined,
+      analysis_count: 3,
+      post_generation_count: 1
     };
   }
 };
@@ -326,7 +328,9 @@ export const getRawPremiumStatus = async (userId: string | null, nocache: string
     return {
       has_premium: false,
       user_id: userId,
-      error: error instanceof Error ? error.message : 'Неизвестная ошибка'
+      subscription_end_date: undefined,
+      analysis_count: 3,
+      post_generation_count: 1
     };
   }
 };
@@ -423,7 +427,9 @@ export const getDirectPremiumStatus = async (userId: string | null): Promise<Pre
     return {
       has_premium: false,
       user_id: userId,
-      error: error instanceof Error ? error.message : 'Неизвестная ошибка'
+      subscription_end_date: undefined,
+      analysis_count: 3,
+      post_generation_count: 1
     };
   }
 };
@@ -457,18 +463,18 @@ export const getBotStylePremiumStatus = async (userId: string | null): Promise<P
     });
 
     if (!response.ok) {
-      throw new Error(`Ошибка API: ${response.status}`);
+      const text = await response.text();
+      if (text.includes('<!doctype html>') || text.includes('<html>')) {
+        throw new Error('Ошибка API: получен HTML вместо JSON. Проверьте серверный роутинг!');
+      }
+      throw new Error(`Ошибка API: ${response.status} ${text}`);
     }
-    
     const data = await response.json();
     console.log(`[API] Получен ответ из бот-стиль API:`, data);
-    
-    // Приводим ответ к формату PremiumStatus
     return {
       has_premium: data.has_premium,
       user_id: userId,
-      error: data.error || null,
-      subscription_end_date: data.subscription_end_date || null,
+      subscription_end_date: data.subscription_end_date === null ? undefined : data.subscription_end_date,
       analysis_count: data.analysis_count,
       post_generation_count: data.post_generation_count
     };
@@ -479,7 +485,9 @@ export const getBotStylePremiumStatus = async (userId: string | null): Promise<P
     return {
       has_premium: false,
       user_id: userId,
-      error: error instanceof Error ? error.message : 'Неизвестная ошибка'
+      subscription_end_date: undefined,
+      analysis_count: 3,
+      post_generation_count: 1
     };
   }
 }; 
