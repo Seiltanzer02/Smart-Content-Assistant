@@ -380,11 +380,73 @@ def normalize_db_url(url: str) -> str:
 async def telegram_webhook(request: Request):
     """Вебхук для обработки обновлений от бота Telegram."""
     try:
-        # Получаем данные запроса
         data = await request.json()
         logger.info(f"Получен вебхук от Telegram: {data}")
-        
-        # Проверяем, есть ли сообщение
+
+        # 1. Обработка pre_checkout_query
+        pre_checkout_query = data.get("pre_checkout_query")
+        if pre_checkout_query:
+            query_id = pre_checkout_query.get("id")
+            bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+            logger.info(f"[telegram_webhook] pre_checkout_query: query_id={query_id}")
+            if not bot_token:
+                logger.error("[telegram_webhook] Нет TELEGRAM_BOT_TOKEN")
+                return {"ok": False, "error": "TELEGRAM_BOT_TOKEN не задан"}
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"https://api.telegram.org/bot{bot_token}/answerPreCheckoutQuery",
+                    json={"pre_checkout_query_id": query_id, "ok": True}
+                )
+                logger.info(f"[telegram_webhook] Ответ на pre_checkout_query: {resp.text}")
+            return {"ok": True, "pre_checkout_query": True}
+
+        # 2. Обработка успешной оплаты
+        message = data.get("message", {})
+        successful_payment = message.get("successful_payment")
+        if successful_payment:
+            user_id_raw = message.get("from", {}).get("id")
+            try:
+                user_id = int(user_id_raw)
+                logger.info(f'[telegram_webhook] user_id приведён к int: {user_id} ({type(user_id)})')
+            except Exception as e:
+                logger.error(f'[telegram_webhook] Не удалось привести user_id к int: {user_id_raw}, ошибка: {e}')
+                return {"ok": False, "error": "Некорректный user_id"}
+            payment_id = successful_payment.get("telegram_payment_charge_id")
+            from datetime import datetime, timedelta
+            now = datetime.utcnow()
+            start_date = now
+            end_date = now + timedelta(days=30)
+            logger.info(f'[telegram_webhook] Успешная оплата: user_id={user_id} ({type(user_id)}), payment_id={payment_id}, start_date={start_date}, end_date={end_date}')
+            try:
+                # Проверяем, есть ли уже подписка
+                existing = supabase.table("user_subscription").select("id").eq("user_id", user_id).maybe_single().execute()
+                if existing.data:
+                    # Обновляем
+                    supabase.table("user_subscription").update({
+                        "start_date": start_date.isoformat(),
+                        "end_date": end_date.isoformat(),
+                        "payment_id": payment_id,
+                        "is_active": True,
+                        "updated_at": now.isoformat()
+                    }).eq("user_id", user_id).execute()
+                else:
+                    # Создаём новую
+                    supabase.table("user_subscription").insert({
+                        "user_id": user_id,
+                        "start_date": start_date.isoformat(),
+                        "end_date": end_date.isoformat(),
+                        "payment_id": payment_id,
+                        "is_active": True,
+                        "created_at": now.isoformat(),
+                        "updated_at": now.isoformat()
+                    }).execute()
+                logger.info(f'[telegram_webhook] Подписка успешно активирована для user_id={user_id}')
+            except Exception as e:
+                logger.error(f'[telegram_webhook] Ошибка при активации подписки: {e}', exc_info=True)
+            return {"ok": True, "successful_payment": True}
+
+        # --- Дальнейшая обработка сообщений (оставляю существующую логику) ---
+        # Получаем сообщение, если оно есть
         message = data.get('message')
         if not message:
             return {"ok": True}
