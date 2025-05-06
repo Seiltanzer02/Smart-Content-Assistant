@@ -3836,48 +3836,21 @@ async def bot_style_premium_check(user_id: str, request: Request):
     """
     try:
         logger.info(f"[BOT-STYLE] Запрос премиум-статуса для пользователя: {user_id}")
-        
-        # Проверяем, что user_id предоставлен и преобразуем его в int
         if not user_id:
-            return JSONResponse(
-                status_code=400,
-                content={"success": False, "error": "ID пользователя не указан"}
-            )
-        
+            return JSONResponse(status_code=400, content={"success": False, "error": "ID пользователя не указан"})
         try:
             user_id_int = int(user_id)
         except ValueError:
-            return JSONResponse(
-                status_code=400,
-                content={"success": False, "error": "ID пользователя должен быть числом"}
-            )
-        
-        # Проверяем, что у нас есть доступ к базе данных
+            return JSONResponse(status_code=400, content={"success": False, "error": "ID пользователя должен быть числом"})
         db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("RENDER_DATABASE_URL")
         if not db_url:
             logger.error("[BOT-STYLE] Отсутствуют SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL")
-            return JSONResponse(
-                status_code=500,
-                content={"success": False, "error": "Отсутствуют настройки подключения к базе данных"}
-            )
-            
-        # Нормализуем URL базы данных
+            return JSONResponse(status_code=500, content={"success": False, "error": "Отсутствуют настройки подключения к базе данных"})
         db_url = normalize_db_url(db_url)
-        
-        # Подключаемся напрямую к базе данных (так же, как это делает бот)
         conn = await asyncpg.connect(db_url)
         try:
-            # Проверяем наличие активной подписки
             query = """
-            SELECT
-                id,
-                user_id,
-                start_date,
-                end_date,
-                is_active,
-                payment_id,
-                created_at,
-                updated_at
+            SELECT id, user_id, start_date, end_date, is_active, payment_id, created_at, updated_at
             FROM user_subscription 
             WHERE user_id = $1 
               AND is_active = TRUE 
@@ -3885,16 +3858,10 @@ async def bot_style_premium_check(user_id: str, request: Request):
             ORDER BY end_date DESC
             LIMIT 1
             """
-            
             subscription = await conn.fetchrow(query, user_id_int)
-            
-            # Проверяем результат
             if subscription:
-                # Подписка существует и активна
                 has_premium = True
                 subscription_end_date = subscription["end_date"].strftime('%Y-%m-%d %H:%M:%S') if subscription["end_date"] else None
-                
-                # Форматируем subscription в словарь
                 subscription_data = {
                     "id": subscription["id"],
                     "user_id": subscription["user_id"],
@@ -3906,16 +3873,11 @@ async def bot_style_premium_check(user_id: str, request: Request):
                     "updated_at": subscription["updated_at"].strftime('%Y-%m-%d %H:%M:%S') if subscription["updated_at"] else None
                 }
             else:
-                # Подписка не существует или не активна
                 has_premium = False
                 subscription_data = None
                 subscription_end_date = None
-            
-            # Получаем лимиты в зависимости от статуса подписки
             analysis_count = 9999 if has_premium else 3
             post_generation_count = 9999 if has_premium else 1
-            
-            # Формируем ответ
             response = {
                 "success": True,
                 "user_id": user_id_int,
@@ -3924,12 +3886,8 @@ async def bot_style_premium_check(user_id: str, request: Request):
                 "post_generation_count": post_generation_count,
                 "subscription": subscription_data
             }
-            
-            # Добавляем дату окончания подписки если есть
             if subscription_end_date:
                 response["subscription_end_date"] = subscription_end_date
-            
-            # Возвращаем ответ с заголовками CORS
             return JSONResponse(
                 content=response,
                 headers={
@@ -3939,11 +3897,8 @@ async def bot_style_premium_check(user_id: str, request: Request):
                     "Content-Type": "application/json"
                 }
             )
-            
         finally:
-            # Закрываем соединение с базой данных
             await conn.close()
-        
     except Exception as e:
         logger.error(f"[BOT-STYLE] Ошибка при проверке премиум-статуса: {e}")
         return JSONResponse(
