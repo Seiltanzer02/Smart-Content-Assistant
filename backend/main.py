@@ -8,7 +8,7 @@ import httpx
 import tempfile
 import shutil
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field
 
 # FastAPI компоненты
@@ -209,80 +209,86 @@ app.add_middleware(
 @app.get("/bot-style-premium-check/{user_id}", status_code=200)
 async def bot_style_premium_check(user_id: str, request: Request):
     """
-    Прямая проверка премиум-статуса через базу данных, используя тот же метод, который использует бот.
-    Этот эндпоинт игнорирует кэширование и промежуточные слои, работая напрямую с базой данных.
+    Проверка премиум-статуса через Supabase REST API (без прямого подключения к PostgreSQL).
     """
+    import os
+    import httpx
+    from datetime import datetime, timezone
+    from fastapi.responses import JSONResponse
+
+    logger.info(f"[BOT-STYLE] Запрос премиум-статуса для пользователя: {user_id}")
+    if not user_id:
+        return JSONResponse(status_code=400, content={"success": False, "error": "ID пользователя не указан"})
     try:
-        logger.info(f"[BOT-STYLE] Запрос премиум-статуса для пользователя: {user_id}")
-        if not user_id:
-            return JSONResponse(status_code=400, content={"success": False, "error": "ID пользователя не указан"})
-        try:
-            user_id_int = int(user_id)
-        except ValueError:
-            return JSONResponse(status_code=400, content={"success": False, "error": "ID пользователя должен быть числом"})
-        db_url = os.getenv("SUPABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("RENDER_DATABASE_URL")
-        if not db_url:
-            logger.error("[BOT-STYLE] Отсутствуют SUPABASE_URL, DATABASE_URL и RENDER_DATABASE_URL")
-            return JSONResponse(status_code=500, content={"success": False, "error": "Отсутствуют настройки подключения к базе данных"})
-        db_url = normalize_db_url(db_url)
-        conn = await asyncpg.connect(db_url)
-        try:
-            query = """
-            SELECT id, user_id, start_date, end_date, is_active, payment_id, created_at, updated_at
-            FROM user_subscription 
-            WHERE user_id = $1 
-              AND is_active = TRUE 
-              AND end_date > NOW()
-            ORDER BY end_date DESC
-            LIMIT 1
-            """
-            subscription = await conn.fetchrow(query, user_id_int)
-            if subscription:
-                has_premium = True
-                subscription_end_date = subscription["end_date"].strftime('%Y-%m-%d %H:%M:%S') if subscription["end_date"] else None
-                subscription_data = {
-                    "id": subscription["id"],
-                    "user_id": subscription["user_id"],
-                    "start_date": subscription["start_date"].strftime('%Y-%m-%d %H:%M:%S') if subscription["start_date"] else None,
-                    "end_date": subscription_end_date,
-                    "is_active": subscription["is_active"],
-                    "payment_id": subscription["payment_id"],
-                    "created_at": subscription["created_at"].strftime('%Y-%m-%d %H:%M:%S') if subscription["created_at"] else None,
-                    "updated_at": subscription["updated_at"].strftime('%Y-%m-%d %H:%M:%S') if subscription["updated_at"] else None
-                }
-            else:
-                has_premium = False
-                subscription_data = None
-                subscription_end_date = None
-            analysis_count = 9999 if has_premium else 3
-            post_generation_count = 9999 if has_premium else 1
-            response = {
-                "success": True,
-                "user_id": user_id_int,
-                "has_premium": has_premium,
-                "analysis_count": analysis_count,
-                "post_generation_count": post_generation_count,
-                "subscription": subscription_data
-            }
-            if subscription_end_date:
-                response["subscription_end_date"] = subscription_end_date
-            return JSONResponse(
-                content=response,
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "GET, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-                    "Content-Type": "application/json"
-                }
-            )
-        finally:
-            await conn.close()
-    except Exception as e:
-        logger.error(f"[BOT-STYLE] Ошибка при проверке премиум-статуса: {e}")
+        user_id_int = int(user_id)
+    except ValueError:
+        return JSONResponse(status_code=400, content={"success": False, "error": "ID пользователя должен быть числом"})
+
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_ANON_KEY")
+    if not supabase_url or not supabase_key:
+        logger.error("[BOT-STYLE] Не заданы SUPABASE_URL или SUPABASE_ANON_KEY")
+        return JSONResponse(status_code=500, content={"success": False, "error": "Не заданы SUPABASE_URL или SUPABASE_ANON_KEY"})
+
+    headers = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}"
+    }
+    params = {
+        "select": "*",
+        "user_id": f"eq.{user_id_int}",
+        "is_active": "eq.true"
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{supabase_url}/rest/v1/user_subscription", headers=headers, params=params)
+        if resp.status_code != 200:
+            logger.error(f"[BOT-STYLE] Ошибка Supabase REST: {resp.status_code} - {resp.text}")
+            return JSONResponse(status_code=500, content={"success": False, "error": f"Supabase REST error: {resp.status_code}"})
+        data = resp.json()
+        subscription = None
+        has_premium = False
+        subscription_end_date = None
+        if data and isinstance(data, list) and len(data) > 0:
+            # Берём самую свежую подписку
+            sub = sorted(data, key=lambda x: x.get("end_date", ""), reverse=True)[0]
+            # Проверяем дату окончания
+            end_date = sub.get("end_date")
+            is_active = sub.get("is_active", False)
+            if end_date and is_active:
+                try:
+                    # Преобразуем дату в datetime
+                    dt_end = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+                    if dt_end > datetime.now(timezone.utc):
+                        has_premium = True
+                        subscription_end_date = dt_end.strftime('%Y-%m-%d %H:%M:%S')
+                        subscription = sub
+                except Exception as dt_err:
+                    logger.warning(f"[BOT-STYLE] Не удалось разобрать дату окончания: {dt_err}")
+        analysis_count = 9999 if has_premium else 3
+        post_generation_count = 9999 if has_premium else 1
+        response = {
+            "success": True,
+            "user_id": user_id_int,
+            "has_premium": has_premium,
+            "analysis_count": analysis_count,
+            "post_generation_count": post_generation_count,
+            "subscription": subscription
+        }
+        if subscription_end_date:
+            response["subscription_end_date"] = subscription_end_date
         return JSONResponse(
-            status_code=500,
-            content={"success": False, "error": str(e)}
+            content=response,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                "Content-Type": "application/json"
+            }
         )
+    except Exception as e:
+        logger.error(f"[BOT-STYLE] Ошибка при проверке премиум-статуса через Supabase REST: {e}")
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 @app.post("/generate-invoice", response_model=Dict[str, Any])
 async def generate_invoice(request: Request):
