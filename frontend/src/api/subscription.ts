@@ -29,17 +29,13 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
   if (!userId) {
     throw new Error('ID пользователя не предоставлен');
   }
-  const nocache = new Date().getTime();
-  const response = await axios.get(`${API_URL}/subscription/status?user_id=${userId}&nocache=${nocache}`, {
-    headers: {
-      'x-telegram-user-id': userId,
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-      'Accept': 'application/json'
-    }
-  });
-  return response.data;
+  const response = await fetch(`/bot-style-premium-check/${userId}`);
+  const data = await response.json();
+  return {
+    has_subscription: !!data.has_premium,
+    is_active: !!data.has_premium,
+    subscription_end_date: data.subscription_end_date || null
+  };
 };
 
 /**
