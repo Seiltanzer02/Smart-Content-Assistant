@@ -5,6 +5,8 @@ export interface SubscriptionStatus {
   has_subscription: boolean;
   is_active: boolean;
   subscription_end_date?: string | null;
+  analysis_count?: number;
+  post_generation_count?: number;
 }
 
 // Интерфейс для прямой проверки премиум-статуса
