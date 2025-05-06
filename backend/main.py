@@ -2853,20 +2853,17 @@ async def check_db_tables():
         if not db_url:
             logger.error("Отсутствуют SUPABASE_URL и DATABASE_URL в переменных окружения при проверке таблиц БД")
             return False
-        
         # Проверяем есть ли клиент Supabase
         if not supabase:
             logger.error("Клиент Supabase не инициализирован для проверки таблиц")
             return False
-            
         # Для проверки просто запрашиваем одну строку из таблицы, чтобы убедиться, что соединение работает
         try:
-        result = supabase.table("suggested_ideas").select("id").limit(1).execute()
-        logger.info("Таблица suggested_ideas существует и доступна.")
+            result = supabase.table("suggested_ideas").select("id").limit(1).execute()
+            logger.info("Таблица suggested_ideas существует и доступна.")
         except Exception as e:
             logger.error(f"Ошибка при проверке соединения с Supabase: {e}")
             return False
-        
         # Автоматическое добавление недостающих столбцов
         try:
             move_temp_files.add_missing_columns()
