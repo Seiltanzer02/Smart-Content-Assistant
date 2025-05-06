@@ -3,9 +3,8 @@ import axios from 'axios';
 // Определение интерфейса для статуса подписки
 export interface SubscriptionStatus {
   has_subscription: boolean;
-  analysis_count: number;
-  post_generation_count: number;
-  subscription_end_date?: string;
+  is_active: boolean;
+  subscription_end_date?: string | null;
 }
 
 // Интерфейс для прямой проверки премиум-статуса
@@ -22,7 +21,7 @@ export interface PremiumStatus {
 const API_URL = '';
 
 /**
- * Получает статус подписки пользователя
+ * Получает статус подписки пользователя (только через /subscription/status)
  * @param userId ID пользователя Telegram
  * @returns Promise с данными о статусе подписки
  */
@@ -30,119 +29,17 @@ export const getUserSubscriptionStatus = async (userId: string | null): Promise<
   if (!userId) {
     throw new Error('ID пользователя не предоставлен');
   }
-
-  console.log(`[API] Основной запрос статуса подписки для пользователя ID: ${userId}`);
-  
-  // Пробуем разные способы получения данных о подписке последовательно
-  try {
-    // Метод 1: Проверка через бот-стиль API (прямой запрос к БД как в боте)
-    try {
-      const botStyleData = await getBotStylePremiumStatus(userId);
-      console.log(`[API] Успешно получены данные через бот-стиль API`);
-      
-      return {
-        has_subscription: botStyleData.has_premium,
-        analysis_count: botStyleData.analysis_count || 3,
-        post_generation_count: botStyleData.post_generation_count || 1,
-        subscription_end_date: botStyleData.subscription_end_date
-      };
-    } catch (botStyleError) {
-      console.warn(`[API] Не удалось получить данные через бот-стиль API:`, botStyleError);
+  const nocache = new Date().getTime();
+  const response = await axios.get(`${API_URL}/subscription/status?user_id=${userId}&nocache=${nocache}`, {
+    headers: {
+      'x-telegram-user-id': userId,
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'Accept': 'application/json'
     }
-    
-    // Метод 2: Прямой доступ к API direct_premium_check
-    try {
-      const directData = await getDirectPremiumStatus(userId);
-      console.log(`[API] Успешно получены данные через прямой API`);
-      
-      return {
-        has_subscription: directData.has_premium,
-        analysis_count: directData.analysis_count || 3,
-        post_generation_count: directData.post_generation_count || 1,
-        subscription_end_date: directData.subscription_end_date
-      };
-    } catch (directError) {
-      console.warn(`[API] Не удалось получить данные через прямой API:`, directError);
-    }
-    
-    // Метод 3: Raw API с нестандартным URL
-    try {
-      const nocache = new Date().getTime().toString();
-      const rawData = await getRawPremiumStatus(userId, `_nocache=${nocache}`);
-      console.log(`[API] Успешно получены данные через raw API`);
-      
-      return {
-        has_subscription: rawData.has_premium,
-        analysis_count: rawData.analysis_count || 3,
-        post_generation_count: rawData.post_generation_count || 1,
-        subscription_end_date: rawData.subscription_end_date
-      };
-    } catch (rawError) {
-      console.warn(`[API] Не удалось получить данные через raw API:`, rawError);
-    }
-    
-    // Метод 4: Новый V2 API
-    try {
-      const subscriptionData = await getSubscriptionStatusV2(userId);
-      console.log(`[API] Успешно получены данные через V2 API`);
-      return subscriptionData;
-    } catch (v2Error) {
-      console.warn(`[API] Не удалось получить данные через V2 API:`, v2Error);
-    }
-    
-    // Метод 5: Проверка премиума и преобразование в формат SubscriptionStatus
-    try {
-      const premiumData = await getPremiumStatus(userId);
-      console.log(`[API] Успешно получены данные через премиум API`);
-      
-      return {
-        has_subscription: premiumData.has_premium,
-        analysis_count: premiumData.analysis_count || 3,
-        post_generation_count: premiumData.post_generation_count || 1,
-        subscription_end_date: premiumData.subscription_end_date
-      };
-    } catch (premiumError) {
-      console.warn(`[API] Не удалось получить данные через премиум API:`, premiumError);
-    }
-    
-    // Метод 6: Старый API (оставляем для обратной совместимости)
-    try {
-      const nocache = new Date().getTime();
-      const response = await axios.get(`${API_URL}/subscription/status?user_id=${userId}&nocache=${nocache}`, {
-        headers: { 
-          'x-telegram-user-id': userId,
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0',
-          'Accept': 'application/json'
-        }
-      });
-      
-      console.log(`[API] Успешно получены данные через старый API:`, response.data);
-      return response.data;
-    } catch (oldApiError) {
-      console.warn(`[API] Не удалось получить данные через старый API:`, oldApiError);
-    }
-    
-    // Если все методы не сработали, возвращаем базовые данные
-    console.warn(`[API] Все методы получения подписки не сработали, возвращаем базовые данные`);
-    return {
-      has_subscription: false,
-      analysis_count: 3,
-      post_generation_count: 1,
-      error: 'Все методы получения статуса подписки не сработали'
-    };
-  } catch (error) {
-    console.error('[API] Критическая ошибка при получении статуса подписки:', error);
-    
-    // Возвращаем базовые данные в случае полного сбоя
-    return {
-      has_subscription: false,
-      analysis_count: 3,
-      post_generation_count: 1,
-      error: error instanceof Error ? error.message : 'Неизвестная ошибка'
-    };
-  }
+  });
+  return response.data;
 };
 
 /**
