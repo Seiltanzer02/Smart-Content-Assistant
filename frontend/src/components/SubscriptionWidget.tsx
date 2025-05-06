@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/SubscriptionWidget.css';
-import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice } from '../api/subscription';
+import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice, checkPremiumViaBot } from '../api/subscription';
 
 // Добавляем объявление глобального объекта Telegram для TypeScript
 declare global {
@@ -208,16 +208,40 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     };
   }, [validatedUserId]);
   
-  // Получаем статус только через новый API
+  // Основная функция получения статуса
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
-    const effectiveUserId = validatedUserId;
+    let effectiveUserId = validatedUserId;
     if (!effectiveUserId) {
       setError('ID пользователя не определен. Пожалуйста, перезапустите приложение.');
       return false;
     }
     setLoading(true);
     try {
-      const result = await getUserSubscriptionStatus(effectiveUserId);
+      let result: SubscriptionStatus | null = null;
+      try {
+        result = await getUserSubscriptionStatus(effectiveUserId);
+      } catch (apiError) {
+        // fallback: пробуем взять из localStorage
+        const savedData = localStorage.getItem('premium_status_data');
+        if (savedData) {
+          const parsed = JSON.parse(savedData);
+          if (parsed.userId === effectiveUserId && parsed.hasPremium) {
+            result = {
+              has_subscription: true,
+              analysis_count: 9999,
+              post_generation_count: 9999,
+              subscription_end_date: parsed.endDate || undefined
+            };
+          }
+        }
+      }
+      if (!result) {
+        result = {
+          has_subscription: false,
+          analysis_count: 3,
+          post_generation_count: 1
+        };
+      }
       setStatus(result);
       setError(null);
       setLoading(false);
@@ -311,6 +335,32 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     }
   };
   
+  // Проверка через бота и сохранение статуса в localStorage
+  const handleCheckPremiumViaBot = () => {
+    if (validatedUserId) {
+      checkPremiumViaBot();
+      // Сохраняем флаг, что была ручная проверка
+      localStorage.setItem('premium_check_initiated', JSON.stringify({
+        userId: validatedUserId,
+        timestamp: new Date().getTime(),
+        status: 'checking'
+      }));
+    }
+  };
+  
+  // Автообновление после возврата из бота
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchSubscriptionStatus();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [validatedUserId]);
+
   // Основной индикатор статуса подписки — только по API
   const hasPremium = status?.has_subscription && status?.is_active;
   const endDate = status?.subscription_end_date || null;
