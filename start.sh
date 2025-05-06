@@ -21,10 +21,6 @@ python -m backend.migrate
 echo "Запуск скрипта для прямого обновления таблиц..."
 python -m backend.move_temp_files
 
-# Исправление отступов в файле main.py
-echo "Запуск скрипта исправления отступов в файле main.py..."
-python -m backend.fix_indentation
-
 # Запуск приложения
 echo "Запуск приложения..."
 cd backend && uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000} 
