@@ -415,12 +415,12 @@ async def telegram_webhook(request: Request):
             from datetime import datetime, timedelta
             now = datetime.utcnow()
             start_date = now
-            end_date = now + timedelta(days=30)
+            end_date = now + timedelta(minutes=1)
             logger.info(f'[telegram_webhook] Успешная оплата: user_id={user_id} ({type(user_id)}), payment_id={payment_id}, start_date={start_date}, end_date={end_date}')
             try:
                 # Проверяем, есть ли уже подписка
-                existing = supabase.table("user_subscription").select("id").eq("user_id", user_id).maybe_single().execute()
-                if existing.data:
+                existing = supabase.table("user_subscription").select("id").eq("user_id", user_id).execute()
+                if existing and hasattr(existing, "data") and existing.data and len(existing.data) > 0:
                     # Обновляем
                     supabase.table("user_subscription").update({
                         "start_date": start_date.isoformat(),

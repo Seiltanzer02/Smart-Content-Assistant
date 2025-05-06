@@ -382,11 +382,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
                   buttons: [{ type: 'ok' }]
                 });
               }
-              setTimeout(() => {
-                if (window?.Telegram?.WebApp?.close) {
-                  window.Telegram.WebApp.close();
-                }
-              }, 300);
             } else if (status === 'failed') {
               setError('Оплата не удалась. Пожалуйста, попробуйте позже.');
             } else if (status === 'cancelled') {
