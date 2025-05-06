@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/SubscriptionWidget.css';
-import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice, checkPremiumViaBot, getBotStylePremiumStatus } from '../api/subscription';
+import { getBotStylePremiumStatus, PremiumStatus, generateInvoice } from '../api/subscription';
 
 // Добавляем объявление глобального объекта Telegram для TypeScript
 declare global {
@@ -36,7 +36,7 @@ const formatDate = (isoDateString: string): string => {
 const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActive }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<SubscriptionStatus | null>(null);
+  const [status, setStatus] = useState<PremiumStatus | null>(null);
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
   const SUBSCRIPTION_PRICE = 1; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
@@ -208,40 +208,16 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     };
   }, [validatedUserId]);
   
-  // Основной источник истины — только API
+  // Используем только прямой запрос к /bot-style-premium-check/{user_id}
   const fetchSubscriptionStatus = async (): Promise<boolean> => {
-    let effectiveUserId = validatedUserId;
+    const effectiveUserId = validatedUserId;
     if (!effectiveUserId) {
       setError('ID пользователя не определен. Пожалуйста, перезапустите приложение.');
       return false;
     }
     setLoading(true);
     try {
-      let result: SubscriptionStatus | null = null;
-      try {
-        result = await getUserSubscriptionStatus(effectiveUserId);
-      } catch (apiError) {
-        // fallback: localStorage только если API недоступен
-        const savedData = localStorage.getItem(PREMIUM_STATUS_KEY);
-        if (savedData) {
-          const parsed = JSON.parse(savedData);
-          if (parsed.userId === effectiveUserId && parsed.hasPremium) {
-            result = {
-              has_subscription: true,
-              analysis_count: 9999,
-              post_generation_count: 9999,
-              subscription_end_date: parsed.endDate || undefined
-            };
-          }
-        }
-      }
-      if (!result) {
-        result = {
-          has_subscription: false,
-          analysis_count: 3,
-          post_generation_count: 1
-        };
-      }
+      const result = await getBotStylePremiumStatus(effectiveUserId);
       setStatus(result);
       setError(null);
       setLoading(false);
@@ -348,7 +324,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       localStorage.setItem('premium_check_initiated', JSON.stringify(checkInitiated));
       
       // Открываем бота для проверки премиума
-      checkPremiumViaBot();
+      getBotStylePremiumStatus(validatedUserId);
     }
   };
   
@@ -395,8 +371,8 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   }
   
   // Основной индикатор статуса подписки — только по API, localStorage как резерв
-  const hasPremium = status?.has_subscription || false;
-  const endDate = status?.subscription_end_date || localEndDate;
+  const hasPremium = status?.has_premium || false;
+  const endDate = status?.subscription_end_date || null;
 
   return (
     <div className="subscription-widget">
