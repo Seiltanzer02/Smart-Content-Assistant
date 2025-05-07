@@ -10,6 +10,7 @@ import shutil
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field
+import re
 
 # FastAPI компоненты
 from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends, Form
