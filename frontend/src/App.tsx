@@ -727,10 +727,13 @@ function App() {
 
       if (response.data && response.data.found_images && selectedIdea) {
         const newImages = response.data.found_images.map((img: any) => ({
-          url: img.url || img.urls?.regular || img.regular_url || img.preview_url || '',
+          url: img.regular_url || img.urls?.regular || img.url || img.urls?.raw || '', // Кладём regular_url в url
           alt: img.alt_description || img.description || 'Изображение для поста',
           author: img.user?.name || img.author_name || '',
-          author_url: img.user?.links?.html || img.author_url || ''
+          author_url: img.user?.links?.html || img.author_url || '',
+          id: img.id || `unsplash-${uuidv4()}`,
+          preview_url: img.preview_url || img.urls?.small || img.urls?.thumb || img.urls?.regular || '',
+          source: img.source || 'unsplash'
         }));
 
         setSelectedIdea(prevState => {
@@ -1218,12 +1221,12 @@ function App() {
         if (response.data.found_images && Array.isArray(response.data.found_images)) {
           const formattedSuggestedImages = response.data.found_images.map((img: any) => ({
             id: img.id || `unsplash-${uuidv4()}`, // Используем ID от Unsplash или генерируем, если нет
-            url: img.urls?.regular || img.urls?.raw || img.url || '', // URL для загрузки (предпочтительно качественный)
-            preview_url: img.urls?.small || img.urls?.thumb || img.preview_url || img.urls?.regular || '', // URL для превью
+            url: img.regular_url || img.urls?.regular || img.url || img.urls?.raw || '', // URL для загрузки (предпочтительно качественный)
+            preview_url: img.preview_url || img.urls?.small || img.urls?.thumb || img.urls?.regular || '', // URL для превью
             alt: img.alt_description || img.description || 'Предложенное изображение',
-            author: img.user?.name || '',
-            author_url: img.user?.links?.html || '',
-            source: 'unsplash' // Четко указываем источник
+            author: img.user?.name || img.author_name || '',
+            author_url: img.user?.links?.html || img.author_url || '',
+            source: img.source || 'unsplash' // Четко указываем источник
           }));
           setSuggestedImages(formattedSuggestedImages);
         } else {
