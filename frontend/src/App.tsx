@@ -1182,18 +1182,37 @@ function App() {
 
   // Function to handle selecting/deselecting a suggested image
   const handleImageSelection = (imageToSelect: PostImage | undefined) => {
+    console.log('handleImageSelection вызван с изображением:', JSON.stringify(imageToSelect));
+    
     if (!imageToSelect) {
+      console.error("Ошибка: изображение не выбрано.");
       toast.error("Ошибка: изображение не выбрано.");
       return;
     }
 
-    // Если нет imageToSelect.url, но есть другие варианты — подставляем их
+    console.log('Исходный URL изображения:', imageToSelect.url);
+    alert(`Попытка выбрать изображение: ${imageToSelect.alt || 'без описания'}`);
+
+    // Если у объекта есть вложенный объект urls (как у Unsplash API)
     let url = imageToSelect.url;
     if (!url || url.trim() === '') {
-      url = (imageToSelect as any).regular || (imageToSelect as any).raw || (imageToSelect as any).small || '';
+      // Проверяем, есть ли urls как вложенный объект (характерно для ответа Unsplash API)
+      if ((imageToSelect as any).urls) {
+        const urls = (imageToSelect as any).urls;
+        url = urls.regular || urls.raw || urls.small || urls.thumb || '';
+        console.log('Найден вложенный объект urls, используем:', url);
+      } else {
+        // Используем прямые поля, если они есть
+        url = (imageToSelect as any).regular || (imageToSelect as any).raw || 
+              (imageToSelect as any).small || (imageToSelect as any).regular_url || '';
+        console.log('Поля напрямую, используем:', url);
+      }
     }
 
+    console.log('Итоговый URL для выбора:', url);
+
     if (!url || url.trim() === '') {
+      console.error("У изображения нет корректного URL");
       toast.error("У выбранного изображения нет корректного URL для сохранения.");
       return;
     }
@@ -1201,13 +1220,17 @@ function App() {
     // Формируем новый объект с валидным url
     const selected: PostImage = {
       ...imageToSelect,
-      url,
+      url: url, // Явно назначаем обработанный URL
     };
+
+    console.log('Сформирован объект selected:', JSON.stringify(selected));
 
     // Если уже выбрано это изображение — снимаем выбор
     if (selectedImage && selectedImage.url === selected.url) {
+      console.log('Снимаем выбор с изображения');
       setSelectedImage(null);
     } else {
+      console.log('Выбираем новое изображение');
       setSelectedImage(selected);
       toast.success("Изображение выбрано");
     }
@@ -1878,22 +1901,51 @@ function App() {
                           <h3>Предложенные изображения:</h3>
                           <div className="image-gallery suggested">
                               {suggestedImages.map((image, index) => {
-                                  const isSelected = selectedImage ? selectedImage.url === image.url : false;
+                                  console.log(`Рендеринг изображения ${index}:`, image);
+                                  // Проверка, доступен ли URL для превью
+                                  const previewUrl = image.preview_url || 
+                                                (image as any).urls?.small || 
+                                                (image as any).urls?.thumb || 
+                                                image.url || 
+                                                'https://via.placeholder.com/100?text=Нет+превью';
+                                  
+                                  const isSelected = selectedImage ? 
+                                        (selectedImage.url === image.url || 
+                                         selectedImage.url === (image as any).urls?.regular) : false;
+                                  
                                   return (
                                       <div 
-                                          key={image.url || image.id || `suggested-${index}`} // Более надежный ключ
+                                          key={image.id || `suggested-${index}`}
                                           className={`image-item ${isSelected ? 'selected' : ''}`}
-                                          onClick={() => handleImageSelection(image)}
-                                          style={{ cursor: 'pointer', position: 'relative', border: isSelected ? '3px solid #1976d2' : '2px solid transparent', padding: '2px' }} // Явная рамка для выбранного
+                                          onClick={() => {
+                                              console.log(`Клик на изображении ${index}:`);
+                                              handleImageSelection(image);
+                                          }}
+                                          style={{ 
+                                              cursor: 'pointer', 
+                                              position: 'relative', 
+                                              border: isSelected ? '3px solid #1976d2' : '2px solid transparent', 
+                                              padding: '2px',
+                                              background: isSelected ? '#e3f2fd' : 'transparent',
+                                              borderRadius: '4px',
+                                              overflow: 'hidden',
+                                              marginBottom: '10px'
+                                          }}
                                       >
                                       <img 
-                                          src={image.preview_url || image.url} 
-                                          alt={image.alt || 'Suggested image'} 
-                                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                          src={previewUrl}
+                                          alt={image.alt || 'Предложенное изображение'} 
+                                          style={{ 
+                                              width: '100%', 
+                                              height: '100%', 
+                                              objectFit: 'cover', 
+                                              display: 'block',
+                                              minHeight: '120px'
+                                          }}
                                           onError={(e) => {
                                               const target = e.target as HTMLImageElement;
-                                              target.src = 'https://via.placeholder.com/100?text=Ошибка'; 
-                                              console.error('Image load error:', image.preview_url || image.url);
+                                              target.src = 'https://via.placeholder.com/100?text=Ошибка';
+                                              console.error('Ошибка загрузки изображения:', previewUrl);
                                           }}
                                       />
                                       {isSelected && (
@@ -1917,9 +1969,9 @@ function App() {
                                       </div>
                                   );
                               })}
+                          </div>
                       </div>
-                    </div>
-                  )}
+                    )}
                   
                   {/* --- Блок для своего изображения: Загрузчик и Превью --- */}
                   <div className="custom-image-section">
