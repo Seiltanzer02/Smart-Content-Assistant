@@ -783,7 +783,8 @@ function App() {
     }
 
     // Для изображений из unsplash или других API нужно сначала сохранить в Supabase Storage
-    if (selectedImage && selectedImage.source === 'unsplash' && !selectedImage.url.includes('supabase.co')) {
+    let finalImageData = selectedImage;
+    if (selectedImage && (selectedImage.source === 'unsplash' || selectedImage.source === 'custom') && !selectedImage.url.includes('supabase.co')) {
       try {
         console.log("Сохраняем изображение из внешнего источника в Supabase Storage...");
         
@@ -802,20 +803,20 @@ function App() {
         if (saveImageResponse.data && saveImageResponse.data.stored_image) {
           const storedImage = saveImageResponse.data.stored_image;
           // Обновляем выбранное изображение с данными из Storage
-          setSelectedImage({
+          const updatedImage = {
             ...selectedImage,
             id: storedImage.id || selectedImage.id,
             url: storedImage.url, // URL в Supabase Storage
             preview_url: storedImage.preview_url || storedImage.url,
             source: 'supabase' // Теперь источник - Supabase Storage
-          });
+          };
+          
+          setSelectedImage(updatedImage);
+          finalImageData = updatedImage;
           console.log("Изображение успешно сохранено в Supabase Storage:", storedImage);
         }
       } catch (err: any) {
         console.error("Ошибка при сохранении изображения в Storage:", err);
-        
-        // Поскольку это предварительная попытка сохранения, можно продолжить с оригинальным URL
-        console.log("Продолжаем с оригинальным URL изображения");
         
         // Если ошибка критическая, показываем пользователю и прерываем сохранение
         if (err.response?.status >= 500) {
@@ -840,8 +841,10 @@ function App() {
       format_style: currentPostFormat,
       final_text: currentPostText,
       channel_name: channelName || undefined,
-      selected_image_data: selectedImage
+      selected_image_data: finalImageData
     };
+
+    console.log("Финальный payload для сохранения поста:", postPayload);
 
     try {
       let response;
@@ -877,6 +880,7 @@ function App() {
       const errorMsg = err.response?.data?.detail || err.message || (currentPostId ? 'Ошибка при обновлении поста' : 'Ошибка при сохранении поста');
       setError(errorMsg);
       console.error(currentPostId ? 'Ошибка при обновлении поста:' : 'Ошибка при сохранении поста:', err);
+      console.error('Детали ошибки:', err.response?.data);
     } finally {
       setIsSavingPost(false);
     }
@@ -1245,9 +1249,9 @@ function App() {
     
     // Сравниваем URL для определения, выбрано ли уже это изображение
     const isCurrentlySelected = selectedImage && 
-                                selectedImage.url && 
-                                imageToSelect.url && 
-                                selectedImage.url === imageToSelect.url;
+                               selectedImage.url && 
+                               imageToSelect.url && 
+                               selectedImage.url === imageToSelect.url;
                                 
     console.log('Изображение уже выбрано?', isCurrentlySelected);
 
@@ -1260,22 +1264,25 @@ function App() {
       // Иначе, выбираем новое изображение
       console.log('Выбираем новое изображение');
       
-      // Создаем копию объекта изображения для безопасности
+      // Создаем копию объекта изображения с обязательными полями
       const newSelectedImage: PostImage = { 
         ...imageToSelect,
-        // Убедимся, что есть ID (если нет, генерируем временный)
+        // Гарантируем, что есть ID 
         id: imageToSelect.id || `img-${Date.now()}`,
         // Гарантируем, что preview_url будет установлен
-        preview_url: imageToSelect.preview_url || imageToSelect.url
+        preview_url: imageToSelect.preview_url || imageToSelect.url,
+        // Обеспечиваем наличие альтернативного текста
+        alt: imageToSelect.alt || 'Изображение для поста',
+        // Гарантируем наличие источника
+        source: imageToSelect.source || (isUnsplashImage ? 'unsplash' : 'custom')
       };
       
-      // Если это изображение из Unsplash, убедимся что оно содержит все необходимые поля
-      if (isUnsplashImage && !newSelectedImage.source) {
-        newSelectedImage.source = 'unsplash';
-      }
-      
+      // Обновляем состояние выбранного изображения
       setSelectedImage(newSelectedImage);
       setSuccess("Изображение выбрано");
+      
+      // Добавляем явное логирование выбранного изображения
+      console.log('Изображение установлено в состояние:', newSelectedImage);
     }
   };
 
@@ -1964,13 +1971,14 @@ function App() {
                                           style={{ 
                                               cursor: 'pointer', 
                                               position: 'relative', 
-                                              border: isSelected ? '3px solid #2196f3' : '1px solid #ddd',
+                                              border: isSelected ? '4px solid #4CAF50' : '1px solid #ddd',
                                               borderRadius: '8px',
                                               width: '150px',
                                               height: '150px',
                                               overflow: 'hidden',
-                                              transition: 'all 0.2s ease',
-                                              boxShadow: isSelected ? '0 0 10px rgba(33, 150, 243, 0.5)' : 'none'
+                                              transition: 'all 0.3s ease',
+                                              boxShadow: isSelected ? '0 0 15px rgba(76, 175, 80, 0.6)' : 'none',
+                                              transform: isSelected ? 'scale(1.05)' : 'scale(1)'
                                           }}
                                       >
                                       <img 
@@ -1992,16 +2000,16 @@ function App() {
                                               position: 'absolute', 
                                               top: '5px', 
                                               right: '5px', 
-                                              backgroundColor: '#2196f3', 
+                                              backgroundColor: '#4CAF50', 
                                               color: 'white', 
                                               borderRadius: '50%', 
-                                              width: '24px',
-                                              height: '24px',
+                                              width: '30px',
+                                              height: '30px',
                                               display: 'flex',
                                               alignItems: 'center',
                                               justifyContent: 'center',
                                               fontWeight: 'bold',
-                                              fontSize: '14px',
+                                              fontSize: '18px',
                                               zIndex: 10
                                           }}>✓</div> 
                                       )}
