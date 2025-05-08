@@ -127,6 +127,7 @@ interface PostImage {
   author?: string;
   author_url?: string;
   source?: string;
+  selected?: boolean; // Добавляем флаг выбора для каждого изображения
 }
 
 // Тип для плана публикаций
@@ -387,6 +388,18 @@ const CalendarDay = ({
   );
 };
 
+// --- Добавляем вспомогательную функцию для правильного отображения числа изображений
+const getImageWordForm = (count: number): string => {
+  if (count % 10 === 1 && count % 100 !== 11) {
+    return "изображение";
+  } else if ([2, 3, 4].includes(count % 10) && ![12, 13, 14].includes(count % 100)) {
+    return "изображения";
+  } else {
+    return "изображений";
+  }
+};
+// --- Конец добавления
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -407,6 +420,7 @@ function App() {
   const [error, setError] = useState<string | null>(null); 
   const [success, setSuccess] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<PostImage | null>(null);
+  const [selectedImages, setSelectedImages] = useState<PostImage[]>([]); // Массив выбранных изображений
 
   // Состояния для календаря и сохраненных постов
   const [savedPosts, setSavedPosts] = useState<SavedPost[]>([]);
@@ -770,13 +784,15 @@ function App() {
       final_text: string;
       channel_name?: string;
       selected_image_data?: PostImage | null;
+      selected_images?: PostImage[]; // Добавляем массив выбранных изображений
     } = {
       target_date: currentPostDate,
       topic_idea: currentPostTopic,
       format_style: currentPostFormat,
       final_text: currentPostText,
       channel_name: channelName || undefined,
-      selected_image_data: selectedImage
+      selected_image_data: selectedImage,
+      selected_images: selectedImages.length > 0 ? selectedImages : undefined
     };
 
     try {
@@ -1165,29 +1181,37 @@ function App() {
       return;
     }
 
-    // Отображаем состояние до изменения
-    console.log('Текущее выбранное изображение:', selectedImage);
-
-    // Сравниваем URL для определения, выбрано ли уже это изображение
-    const isCurrentlySelected = selectedImage && selectedImage.url === imageToSelect.url;
-    console.log('Изображение уже выбрано?', isCurrentlySelected);
-
-    if (isCurrentlySelected) {
-      // Если изображение уже выбрано, снимаем выбор
-      console.log('Снимаем выбор с изображения');
-      setSelectedImage(null);
+    // Проверяем, есть ли уже это изображение в списке выбранных
+    const imageIndex = selectedImages.findIndex(img => img.url === imageToSelect.url);
+    
+    if (imageIndex >= 0) {
+      // Если изображение уже выбрано, удаляем его из списка
+      console.log('Удаляем изображение из выбранных');
+      const newSelectedImages = [...selectedImages];
+      newSelectedImages.splice(imageIndex, 1);
+      setSelectedImages(newSelectedImages);
+      
+      // Если это было единственное изображение, то сбрасываем и selectedImage
+      if (newSelectedImages.length === 0) {
+        setSelectedImage(null);
+      } else {
+        // Иначе устанавливаем первое из списка как основное
+        setSelectedImage(newSelectedImages[0]);
+      }
     } else {
-      // Иначе, выбираем новое изображение
-      console.log('Выбираем новое изображение');
-      setSelectedImage(imageToSelect);
+      // Если изображение не выбрано, добавляем его в список
+      console.log('Добавляем изображение в выбранные');
+      const newSelectedImages = [...selectedImages, imageToSelect];
+      setSelectedImages(newSelectedImages);
+      
+      // Устанавливаем первое добавленное изображение как основное, если еще не выбрано
+      if (!selectedImage) {
+        setSelectedImage(imageToSelect);
+      }
     }
 
     // Для наглядности покажем сообщение пользователю
-    if (!isCurrentlySelected) {
-      setSuccess("Изображение выбрано");
-    } else {
-      setSuccess(null);
-    }
+    setSuccess(`Выбрано изображений: ${imageIndex >= 0 ? selectedImages.length - 1 : selectedImages.length + 1}`);
   };
 
   // Effect to fetch post details when creating a new post from an idea
@@ -1839,105 +1863,195 @@ function App() {
                   {suggestedImages.length > 0 && (
                       <div className="suggested-images-section">
                           <h3>Предложенные изображения:</h3>
-                          <div className="image-gallery suggested">
-                              {suggestedImages.map((image, index) => (
-                                  <div 
-                                      key={image.id || `suggested-${index}`} 
-                                      className={`image-item ${selectedImage && selectedImage.url === image.url ? 'selected' : ''}`}
-                                      onClick={() => handleImageSelection(image)}
-                                      style={{ cursor: 'pointer', position: 'relative', border: '2px solid transparent' }}
-                                  >
+                          <p style={{ marginBottom: '10px' }}>
+                            Выбрано изображений: {selectedImages.length} 
+                            {selectedImages.length > 0 && (
+                              <button 
+                                onClick={() => {
+                                  setSelectedImages([]);
+                                  setSelectedImage(null);
+                                  setSuccess("Выбор изображений сброшен");
+                                }}
+                                style={{ marginLeft: '10px', padding: '2px 5px', fontSize: '12px' }}
+                              >
+                                Сбросить выбор
+                              </button>
+                            )}
+                          </p>
+                          <div className="image-gallery suggested" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                            {suggestedImages.map((image, index) => {
+                              const isSelected = selectedImages.some(img => img.url === image.url);
+                              return (
+                                <div 
+                                  key={image.id || `suggested-${index}`} 
+                                  className={`image-item ${isSelected ? 'selected' : ''}`}
+                                  onClick={() => handleImageSelection(image)}
+                                  style={{ 
+                                    cursor: 'pointer', 
+                                    position: 'relative', 
+                                    border: isSelected ? '3px solid #2196f3' : '2px solid transparent',
+                                    borderRadius: '5px',
+                                    width: '150px',
+                                    height: '150px',
+                                    overflow: 'hidden'
+                                  }}
+                                >
                                   <img 
-                                      src={image.preview_url || image.url} 
-                                      alt={image.alt || 'Suggested image'} 
-                                      style={{ width: '100%', height: 'auto' }}
-                                      onError={(e) => {
-                                          const target = e.target as HTMLImageElement;
-                                          target.src = 'https://via.placeholder.com/100?text=Ошибка'; 
-                                          console.error('Image load error:', image.preview_url || image.url);
-                                      }}
+                                    src={image.preview_url || image.url} 
+                                    alt={image.alt || 'Suggested image'} 
+                                    style={{ 
+                                      width: '100%', 
+                                      height: '100%', 
+                                      objectFit: 'cover',
+                                      transition: 'transform 0.3s'
+                                    }}
+                                    onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                                    onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                                    onError={(e) => {
+                                      const target = e.target as HTMLImageElement;
+                                      target.src = 'https://via.placeholder.com/100?text=Ошибка'; 
+                                      console.error('Image load error:', image.preview_url || image.url);
+                                    }}
                                   />
-                                  {selectedImage && selectedImage.url === image.url && (
-                                      <div className="checkmark" style={{ 
-                                          position: 'absolute', 
-                                          top: '5px', 
-                                          right: '5px', 
-                                          backgroundColor: '#2196f3', 
-                                          color: 'white', 
-                                          borderRadius: '50%', 
-                                          padding: '2px',
-                                          fontWeight: 'bold',
-                                          zIndex: 10
-                                      }}>✔</div> 
+                                  {isSelected && (
+                                    <div style={{ 
+                                      position: 'absolute', 
+                                      top: '5px', 
+                                      right: '5px', 
+                                      backgroundColor: '#2196f3', 
+                                      color: 'white', 
+                                      borderRadius: '50%', 
+                                      padding: '2px 8px',
+                                      fontWeight: 'bold',
+                                      zIndex: 10
+                                    }}>✓</div> 
                                   )}
-                                  </div>
-                              ))}
+                                </div>
+                              );
+                            })}
+                          </div>
+                      </div>
+                    )}
+                    
+                    {/* --- Блок для своего изображения: Загрузчик и Превью --- */}
+                    <div className="custom-image-section">
+                       <h4>Свое изображение:</h4>
+                        {/* Показываем загрузчик */} 
+                        {/* --- ИЗМЕНЕНО: Передаем userId --- */}
+                        <ImageUploader onImageUploaded={handleCustomImageUpload} userId={userId} />
+                        
+                        {/* Показываем превью ВЫБРАННОГО изображения (любого) и кнопку удаления */} 
+                        {selectedImage && (
+                            <div className="selected-image-preview">
+                                <h5>Выбранное изображение:</h5>
+                                <div className="preview-container">
+                                   <img src={selectedImage.preview_url || selectedImage.url} alt={selectedImage.alt || 'Выбрано'} />
+                                   <button 
+                                        className="action-button delete-button small remove-image-btn"
+                                        onClick={() => setSelectedImage(null)} // Сброс выбранного изображения
+                                        title="Удалить выбранное изображение"
+                                    >
+                                        <span>🗑️ Удалить</span>
+                                    </button>
+                          </div>
+                        </div>
+                            )}
                       </div>
                     </div>
                   )}
                   
-                  {/* --- Блок для своего изображения: Загрузчик и Превью --- */}
-                  <div className="custom-image-section">
-                     <h4>Свое изображение:</h4>
-                      {/* Показываем загрузчик */} 
-                      {/* --- ИЗМЕНЕНО: Передаем userId --- */}
-                      <ImageUploader onImageUploaded={handleCustomImageUpload} userId={userId} />
-                      
-                      {/* Показываем превью ВЫБРАННОГО изображения (любого) и кнопку удаления */} 
-                      {selectedImage && (
-                          <div className="selected-image-preview">
-                              <h5>Выбранное изображение:</h5>
-                              <div className="preview-container">
-                                 <img src={selectedImage.preview_url || selectedImage.url} alt={selectedImage.alt || 'Выбрано'} />
-                                 <button 
-                                      className="action-button delete-button small remove-image-btn"
-                                      onClick={() => setSelectedImage(null)} // Сброс выбранного изображения
-                                      title="Удалить выбранное изображение"
-                                  >
-                                      <span>🗑️ Удалить</span>
-                                  </button>
-                    </div>
-                  </div>
-                      )}
-                </div>
-              </div>
-              {/* --- КОНЕЦ: Секция управления изображениями --- */} {/* <-- ИСПРАВЛЕНО: Убран лишний символ */} 
-                
-              {/* Кнопки действий */}
-              <div className="form-actions">
-                  <button 
-                    onClick={handleSaveOrUpdatePost} 
-                    className="action-button save-button"
-                    disabled={isSavingPost || isGeneratingPostDetails || !currentPostText}
-                  >
-                    {isSavingPost ? 'Сохранение...' : (currentPostId ? 'Обновить пост' : 'Сохранить пост')}
-                  </button>
-                  
-                  {/* Добавляем информацию о выбранном изображении */}
-                  {selectedImage && (
-                    <div style={{ margin: '10px 0', color: 'green', fontWeight: 'bold' }}>
-                      ✅ Изображение выбрано и будет сохранено с постом
+                  {/* Показываем превью выбранных изображений */}
+                  {selectedImages.length > 0 && (
+                    <div className="selected-images-preview" style={{ marginTop: '20px' }}>
+                      <h3>Выбранные изображения ({selectedImages.length}):</h3>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                        {selectedImages.map((image, index) => (
+                          <div key={`selected-${index}`} style={{
+                            position: 'relative',
+                            width: '100px',
+                            height: '100px',
+                            overflow: 'hidden',
+                            borderRadius: '5px',
+                            border: '2px solid #4CAF50'
+                          }}>
+                            <img 
+                              src={image.preview_url || image.url} 
+                              alt={image.alt || 'Selected image'} 
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                            />
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleImageSelection(image);
+                              }}
+                              style={{
+                                position: 'absolute',
+                                top: '0',
+                                right: '0',
+                                background: 'rgba(255, 0, 0, 0.7)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '0 0 0 5px',
+                                padding: '2px 5px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              ✕
+                            </button>
+                            <div style={{
+                              position: 'absolute',
+                              bottom: '0',
+                              left: '0',
+                              right: '0',
+                              background: 'rgba(0, 0, 0, 0.5)',
+                              color: 'white',
+                              padding: '2px 5px',
+                              fontSize: '10px',
+                              textAlign: 'center'
+                            }}>
+                              Изображение {index + 1}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
-                 {/* Добавляем кнопку Отмена */}
-                  <button 
-                    onClick={() => {
-                        setCurrentView('calendar'); // Возвращаемся в календарь
-                        // Сбрасываем состояние редактирования
-                        setCurrentPostId(null);
-                        setCurrentPostDate(new Date().toISOString().split('T')[0]);
-                        setCurrentPostTopic('');
-                        setCurrentPostFormat('');
-                        setCurrentPostText('');
-                        setSelectedImage(null);
-                        setSuggestedImages([]);
-                    }}
-                    className="action-button cancel-button"
-                    disabled={isSavingPost}
-                  >
-                    Отмена
-                  </button>
-                </div>
+                  
+                  {/* Кнопки действий */}
+                  <div className="form-actions">
+                    <button 
+                      onClick={handleSaveOrUpdatePost} 
+                      className="action-button save-button"
+                      disabled={isSavingPost || isGeneratingPostDetails || !currentPostText}
+                    >
+                      {isSavingPost ? 'Сохранение...' : (currentPostId ? 'Обновить пост' : 'Сохранить пост')}
+                    </button>
+                    
+                    {/* Информация о выбранных изображениях */}
+                    {selectedImages.length > 0 && (
+                      <div style={{ margin: '10px 0', color: 'green', fontWeight: 'bold' }}>
+                        ✅ {selectedImages.length} {getImageWordForm(selectedImages.length)} будет сохранено с постом
+                      </div>
+                    )}
+                    {/* Добавляем кнопку Отмена */}
+                    <button 
+                      onClick={() => {
+                          setCurrentView('calendar'); // Возвращаемся в календарь
+                          // Сбрасываем состояние редактирования
+                          setCurrentPostId(null);
+                          setCurrentPostDate(new Date().toISOString().split('T')[0]);
+                          setCurrentPostTopic('');
+                          setCurrentPostFormat('');
+                          setCurrentPostText('');
+                          setSelectedImage(null);
+                          setSuggestedImages([]);
+                      }}
+                      className="action-button cancel-button"
+                      disabled={isSavingPost}
+                    >
+                      Отмена
+                    </button>
+                  </div>
 
             </div>
           )}
