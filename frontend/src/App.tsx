@@ -707,43 +707,47 @@ function App() {
   
   // Добавляем функцию для регенерации только изображений
   const regeneratePostDetails = async () => {
-    if (!selectedIdea) return;
+    if (!selectedIdea && !currentPostTopic) return;
     
     setIsGeneratingPostDetails(true);
     setError('');
     setSuccess('');
 
     try {
+      console.log("Начинаем регенерацию изображений для поста");
       const response = await axios.post(`${API_BASE_URL}/generate-post-details`, {
-        topic_idea: selectedIdea.topic_idea,
-        format_style: selectedIdea.format_style || '',
-        channel_name: selectedIdea.channel_name || '',
-        regenerate_images_only: true
+        topic_idea: selectedIdea ? selectedIdea.topic_idea : currentPostTopic,
+        format_style: selectedIdea ? selectedIdea.format_style : currentPostFormat,
+        channel_name: selectedIdea ? selectedIdea.channel_name : channelName,
+        regenerate_images_only: true // Флаг для регенерации только изображений
       }, {
         headers: {
           'x-telegram-user-id': userId ? userId : 'unknown'
         }
       });
 
-      if (response.data && response.data.found_images && selectedIdea) {
-        const newImages = response.data.found_images.map((img: any) => ({
-          url: img.url || img.urls?.regular || img.regular_url || img.preview_url || '',
-          alt: img.alt_description || img.description || 'Изображение для поста',
-          author: img.user?.name || img.author_name || '',
-          author_url: img.user?.links?.html || img.author_url || ''
-        }));
+      if (response.data) {
+        // Проверяем, есть ли изображения в ответе
+        if (response.data.found_images && Array.isArray(response.data.found_images)) {
+          // Преобразуем изображения в нужный формат, если необходимо
+          const newImages = response.data.found_images.map((img: any) => {
+            return {
+              id: img.id || `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              url: img.url || img.urls?.regular || img.regular_url || img.preview_url || '',
+              preview_url: img.preview_url || img.url || img.urls?.regular || img.regular_url || '',
+              alt: img.alt_description || img.alt || img.description || 'Изображение для поста',
+              author: img.user?.name || img.author_name || img.author || '',
+              author_url: img.user?.links?.html || img.author_url || '',
+              source: img.source || 'unsplash'
+            };
+          });
 
-        setSelectedIdea(prevState => {
-          if (!prevState) return null;
-          return {
-            ...prevState,
-            images: newImages
-          };
-        });
-
-        if (selectedIdea) {
+          console.log(`Получены новые изображения (${newImages.length} шт):`, newImages);
           setSuggestedImages(newImages);
-        setSuccess('Изображения успешно обновлены');
+          setSuccess('Изображения успешно обновлены');
+        } else {
+          console.warn("В ответе API отсутствуют изображения");
+          setError('Не удалось найти подходящие изображения. Попробуйте ещё раз или загрузите своё изображение.');
         }
       }
     } catch (err: any) {
@@ -811,9 +815,10 @@ function App() {
             source: 'supabase' // Теперь источник - Supabase Storage
           };
           
-          setSelectedImage(updatedImage);
-          finalImageData = updatedImage;
-          console.log("Изображение успешно сохранено в Supabase Storage:", storedImage);
+          console.log("Получены данные сохраненного изображения:", storedImage);
+          finalImageData = updatedImage; // Обновляем finalImageData ПЕРЕД установкой состояния
+          setSelectedImage(updatedImage); // Это состояние может не успеть обновиться до отправки запроса
+          console.log("Изображение успешно сохранено в Supabase Storage, подготовлены данные:", finalImageData);
         }
       } catch (err: any) {
         console.error("Ошибка при сохранении изображения в Storage:", err);
@@ -823,6 +828,22 @@ function App() {
           setError("Ошибка сервера при сохранении изображения. Пожалуйста, попробуйте позже или выберите другое изображение.");
           setIsSavingPost(false);
           return;
+        }
+      }
+    }
+
+    // Проверяем наличие необходимых полей у изображения перед отправкой
+    if (finalImageData) {
+      console.log("Проверка данных изображения перед отправкой:", finalImageData);
+      // Убедимся, что у изображения есть все необходимые поля
+      if (!finalImageData.id) finalImageData.id = `img-${Date.now()}`;
+      if (!finalImageData.preview_url) finalImageData.preview_url = finalImageData.url;
+      if (!finalImageData.alt) finalImageData.alt = 'Изображение для поста';
+      if (!finalImageData.source) {
+        if (finalImageData.author && finalImageData.author !== 'Пользователь (upload)') {
+          finalImageData.source = 'unsplash';
+        } else {
+          finalImageData.source = 'custom';
         }
       }
     }
@@ -844,7 +865,7 @@ function App() {
       selected_image_data: finalImageData
     };
 
-    console.log("Финальный payload для сохранения поста:", postPayload);
+    console.log("Финальный payload для сохранения поста:", JSON.stringify(postPayload));
 
     try {
       let response;
@@ -862,6 +883,7 @@ function App() {
            headers: { 'x-telegram-user-id': userId }
         });
         setSuccess("Пост успешно сохранен");
+        console.log("Ответ сервера:", response.data);
       }
       
       if (response.data) {
@@ -1282,7 +1304,7 @@ function App() {
       setSuccess("Изображение выбрано");
       
       // Добавляем явное логирование выбранного изображения
-      console.log('Изображение установлено в состояние:', newSelectedImage);
+      console.log('Изображение установлено в состояние:', JSON.stringify(newSelectedImage));
     }
   };
 
@@ -1952,6 +1974,17 @@ function App() {
                               Нажмите на изображение, чтобы выбрать его для сохранения с постом.
                               {selectedImage ? ' Выбранное изображение отмечено галочкой.' : ''}
                           </p>
+
+                          {/* Добавляем кнопку для регенерации изображений */}
+                          <button 
+                            onClick={regeneratePostDetails}
+                            className="action-button"
+                            disabled={isGeneratingPostDetails}
+                            style={{marginBottom: '15px'}}
+                          >
+                            {isGeneratingPostDetails ? 'Обновление...' : 'Найти новые изображения'}
+                          </button>
+
                           <div className="image-gallery suggested" style={{ display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
                               {suggestedImages.map((image, index) => {
                                   // Более строгая проверка, выбрано ли это изображение
@@ -2139,8 +2172,16 @@ function App() {
                   
                   {/* Добавляем информацию о выбранном изображении */}
                   {selectedImage && currentPostText && (
-                    <div style={{ margin: '10px 0', color: 'green', fontWeight: 'bold' }}>
-                      ✅ Изображение выбрано и будет сохранено с постом
+                    <div style={{ margin: '10px 0', color: 'green', fontWeight: 'bold', padding: '10px', backgroundColor: '#f0fff0', borderRadius: '5px', border: '1px solid #4CAF50' }}>
+                      <div style={{ marginBottom: '5px', fontSize: '16px' }}>✅ Изображение выбрано и будет сохранено с постом</div>
+                      <div style={{ fontSize: '14px' }}>
+                        <strong>URL изображения:</strong> {selectedImage.url?.substring(0, 70) + '...'}
+                      </div>
+                      {selectedImage.source && (
+                        <div style={{ fontSize: '14px' }}>
+                          <strong>Источник:</strong> {selectedImage.source}
+                        </div>
+                      )}
                     </div>
                   )}
                  {/* Добавляем кнопку Отмена */}
