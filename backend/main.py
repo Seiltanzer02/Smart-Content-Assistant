@@ -1857,6 +1857,10 @@ async def create_post(request: Request, post_data: PostData):
                     public_url = None
                     # Если изображение внешнее (например, Unsplash), скачиваем и загружаем в Storage
                     if selected_image.source and selected_image.source.lower() in ["unsplash", "pexels", "openverse"]:
+                        # Проверяем, что URL не пустой и начинается с http/https
+                        if not selected_image.url or not str(selected_image.url).startswith(("http://", "https://")):
+                            logger.error(f"Некорректный или пустой URL для внешнего изображения: '{selected_image.url}'")
+                            raise HTTPException(status_code=422, detail="Некорректный или пустой URL для внешнего изображения. Попробуйте выбрать другое изображение.")
                         try:
                             response = requests.get(selected_image.url, timeout=10)
                             response.raise_for_status()
