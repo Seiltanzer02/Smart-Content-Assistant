@@ -7,6 +7,9 @@ import { Toaster, toast } from 'react-hot-toast';
 import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
 import DirectPremiumStatus from './components/DirectPremiumStatus'; // <-- Импортируем новый компонент
+import ImageUploader from './components/ImageUploader';
+import ImageGallery from './components/ImageGallery';
+import { createUUID } from './utils/helpers';
 
 // Определяем базовый URL API
 // Так как фронтенд и API на одном домене, используем пустую строку
@@ -159,233 +162,6 @@ interface CalendarDay {
   isCurrentMonth: boolean;
   isToday: boolean;
 }
-
-// Компонент загрузки изображений
-// --- ИЗМЕНЕНО: Добавляем userId в пропсы --- 
-// --- ИСПРАВЛЕНО: Синтаксис типа пропсов --- 
-const ImageUploader = ({ onImageUploaded, userId }: { onImageUploaded: (imageUrl: string) => void, userId: string | null }) => {
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    
-    const file = files[0];
-    // Проверка размера (менее 5 МБ)
-    if (file.size > 5 * 1024 * 1024) {
-      setUploadError("Размер файла должен быть не более 5 МБ");
-      return;
-    }
-    
-    // Проверка типа (только изображения)
-    if (!file.type.startsWith('image/')) {
-      setUploadError("Разрешены только изображения");
-      return;
-    }
-    
-    // Загружаем файл на сервер
-    setUploading(true);
-    setUploadError(null);
-    
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      const response = await axios.post(`${API_BASE_URL}/upload-image`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          // --- ДОБАВЛЕНО: Передача userId --- 
-          'x-telegram-user-id': userId
-        }
-      });
-      
-      if (response.data && response.data.url) {
-        onImageUploaded(response.data.url);
-      } else {
-        setUploadError("Ошибка при загрузке. Попробуйте еще раз.");
-      }
-    } catch (error: any) {
-      console.error("Ошибка загрузки изображения:", error);
-      setUploadError(error.response?.data?.detail || "Ошибка при загрузке");
-    } finally {
-      setUploading(false);
-    }
-  };
-  
-  return (
-    <div className="image-uploader">
-      <label className="upload-button-label">
-        <input 
-          type="file" 
-          accept="image/*" 
-          onChange={handleFileChange} 
-          disabled={uploading}
-          style={{ display: 'none' }}
-        />
-        <span className="action-button">
-          {uploading ? "Загрузка..." : "Загрузить изображение"}
-        </span>
-      </label>
-      {uploadError && <p className="error-message">{uploadError}</p>}
-    </div>
-  );
-};
-
-// Компонент для отображения галереи изображений поста
-const PostImageGallery = ({ 
-  postId, 
-  onImageSelect 
-}: { 
-  postId: string; 
-  onImageSelect?: (imageUrl: string) => void 
-}) => {
-  const [images, setImages] = useState<any[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  
-  // Функция для загрузки изображений
-  const loadImages = useCallback(async () => {
-    if (!postId) return;
-    
-    setLoading(true);
-    setError(null);
-    
-    try {
-      // Запрашиваем изображения для поста
-      const response = await axios.get(`${API_BASE_URL}/posts/${postId}/images`);
-      
-      if (response.data && response.data.images) {
-        setImages(response.data.images);
-      }
-    } catch (err: any) {
-      console.error('Ошибка при загрузке изображений поста:', err);
-      setError('Не удалось загрузить изображения');
-      } finally {
-        setLoading(false);
-      }
-  }, [postId]);
-  
-  // Загружаем изображения при монтировании
-  useEffect(() => {
-    loadImages();
-  }, [loadImages]);
-  
-  // Функция для выбора изображения
-  const handleSelect = (image: any) => {
-    if (onImageSelect) {
-      onImageSelect(image.url);
-    }
-  };
-  
-  // Отображаем загрузку
-  if (loading) {
-    return (
-      <div className="post-image-gallery loading">
-        <div className="loading-spinner small"></div>
-        <p>Загрузка изображений...</p>
-      </div>
-    );
-  }
-
-  // Отображаем ошибку
-  if (error) {
-    return (
-      <div className="post-image-gallery error">
-        <p>{error}</p>
-      </div>
-    );
-  }
-  
-  // Отображаем пустое состояние
-  if (!images || images.length === 0) {
-    return (
-      <div className="post-image-gallery empty">
-        <p>Нет изображений</p>
-      </div>
-    );
-  }
-  
-  // Отображаем галерею
-  return (
-    <div className="post-image-gallery">
-      <div className="image-grid">
-        {images.map((image, index) => (
-          <div 
-            key={image.id || index} 
-            className="image-item"
-            onClick={() => handleSelect(image)}
-          >
-            <img 
-              src={image.preview_url || image.url} 
-              alt={image.alt || "Изображение поста"} 
-              className="thumbnail"
-              onError={(e) => {
-                // Обработка ошибки загрузки изображения
-                const target = e.target as HTMLImageElement;
-                target.onerror = null;
-                target.src = 'https://via.placeholder.com/100?text=Ошибка';
-              }}
-            />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-// Компонент для отображения дня календаря
-const CalendarDay = ({ 
-  day, 
-  onEditPost, 
-  onDeletePost 
-}: { 
-  day: CalendarDay; 
-  onEditPost: (post: SavedPost) => void;
-  onDeletePost: (postId: string) => void;
-}) => {
-  const { date, posts, isCurrentMonth, isToday } = day;
-  const dayNumber = date.getDate();
-  
-  // Класс для ячейки календаря
-  const cellClass = `calendar-day ${isCurrentMonth ? '' : 'other-month'} ${isToday ? 'today' : ''}`;
-  
-  return (
-    <div className={cellClass}>
-      <div className="day-number">{dayNumber}</div>
-      {posts.length > 0 && (
-        <div className="day-posts">
-          {posts.map((post) => (
-            <div key={post.id} className="post-item">
-              <div className="post-title" title={post.topic_idea}>
-                {post.topic_idea.length > 25 
-                  ? post.topic_idea.substring(0, 22) + '...' 
-                  : post.topic_idea
-                }
-              </div>
-              <div className="post-actions">
-                <button 
-                  className="action-button edit-button" 
-                  onClick={() => onEditPost(post)}
-                  title="Редактировать"
-                >
-                  <span>📝</span>
-                </button>
-                <button 
-                  className="action-button delete-button" 
-                  onClick={() => onDeletePost(post.id)}
-                  title="Удалить"
-                >
-                  <span>🗑️</span>
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -1165,28 +941,27 @@ function App() {
       return;
     }
 
-    // Отображаем состояние до изменения
-    console.log('Текущее выбранное изображение:', selectedImage);
-
     // Сравниваем URL для определения, выбрано ли уже это изображение
     const isCurrentlySelected = selectedImage && selectedImage.url === imageToSelect.url;
-    console.log('Изображение уже выбрано?', isCurrentlySelected);
 
     if (isCurrentlySelected) {
       // Если изображение уже выбрано, снимаем выбор
-      console.log('Снимаем выбор с изображения');
       setSelectedImage(null);
+      setSuccess(null);
     } else {
       // Иначе, выбираем новое изображение
-      console.log('Выбираем новое изображение');
-      setSelectedImage(imageToSelect);
-    }
-
-    // Для наглядности покажем сообщение пользователю
-    if (!isCurrentlySelected) {
+      // Создаем новый объект изображения с обязательными полями для API
+      const processedImage: PostImage = {
+        ...imageToSelect,
+        id: imageToSelect.id || `img-${Date.now()}`,
+        url: imageToSelect.url,
+        preview_url: imageToSelect.preview_url || imageToSelect.url,
+        alt: imageToSelect.alt || 'Изображение для поста',
+        author: imageToSelect.author || ''
+      };
+      
+      setSelectedImage(processedImage);
       setSuccess("Изображение выбрано");
-    } else {
-      setSuccess(null);
     }
   };
 
@@ -1839,66 +1614,139 @@ function App() {
                   {suggestedImages.length > 0 && (
                       <div className="suggested-images-section">
                           <h3>Предложенные изображения:</h3>
-                          <div className="image-gallery suggested">
-                              {suggestedImages.map((image, index) => (
-                                  <div 
-                                      key={image.id || `suggested-${index}`} 
-                                      className={`image-item ${selectedImage && selectedImage.url === image.url ? 'selected' : ''}`}
-                                      onClick={() => handleImageSelection(image)}
-                                      style={{ cursor: 'pointer', position: 'relative', border: '2px solid transparent' }}
-                                  >
-                                  <img 
-                                      src={image.preview_url || image.url} 
-                                      alt={image.alt || 'Suggested image'} 
-                                      style={{ width: '100%', height: 'auto' }}
-                                      onError={(e) => {
-                                          const target = e.target as HTMLImageElement;
-                                          target.src = 'https://via.placeholder.com/100?text=Ошибка'; 
-                                          console.error('Image load error:', image.preview_url || image.url);
-                                      }}
-                                  />
-                                  {selectedImage && selectedImage.url === image.url && (
-                                      <div className="checkmark" style={{ 
-                                          position: 'absolute', 
-                                          top: '5px', 
-                                          right: '5px', 
-                                          backgroundColor: '#2196f3', 
-                                          color: 'white', 
-                                          borderRadius: '50%', 
-                                          padding: '2px',
-                                          fontWeight: 'bold',
-                                          zIndex: 10
-                                      }}>✔</div> 
-                                  )}
-                                  </div>
-                              ))}
+                          <div style={{ 
+                              display: 'flex', 
+                              flexWrap: 'wrap', 
+                              gap: '10px',
+                              marginBottom: '20px' 
+                          }}>
+                              {suggestedImages.map((image, index) => {
+                                  // Проверяем, выбрано ли это изображение
+                                  const isSelected = selectedImage && selectedImage.url === image.url;
+                                  
+                                  return (
+                                      <div 
+                                          key={image.id || `suggested-${index}`} 
+                                          onClick={() => handleImageSelection(image)}
+                                          style={{ 
+                                              cursor: 'pointer', 
+                                              position: 'relative', 
+                                              width: '150px',
+                                              height: '150px',
+                                              border: isSelected ? '3px solid #2196f3' : '2px solid #e0e0e0',
+                                              borderRadius: '5px',
+                                              overflow: 'hidden',
+                                              transition: 'all 0.2s ease',
+                                              boxShadow: isSelected ? '0 0 10px rgba(33, 150, 243, 0.5)' : 'none'
+                                          }}
+                                      >
+                                      <img 
+                                          src={image.preview_url || image.url} 
+                                          alt={image.alt || 'Suggested image'} 
+                                          style={{ 
+                                              width: '100%', 
+                                              height: '100%', 
+                                              objectFit: 'cover' 
+                                          }}
+                                          onError={(e) => {
+                                              const target = e.target as HTMLImageElement;
+                                              target.src = 'https://via.placeholder.com/150?text=Ошибка'; 
+                                              console.error('Image load error:', image.preview_url || image.url);
+                                          }}
+                                      />
+                                      {isSelected && (
+                                          <div style={{ 
+                                              position: 'absolute', 
+                                              top: '5px', 
+                                              right: '5px', 
+                                              backgroundColor: '#2196f3', 
+                                              color: 'white', 
+                                              borderRadius: '50%', 
+                                              width: '24px',
+                                              height: '24px',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                              fontWeight: 'bold',
+                                              zIndex: 10
+                                          }}>✓</div> 
+                                      )}
+                                      </div>
+                                  );
+                              })}
+                          </div>
                       </div>
-                    </div>
                   )}
                   
                   {/* --- Блок для своего изображения: Загрузчик и Превью --- */}
                   <div className="custom-image-section">
-                     <h4>Свое изображение:</h4>
+                      <h4>Свое изображение:</h4>
                       {/* Показываем загрузчик */} 
-                      {/* --- ИЗМЕНЕНО: Передаем userId --- */}
                       <ImageUploader onImageUploaded={handleCustomImageUpload} userId={userId} />
-                      
-                      {/* Показываем превью ВЫБРАННОГО изображения (любого) и кнопку удаления */} 
-                      {selectedImage && (
-                          <div className="selected-image-preview">
-                              <h5>Выбранное изображение:</h5>
-                              <div className="preview-container">
-                                 <img src={selectedImage.preview_url || selectedImage.url} alt={selectedImage.alt || 'Выбрано'} />
-                                 <button 
-                                      className="action-button delete-button small remove-image-btn"
-                                      onClick={() => setSelectedImage(null)} // Сброс выбранного изображения
-                                      title="Удалить выбранное изображение"
-                                  >
-                                      <span>🗑️ Удалить</span>
-                                  </button>
-                    </div>
                   </div>
-                      )}
+
+                  {/* --- Блок предпросмотра выбранного изображения --- */}
+                  {selectedImage && (
+                      <div style={{
+                        marginTop: '20px',
+                        padding: '15px',
+                        border: '1px solid #2196f3',
+                        borderRadius: '8px',
+                        backgroundColor: '#f5f5f5'
+                      }}>
+                          <h4 style={{
+                            color: '#2196f3',
+                            marginTop: 0,
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}>
+                            <span style={{ marginRight: '8px' }}>✅</span>
+                            Выбранное изображение:
+                          </h4>
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: '15px',
+                            flexWrap: 'wrap'
+                          }}>
+                              <div style={{
+                                maxWidth: '300px',
+                                flex: '1'
+                              }}>
+                                  <img 
+                                      src={selectedImage.preview_url || selectedImage.url} 
+                                      alt={selectedImage.alt || 'Выбранное изображение'} 
+                                      style={{
+                                        width: '100%',
+                                        maxHeight: '250px',
+                                        objectFit: 'contain',
+                                        borderRadius: '5px',
+                                        boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
+                                      }}
+                                  />
+                              </div>
+                              <div style={{ flex: '1', minWidth: '200px' }}>
+                                  {selectedImage.author && (
+                                      <p style={{
+                                        margin: '0 0 8px 0',
+                                        fontSize: '14px'
+                                      }}>
+                                          <strong>Автор:</strong> {selectedImage.author}
+                                      </p>
+                                  )}
+                                  <p className="selected-confirmation">
+                                      Это изображение будет сохранено с постом
+                                  </p>
+                                  <button 
+                                      onClick={() => setSelectedImage(null)}
+                                      className="remove-image-btn"
+                                  >
+                                      🗑️ Отменить выбор
+                                  </button>
+                              </div>
+                          </div>
+                      </div>
+                  )}
                 </div>
               </div>
               {/* --- КОНЕЦ: Секция управления изображениями --- */} {/* <-- ИСПРАВЛЕНО: Убран лишний символ */} 
@@ -1912,13 +1760,6 @@ function App() {
                   >
                     {isSavingPost ? 'Сохранение...' : (currentPostId ? 'Обновить пост' : 'Сохранить пост')}
                   </button>
-                  
-                  {/* Добавляем информацию о выбранном изображении */}
-                  {selectedImage && (
-                    <div style={{ margin: '10px 0', color: 'green', fontWeight: 'bold' }}>
-                      ✅ Изображение выбрано и будет сохранено с постом
-                    </div>
-                  )}
                  {/* Добавляем кнопку Отмена */}
                   <button 
                     onClick={() => {
@@ -1942,7 +1783,7 @@ function App() {
             </div>
           )}
         </div>
-      </main> {/* <-- ИСПРАВЛЕНО: Добавлен закрывающий тег */} 
+      </main>
 
       <footer className="app-footer">
         <p>© 2024 Smart Content Assistant</p>
