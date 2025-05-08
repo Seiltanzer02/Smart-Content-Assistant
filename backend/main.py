@@ -1857,11 +1857,12 @@ async def create_post(request: Request, post_data: PostData):
                     public_url = None
                     # Если изображение внешнее (например, Unsplash), скачиваем и загружаем в Storage
                     if selected_image.source and selected_image.source.lower() in ["unsplash", "pexels", "openverse"]:
-                        # Проверяем, что URL не пустой и начинается с http/https
-                        if not selected_image.url or not str(selected_image.url).startswith(("http://", "https://")):
-                            logger.error(f"Некорректный или пустой URL для внешнего изображения: '{selected_image.url}'")
-                            raise HTTPException(status_code=422, detail="Некорректный или пустой URL для внешнего изображения. Попробуйте выбрать другое изображение.")
                         try:
+                            # === ДОБАВЛЕНА ПРОВЕРКА URL ===
+                            if not selected_image.url or not selected_image.url.startswith(('http://', 'https://')):
+                                logger.error(f"Некорректный или отсутствующий URL для внешнего изображения: '{selected_image.url}'")
+                                raise HTTPException(status_code=400, detail=f"Некорректный URL для выбранного изображения: '{selected_image.url}'")
+                            # === КОНЕЦ ПРОВЕРКИ ===
                             response = requests.get(selected_image.url, timeout=10)
                             response.raise_for_status()
                             file_content = response.content
@@ -2378,15 +2379,27 @@ async def search_unsplash_images(query: str, count: int = 5, topic: str = "", fo
         
         images = []
         for photo in selected_photos:
-            # Просто формируем объекты FoundImage без сохранения в БД
+            urls_data = photo.get('urls', {})
+            regular_url = urls_data.get('regular')
+            preview_url = urls_data.get('small')
+            photo_id = photo.get('id', 'unknown_id')
+
+            if not regular_url or not isinstance(regular_url, str) or not regular_url.startswith(('http://', 'https://')):
+                logger.warning(f"Unsplash photo ID {photo_id} имеет некорректный или отсутствующий regular_url: '{regular_url}'. Пропускаем это изображение.")
+                continue
+            
+            if not preview_url or not isinstance(preview_url, str) or not preview_url.startswith(('http://', 'https://')):
+                logger.warning(f"Unsplash photo ID {photo_id} имеет некорректный или отсутствующий preview_url: '{preview_url}'. Используем regular_url как fallback для preview.")
+                preview_url = regular_url
+
             images.append(FoundImage(
-                id=photo['id'],
+                id=photo_id,
                 source="unsplash",
-                preview_url=photo['urls']['small'],
-                regular_url=photo['urls']['regular'],
+                preview_url=preview_url,
+                regular_url=regular_url,
                 description=photo.get('description') or photo.get('alt_description') or query,
-                author_name=photo['user']['name'],
-                author_url=photo['user']['links']['html']
+                author_name=photo.get('user', {}).get('name'),
+                author_url=photo.get('user', {}).get('links', {}).get('html')
             ))
         
         logger.info(f"Найдено и отобрано {len(images)} изображений из {len(all_photos)} в Unsplash для предложения")
@@ -2583,19 +2596,38 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
             # Если была ошибка API, добавляем ее в сообщение ответа
             response_message = f"Ошибка генерации текста: {api_error_message}. Изображений найдено: {len(found_images[:IMAGE_RESULTS_COUNT])}"
         
+        # === ДОБАВЛЕНА БОЛЕЕ НАДЕЖНАЯ УСТАНОВКА ИЗОБРАЖЕНИЯ ПО УМОЛЧАНИЮ ===
+        default_selected_image = None
+        if found_images:
+            first_found = found_images[0]
+            # Проверяем, что URL существует, является строкой и имеет схему
+            if (first_found.regular_url and 
+                isinstance(first_found.regular_url, str) and 
+                first_found.regular_url.startswith(('http://', 'https://'))):
+                
+                default_selected_image = PostImage(
+                    url=first_found.regular_url,
+                    id=first_found.id,
+                    preview_url=first_found.preview_url if (first_found.preview_url and 
+                                                            isinstance(first_found.preview_url, str) and 
+                                                            first_found.preview_url.startswith(('http://', 'https://'))) 
+                              else first_found.regular_url,
+                    alt=first_found.description,
+                    author=first_found.author_name,
+                    author_url=first_found.author_url,
+                    source=first_found.source
+                )
+                logger.info(f"Установлено изображение по умолчанию (ID: {first_found.id}) с URL: {first_found.regular_url}")
+            else:
+                logger.warning(f"Первое найденное изображение (ID: {first_found.id}) имеет некорректный regular_url: '{first_found.regular_url}'. Изображение по умолчанию не будет выбрано.")
+        # === КОНЕЦ ДОБАВЛЕНИЯ ===
+        
         return PostDetailsResponse(
             generated_text=post_text, # Будет пустым или '[...]' при ошибке
             found_images=found_images[:IMAGE_RESULTS_COUNT],
             message=response_message, # <--- Сообщение включает ошибку API
             channel_name=channel_name,
-            selected_image_data=PostImage(
-                url=found_images[0].regular_url if found_images else "",
-                id=found_images[0].id if found_images else None,
-                preview_url=found_images[0].preview_url if found_images else "",
-                alt=found_images[0].description if found_images else "",
-                author=found_images[0].author_name if found_images else "",
-                author_url=found_images[0].author_url if found_images else ""
-            ) if found_images else None
+            selected_image_data=default_selected_image # Используем default_selected_image
         )
         # === КОНЕЦ ИЗМЕНЕНИЯ ===
                 
