@@ -1093,120 +1093,417 @@ h1 {
 
 /* ... остальные стили ... */
 
-/* Новые стили для галереи изображений - улучшенная версия */
-.image-gallery.suggested {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-bottom: 20px;
+/* Новые стили для галереи изображений */
+.image-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin-top: 10px;
+  margin-bottom: 20px;
 }
 
 .image-item {
-    cursor: pointer;
-    position: relative;
-    width: 150px;
-    height: 150px;
-    border: 2px solid #e0e0e0;
-    border-radius: 8px;
-    overflow: hidden;
-    transition: all 0.3s ease;
-}
-
-.image-item.selected {
-    border-color: #2196f3;
-    box-shadow: 0 0 10px rgba(33, 150, 243, 0.5);
-}
-
-.image-item img.thumbnail {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    transition: transform 0.3s ease;
-}
-
-.image-item:hover img.thumbnail {
-    transform: scale(1.05);
-}
-
-.checkmark {
-    position: absolute;
-    top: 5px;
-    right: 5px;
-    background-color: #2196f3;
-    color: white;
-    border-radius: 50%;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: bold;
-    z-index: 10;
-}
-
-/* Улучшенный превью выбранного изображения */
-.selected-image-preview {
-    margin-top: 20px;
-    padding: 15px;
-    border: 1px solid #2196f3;
-    border-radius: 8px;
-    background-color: #f5f5f5;
-}
-
-.preview-container {
-    display: flex;
-    align-items: flex-start;
-    gap: 15px;
-}
-
-.preview-image-container {
-    max-width: 300px;
-    flex: 1;
-}
-
-.preview-image {
-    width: 100%;
-    max-height: 250px;
-    object-fit: contain;
-    border-radius: 5px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-}
-
-.preview-info {
-    flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100px;
+  margin-bottom: 5px;
 }
 
 .image-author {
-    margin: 0 0 8px 0;
+  font-size: 0.7rem;
+  color: #666;
+  text-align: center;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 3px;
+}
+
+.image-preview-gallery {
+  margin-top: 15px;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  background-color: #f9f9f9;
+}
+
+.preview-image {
+  width: 100%;
+  height: 250px;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.selected-image {
+  width: 100%;
+  height: 250px;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+/* Стиль для сохранения пропорций изображения */
+.editor-view .image-preview-container img {
+  max-width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+/* Стили для кнопок навигации в галерее */
+.preview-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.nav-button {
+  background-color: rgba(0,0,0,0.6);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+  line-height: 30px;
+  text-align: center;
+  cursor: pointer;
+  padding: 0;
+  margin: 0 10px;
+  transition: background-color 0.2s ease;
+}
+
+.nav-button:hover {
+  background-color: rgba(0,0,0,0.8);
+}
+
+.nav-button:disabled {
+  background-color: rgba(0,0,0,0.3);
+  cursor: not-allowed;
+}
+
+.image-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.back-button {
+  margin-bottom: 15px;
+  padding: 8px 15px;
+  background-color: #f1f1f1;
+  color: #333;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.back-button:hover {
+  background-color: #e7e7e7;
+}
+
+.back-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Улучшаем контейнер предпросмотра */
+.image-preview-container {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 12px;
+  background-color: #f9f9f9;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+/* Стили для индикатора занятости даты в календаре */
+.calendar-dot {
+  height: 8px;
+  width: 8px;
+  background-color: #3498db; /* Синий цвет, как у кнопок */
+  border-radius: 50%;
+  display: block; /* Чтобы занимал место в ячейке */
+  margin: 2px auto 0; /* Отступ сверху и центрирование */
+}
+
+/* Стили для блока с деталями поста, выбранного в календаре */
+.calendar-post-details-section {
+  margin-top: 20px;
+  padding: 15px;
+  border: 1px solid #ddd; 
+  border-radius: 6px;
+  background-color: #f9f9f9; /* Слегка другой фон для выделения */
+}
+
+.calendar-post-details-section h3 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  color: #333;
+  text-align: center;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+}
+
+.post-details-content p {
+  margin: 8px 0;
+  line-height: 1.5;
+}
+
+.post-details-content strong {
+  color: #555;
+}
+
+.post-details-image-preview {
+  margin-top: 15px;
+  text-align: center;
+}
+
+.post-details-image-preview img {
+  max-width: 100%; /* Не вылезает за пределы блока */
+  max-height: 200px; /* Ограничиваем высоту */
+  border-radius: 4px;
+  border: 1px solid #eee;
+}
+
+/* Используем те же стили кнопок, что и в списке постов */
+.calendar-post-details-section .post-actions {
+  margin-top: 15px;
+  display: flex;
+  justify-content: center; /* Центрируем кнопки */
+  gap: 10px;
+}
+
+/* --- Адаптация для мобильных устройств --- */
+@media (max-width: 768px) {
+  /* Отключаем горизонтальную прокрутку */
+  body {
+    overflow-x: hidden; 
+  }
+
+  /* Уменьшаем отступы и убираем тень у основного контейнера */
+  .app-container {
+    padding: 10px 5px; /* Уменьшаем боковые отступы */
+    margin: 0;
+    box-shadow: none;
+    border-radius: 0;
+    width: 100%; /* Занимает всю ширину */
+    box-sizing: border-box; /* Учитываем padding */
+  }
+
+  /* Уменьшаем главный заголовок */
+  h1 {
+    font-size: 1.6em; /* Еще немного уменьшим */
+    margin-bottom: 15px;
+  }
+
+  /* Уменьшаем отступы у кнопок навигации */
+  .navigation-buttons {
+    margin-bottom: 15px;
+    gap: 5px;
+  }
+
+  /* Немного уменьшаем кнопки */
+  .action-button {
+    padding: 8px 10px; /* Чуть компактнее */
     font-size: 14px;
-}
+  }
 
-.selected-confirmation {
-    margin: 0 0 15px 0;
-    color: green;
-    font-weight: bold;
-}
+  /* Убедимся, что контейнер вида занимает всю ширину */
+  .view {
+      width: 100%;
+      padding: 0 5px; /* Небольшой отступ по бокам внутри вида */
+      box-sizing: border-box;
+  }
 
-.remove-image-btn {
-    background-color: #f44336;
-    color: white;
-    border: none;
-    padding: 6px 12px;
-    border-radius: 4px;
-    cursor: pointer;
+  /* Контент плана - элементы в столбик */
+  .plan-content {
+    flex-direction: column; /* Ставим все в один столбец */
+    align-items: stretch; /* Растягиваем элементы на всю ширину */
+    gap: 15px; /* Добавляем отступ между блоками */
+  }
+
+  /* Задаем ширину секциям в плане и убираем лишний margin */
+  .calendar-section,
+  .posts-section,
+  .calendar-post-details-section {
+    width: 100%;
+    margin-bottom: 0; /* Убираем margin, используем gap в plan-content */
+  }
+
+  /* Календарь на всю ширину */
+  .react-calendar {
+      width: 100%;
+      max-width: none; /* Убираем ограничение ширины */
+      box-sizing: border-box;
+      border: none; /* Убираем рамку на мобильных */
+      box-shadow: none; /* Убираем тень */
+  }
+
+  /* Уменьшаем отступы у секции деталей поста */
+  .calendar-post-details-section {
+    padding: 10px;
+    margin-top: 0; /* Убираем лишний отступ */
+  }
+
+  /* Уменьшаем заголовки секций */
+  .calendar-section h3,
+  .posts-section h3,
+  .calendar-post-details-section h3 {
+    font-size: 1.1em;
+    margin-bottom: 10px;
+  }
+
+  /* Уменьшаем шрифт в списке постов */
+  .post-item {
     font-size: 14px;
+    padding: 8px 12px;
+  }
+
+  /* Делаем кнопки в списке постов и деталях чуть меньше */
+  .post-actions .edit-button,
+  .post-actions .delete-button,
+  .calendar-post-details-section .post-actions .edit-button,
+  .calendar-post-details-section .post-actions .delete-button {
+     padding: 5px 8px;
+     font-size: 13px;
+  }
+
+  /* --- Стили для редактора --- */
+  .editor-view {
+    /* Дополнительные стили для контейнера редактора, если нужно */
+  }
+
+  .editor-view .form-row {
+      flex-direction: column; /* Поля друг под другом */
+      gap: 10px;
+  }
+
+  .editor-view .form-group {
+      margin-bottom: 15px; /* Немного увеличим отступ */
+  }
+
+  .editor-view textarea#final_text {
+      min-height: 150px; /* Увеличим минимальную высоту для удобства */
+  }
+
+  /* Центрирование и улучшение блока предпросмотра картинки */
+  .editor-view .image-preview-container {
+    width: 100%; /* Занимает всю ширину */
+    max-width: 100%; /* Убираем ограничение */
+    margin-top: 10px;
+    padding: 10px;
+    box-sizing: border-box;
+    background-color: #f0f0f0; /* Легкий фон для выделения */
+  }
+  
+  /* Центрирование картинки внутри блока предпросмотра */
+  .editor-view .image-preview-container img {
+      display: block; /* Для работы margin: auto */
+      margin: 0 auto; /* Центрируем картинку */
+      max-height: 200px; /* Ограничиваем высоту */
+      max-width: 100%; /* Не вылезает за пределы */
+      background-color: transparent; /* Убираем темный фон */
+  }
+
+  /* Уменьшаем превью картинок в галерее */
+  .editor-view .image-thumbnails {
+    justify-content: center; /* Центрируем миниатюры */
+  }
+  .editor-view .image-thumbnails img.thumbnail {
+      width: 60px; /* Чуть больше */
+      height: 60px;
+  }
+  
+  /* Уменьшаем большое превью выбранной картинки из галереи */
+  .editor-view .selected-image-preview img.preview-image {
+      max-height: 200px; 
+  }
+
+  /* Кнопка Назад/Отмена в редакторе */
+  .editor-view .back-button {
+      align-self: flex-start; /* Слева */
+  }
 }
 
-.selected-image-heading {
-    color: #2196f3;
-    margin-top: 0;
+/* --- Анимации и улучшенный UX --- */
+
+/* Анимация плавного появления */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.view-container-animated {
+  animation: fadeIn 0.4s ease-out;
+}
+
+/* Стили для контейнера спиннера, если он используется вместо просто <p> */
+.loading-indicator {
     display: flex;
+    flex-direction: column;
     align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: #555;
 }
 
-.heading-icon {
-    margin-right: 8px;
+/* --- Улучшения списка идей --- */
+.ideas-list {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px; /* Больше пространства между идеями */
 }
+
+.idea-item {
+    background-color: #fff;
+    border-radius: 8px; /* Скругленные углы */
+    padding: 15px 20px;
+    display: flex;
+    justify-content: space-between; /* Текст слева, кнопка справа */
+    align-items: center; /* Выравнивание по вертикали */
+    box-shadow: 0 3px 6px rgba(0,0,0,0.08); /* Мягкая тень */
+    transition: box-shadow 0.2s ease-out;
+}
+
+.idea-item:hover {
+    box-shadow: 0 5px 10px rgba(0,0,0,0.12);
+}
+
+.idea-text {
+    display: flex;
+    flex-direction: column; /* Тема и стиль друг под другом */
+    gap: 3px;
+    margin-right: 15px; /* Отступ от кнопки */
+}
+
+.idea-topic {
+    font-weight: 500; /* Полужирный */
+    color: #333;
+    font-size: 1.05em;
+}
+
+.idea-style {
+    font-size: 0.9em;
+    color: #666;
+}
+
+.detail-button {
+    padding: 6px 12px !important; /* !important для переопределения базовых стилей */
+    font-size: 14px !important;
+    white-space: nowrap; /* Не переносить текст */
+    flex-shrink: 0; /* Не сжимать кнопку */
+}
+
+/* --- КОНЕЦ УЛУЧШЕНИЙ СПИСКА ИДЕЙ --- */
 
 /* Стили для селектора каналов */
 .channel-selector {
