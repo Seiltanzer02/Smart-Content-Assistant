@@ -760,8 +760,12 @@ function App() {
     setError("");
     setSuccess("");
 
-    // === ДОБАВЛЕНО: Вывод для отладки ===
-    console.log('Сохранение поста. Текущее состояние selectedImage:', selectedImage);
+    // Проверка выбранного изображения на валидный URL
+    if (selectedImage && (!selectedImage.url || selectedImage.url.trim() === '')) {
+      toast.error('Выбранное изображение не содержит корректного URL. Пожалуйста, выберите другое.');
+      setIsSavingPost(false);
+      return;
+    }
 
     // Prepare payload
     const postPayload: {
@@ -776,47 +780,30 @@ function App() {
       topic_idea: currentPostTopic,
       format_style: currentPostFormat,
       final_text: currentPostText,
-      channel_name: channelName || undefined
+      channel_name: channelName || undefined,
+      selected_image_data: selectedImage || null // Отправляем null, если selectedImage пустой
     };
-
-    // === ИЗМЕНЕНО: Улучшенная проверка на null/undefined и URL перед добавлением в payload ===
-    // Добавляем изображение только если оно существует и имеет валидный URL
-    if (selectedImage && typeof selectedImage === 'object' && selectedImage.url && selectedImage.url.trim() !== '') {
-      postPayload.selected_image_data = selectedImage;
-      console.log('Добавлено изображение в payload:', selectedImage);
-    } else {
-      // Явно устанавливаем null, чтобы избежать отправки undefined или объекта с пустым URL
-      postPayload.selected_image_data = null;
-      console.log('Изображение не добавлено (null)');
-    }
 
     // === ДОБАВЛЕНА ПРОВЕРКА ОБЯЗАТЕЛЬНЫХ ПОЛЕЙ ===
     if (!postPayload.target_date) {
       toast.error('Дата поста не может быть пустой.');
-      setIsSavingPost(false);
       return;
     }
     if (!postPayload.topic_idea?.trim()) {
       toast.error('Тема/идея поста не может быть пустой.');
-      setIsSavingPost(false);
       return;
     }
     if (!postPayload.format_style?.trim()) {
       toast.error('Формат/стиль поста не может быть пустым.');
-      setIsSavingPost(false);
       return;
     }
     if (!postPayload.final_text?.trim()) {
       toast.error('Текст поста не может быть пустым.');
-      setIsSavingPost(false);
       return;
     }
     // === КОНЕЦ ПРОВЕРКИ ===
 
     try {
-      // === ДОБАВЛЕНО: Информация о запросе ===
-      console.log('Отправка запроса с данными:', JSON.stringify(postPayload));
-      
       let response;
       if (currentPostId) {
         // Update existing post
@@ -850,15 +837,6 @@ function App() {
       const errorMsg = err.response?.data?.detail || err.message || (currentPostId ? 'Ошибка при обновлении поста' : 'Ошибка при сохранении поста');
       setError(errorMsg);
       console.error(currentPostId ? 'Ошибка при обновлении поста:' : 'Ошибка при сохранении поста:', err);
-      
-      // === ДОБАВЛЕНО: Вывод подробной информации об ошибке ===
-      if (err.response) {
-        console.error('Детали ошибки:', {
-          status: err.response.status,
-          statusText: err.response.statusText,
-          data: err.response.data
-        });
-      }
     } finally {
       setIsSavingPost(false);
     }
@@ -922,20 +900,11 @@ function App() {
 
   // --- ДОБАВЛЕНО: Обработчик загрузки своего изображения --- 
   const handleCustomImageUpload = (imageUrl: string) => {
-    console.log('Получен URL загруженного изображения:', imageUrl);
-    
-    if (!imageUrl || imageUrl.trim() === '') {
-      console.error("Попытка установить изображение с пустым URL");
-      toast.error("Ошибка загрузки: получен пустой URL");
-      return;
-    }
-    
+    if (!imageUrl) return;
     // --- ИЗМЕНЕНИЕ: Преобразуем относительный URL в абсолютный ---
     // Предполагаем, что бэкенд запущен на том же хосте, порт 8000
     const backendBaseUrl = `${window.location.protocol}//${window.location.hostname}:8000`;
     const absoluteImageUrl = imageUrl.startsWith('http') ? imageUrl : `${backendBaseUrl}${imageUrl}`;
-    
-    console.log('Преобразованный абсолютный URL:', absoluteImageUrl);
     // --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
     // Создаем объект PostImage для загруженного файла
@@ -951,8 +920,6 @@ function App() {
       // --- КОНЕЦ ИЗМЕНЕНИЯ ---
       source: 'upload' // Указываем источник
     };
-    
-    console.log('Устанавливаем загруженное изображение:', uploadedImage);
     setSelectedImage(uploadedImage); // Устанавливаем как выбранное
     // Опционально: можно добавить в suggestedImages, но лучше держать их раздельно
     // setSuggestedImages(prev => [uploadedImage, ...prev]); 
@@ -962,8 +929,6 @@ function App() {
   
   // Функция для открытия редактирования поста
   const startEditingPost = (post: SavedPost) => {
-    console.log('Открытие поста для редактирования:', post);
-    
     setCurrentPostId(post.id);
     setCurrentPostDate(post.target_date);
     setCurrentPostTopic(post.topic_idea);
@@ -975,37 +940,23 @@ function App() {
     setError(null);
     setSuccess(null);
     setCurrentView('edit');
-    
-    // Сначала сбрасываем выбранное изображение
-    setSelectedImage(null);
 
-    // === ИЗМЕНЕНО: Более надежная логика обработки изображения ===
-    console.log('Данные изображения из поста:', post.selected_image_data);
-    
+    // --- ИСПРАВЛЕНО: Используем selected_image_data напрямую ---
     // Проверяем, есть ли данные о выбранном изображении
-    if (post.selected_image_data && typeof post.selected_image_data === 'object' && 
-        post.selected_image_data.url && post.selected_image_data.url.trim() !== '') {
-      // Создаем копию объекта для избежания мутаций
-      const validImage: PostImage = {
-        ...post.selected_image_data,
-        url: post.selected_image_data.url.trim(),
-        preview_url: post.selected_image_data.preview_url?.trim() || post.selected_image_data.url.trim()
-      };
-      console.log('Устанавливаем валидное изображение из поста:', validImage);
-      setSelectedImage(validImage);
+    if (post.selected_image_data) {
+      // Используем данные напрямую, не нужно загружать их отдельно
+      setSelectedImage(post.selected_image_data);
     } else {
-      // Для обратной совместимости: если selected_image_data нет или неверный, но есть images_ids
+      // Для обратной совместимости: если selected_image_data нет, но есть images_ids
       const savedImageId = post.images_ids && post.images_ids.length > 0 ? post.images_ids[0] : null;
       if (savedImageId) {
-        console.log('selected_image_data отсутствует, пробуем загрузить по images_ids:', savedImageId);
         fetchAndSetSavedImage(savedImageId);
       } else {
         // Если нет ни selected_image_data, ни images_ids, сбрасываем selectedImage
-        console.log('У поста нет связанных изображений');
         setSelectedImage(null);
       }
     }
-    // === КОНЕЦ ИЗМЕНЕНИЙ ===
+    // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
   };
   
   // Функция для сохранения идей в базу данных
@@ -1231,49 +1182,34 @@ function App() {
 
   // Function to handle selecting/deselecting a suggested image
   const handleImageSelection = (imageToSelect: PostImage | undefined) => {
-    console.log('handleImageSelection вызван с изображением:', imageToSelect);
-
     if (!imageToSelect) {
-      console.error("Попытка выбрать undefined изображение");
+      toast.error("Ошибка: изображение не выбрано.");
       return;
     }
 
-    // === ДОБАВЛЕНА ПРОВЕРКА URL ===
-    if (!imageToSelect.url || imageToSelect.url.trim() === '') {
-      console.error("Попытка выбрать изображение с пустым URL:", imageToSelect);
-      toast.error("Невозможно выбрать изображение с отсутствующим URL");
+    // Если нет imageToSelect.url, но есть другие варианты — подставляем их
+    let url = imageToSelect.url;
+    if (!url || url.trim() === '') {
+      url = (imageToSelect as any).regular || (imageToSelect as any).raw || (imageToSelect as any).small || '';
+    }
+
+    if (!url || url.trim() === '') {
+      toast.error("У выбранного изображения нет корректного URL для сохранения.");
       return;
     }
-    // === КОНЕЦ ПРОВЕРКИ URL ===
 
-    // Отображаем состояние до изменения
-    console.log('Текущее выбранное изображение:', selectedImage);
+    // Формируем новый объект с валидным url
+    const selected: PostImage = {
+      ...imageToSelect,
+      url,
+    };
 
-    // Сравниваем URL для определения, выбрано ли уже это изображение
-    const isCurrentlySelected = selectedImage && selectedImage.url === imageToSelect.url;
-    console.log('Изображение уже выбрано?', isCurrentlySelected);
-
-    if (isCurrentlySelected) {
-      // Если изображение уже выбрано, снимаем выбор
-      console.log('Снимаем выбор с изображения');
+    // Если уже выбрано это изображение — снимаем выбор
+    if (selectedImage && selectedImage.url === selected.url) {
       setSelectedImage(null);
     } else {
-      // Иначе, выбираем новое изображение
-      console.log('Выбираем новое изображение');
-      // === ДОБАВЛЕНА КОПИЯ ОБЪЕКТА ДЛЯ ИЗБЕЖАНИЯ МУТАЦИЙ ===
-      const imageCopy = {
-        ...imageToSelect,
-        url: imageToSelect.url.trim() // Гарантируем отсутствие пробелов
-      };
-      setSelectedImage(imageCopy);
-      // === КОНЕЦ КОПИРОВАНИЯ ОБЪЕКТА ===
-    }
-
-    // Для наглядности покажем сообщение пользователю
-    if (!isCurrentlySelected) {
-      toast.success("Изображение выбрано"); // Используем toast для более заметного уведомления
-    } else {
-      // toast.info("Выбор изображения отменен"); // Можно добавить и для отмены
+      setSelectedImage(selected);
+      toast.success("Изображение выбрано");
     }
   };
 
