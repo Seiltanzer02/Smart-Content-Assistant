@@ -1158,18 +1158,35 @@ function App() {
 
   // Function to handle selecting/deselecting a suggested image
   const handleImageSelection = (imageToSelect: PostImage | undefined) => {
-    if (imageToSelect && imageToSelect.url) { // Убедимся, что у изображения есть URL
-      setSelectedImage(prevSelected => {
-        // Если ранее было что-то выбрано и URL совпадает, снимаем выбор (ставим null)
-        if (prevSelected && prevSelected.url === imageToSelect.url) {
-          return null;
-        }
-        // Иначе, выбираем новое изображение
-        return imageToSelect;
-      });
+    console.log('handleImageSelection вызван с изображением:', imageToSelect);
+
+    if (!imageToSelect) {
+      console.error("Попытка выбрать undefined изображение");
+      return;
+    }
+
+    // Отображаем состояние до изменения
+    console.log('Текущее выбранное изображение:', selectedImage);
+
+    // Сравниваем URL для определения, выбрано ли уже это изображение
+    const isCurrentlySelected = selectedImage && selectedImage.url === imageToSelect.url;
+    console.log('Изображение уже выбрано?', isCurrentlySelected);
+
+    if (isCurrentlySelected) {
+      // Если изображение уже выбрано, снимаем выбор
+      console.log('Снимаем выбор с изображения');
+      setSelectedImage(null);
     } else {
-      console.error("Attempted to select an image with undefined data or missing URL.");
-      setSelectedImage(null); // Если данные некорректны, сбрасываем выбор
+      // Иначе, выбираем новое изображение
+      console.log('Выбираем новое изображение');
+      setSelectedImage(imageToSelect);
+    }
+
+    // Для наглядности покажем сообщение пользователю
+    if (!isCurrentlySelected) {
+      setSuccess("Изображение выбрано");
+    } else {
+      setSuccess(null);
     }
   };
 
@@ -1828,18 +1845,30 @@ function App() {
                                       key={image.id || `suggested-${index}`} 
                                       className={`image-item ${selectedImage && selectedImage.url === image.url ? 'selected' : ''}`}
                                       onClick={() => handleImageSelection(image)}
+                                      style={{ cursor: 'pointer', position: 'relative', border: '2px solid transparent' }}
                                   >
                                   <img 
                                       src={image.preview_url || image.url} 
                                       alt={image.alt || 'Suggested image'} 
-                          onError={(e) => {
+                                      style={{ width: '100%', height: 'auto' }}
+                                      onError={(e) => {
                                           const target = e.target as HTMLImageElement;
                                           target.src = 'https://via.placeholder.com/100?text=Ошибка'; 
                                           console.error('Image load error:', image.preview_url || image.url);
                                       }}
                                   />
                                   {selectedImage && selectedImage.url === image.url && (
-                                      <div className="checkmark">✔</div> 
+                                      <div className="checkmark" style={{ 
+                                          position: 'absolute', 
+                                          top: '5px', 
+                                          right: '5px', 
+                                          backgroundColor: '#2196f3', 
+                                          color: 'white', 
+                                          borderRadius: '50%', 
+                                          padding: '2px',
+                                          fontWeight: 'bold',
+                                          zIndex: 10
+                                      }}>✔</div> 
                                   )}
                                   </div>
                               ))}
@@ -1883,6 +1912,13 @@ function App() {
                   >
                     {isSavingPost ? 'Сохранение...' : (currentPostId ? 'Обновить пост' : 'Сохранить пост')}
                   </button>
+                  
+                  {/* Добавляем информацию о выбранном изображении */}
+                  {selectedImage && (
+                    <div style={{ margin: '10px 0', color: 'green', fontWeight: 'bold' }}>
+                      ✅ Изображение выбрано и будет сохранено с постом
+                    </div>
+                  )}
                  {/* Добавляем кнопку Отмена */}
                   <button 
                     onClick={() => {
