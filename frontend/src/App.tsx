@@ -68,7 +68,7 @@ class SimpleErrorBoundary extends React.Component<
 // Типы для typescript
 declare global {
   interface Window {
-    Telegram?: any;  // Используем any для совместимости
+    Telegram?: any; // Simpler, should resolve linter
   }
 }
 
@@ -707,59 +707,47 @@ function App() {
   
   // Добавляем функцию для регенерации только изображений
   const regeneratePostDetails = async () => {
-    if (!selectedIdea && !currentPostTopic) return;
+    if (!selectedIdea) return;
     
     setIsGeneratingPostDetails(true);
     setError('');
     setSuccess('');
 
     try {
-      console.log("Начинаем регенерацию изображений для поста");
       const response = await axios.post(`${API_BASE_URL}/generate-post-details`, {
-        topic_idea: selectedIdea ? selectedIdea.topic_idea : currentPostTopic,
-        format_style: selectedIdea ? selectedIdea.format_style : currentPostFormat,
-        channel_name: selectedIdea ? selectedIdea.channel_name : channelName,
-        regenerate_images_only: true // Флаг для регенерации только изображений
+        topic_idea: selectedIdea.topic_idea,
+        format_style: selectedIdea.format_style || '',
+        channel_name: selectedIdea.channel_name || '',
+        regenerate_images_only: true
       }, {
         headers: {
           'x-telegram-user-id': userId ? userId : 'unknown'
         }
       });
 
-      if (response.data) {
-        // Проверяем, есть ли изображения в ответе
-        if (response.data.found_images && Array.isArray(response.data.found_images)) {
-          // Преобразуем изображения в нужный формат, если необходимо
-          const newImages = response.data.found_images.map((img: any) => {
-            return {
-              id: img.id || `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              url: img.url || img.urls?.regular || img.regular_url || img.preview_url || '',
-              preview_url: img.preview_url || img.url || img.urls?.regular || img.regular_url || '',
-              alt: img.alt_description || img.alt || img.description || 'Изображение для поста',
-              author: img.user?.name || img.author_name || img.author || '',
-              author_url: img.user?.links?.html || img.author_url || '',
-              source: img.source || 'unsplash'
-            };
-          });
+      if (response.data && response.data.found_images && selectedIdea) {
+        const newImages = response.data.found_images.map((img: any) => ({
+          url: img.url || img.urls?.regular || img.regular_url || img.preview_url || '',
+          alt: img.alt_description || img.description || 'Изображение для поста',
+          author: img.user?.name || img.author_name || '',
+          author_url: img.user?.links?.html || img.author_url || ''
+        }));
 
-          console.log(`Получены новые изображения (${newImages.length} шт):`, newImages);
+        setSelectedIdea(prevState => {
+          if (!prevState) return null;
+          return {
+            ...prevState,
+            images: newImages
+          };
+        });
+
+        if (selectedIdea) {
           setSuggestedImages(newImages);
-          setSuccess('Изображения успешно обновлены');
-        } else {
-          console.warn("В ответе API отсутствуют изображения");
-          setError('Не удалось найти подходящие изображения. Попробуйте ещё раз или загрузите своё изображение.');
+        setSuccess('Изображения успешно обновлены');
         }
       }
     } catch (err: any) {
-      // Проверяем, является ли ошибка результатом превышения лимита API
-      const errorMessage = err.response?.data?.detail || err.message || 'Ошибка при обновлении изображений';
-      
-      if (errorMessage.includes('Rate limit exceeded') || err.response?.status === 429) {
-        setError("Превышен лимит запросов к API. Это ограничение бесплатного тарифа OpenRouter API. Пожалуйста, повторите попытку позже.");
-      } else {
-        setError(errorMessage);
-      }
-      
+      setError(err.response?.data?.detail || err.message || 'Ошибка при обновлении изображений');
       console.error('Ошибка при обновлении изображений:', err);
     } finally {
       setIsGeneratingPostDetails(false);
@@ -771,82 +759,6 @@ function App() {
     setIsSavingPost(true);
     setError("");
     setSuccess("");
-
-    // Проверка наличия текста поста
-    if (!currentPostText || currentPostText.trim() === '') {
-      setError("Пожалуйста, заполните текст поста");
-      setIsSavingPost(false);
-      return;
-    }
- 
-    // Проверка наличия выбранного изображения
-    if (!selectedImage) {
-      console.log("Пост сохраняется без изображения");
-    } else {
-      console.log("Выбранное изображение для сохранения:", selectedImage);
-    }
-
-    // Для изображений из unsplash или других API нужно сначала сохранить в Supabase Storage
-    let finalImageData = selectedImage;
-    if (selectedImage && (selectedImage.source === 'unsplash' || selectedImage.source === 'custom') && !selectedImage.url.includes('supabase.co')) {
-      try {
-        console.log("Сохраняем изображение из внешнего источника в Supabase Storage...");
-        
-        // Отдельный запрос на сохранение изображения в Supabase Storage через бэкенд
-        const saveImageResponse = await axios.post(`${API_BASE_URL}/save-external-image`, {
-          image_url: selectedImage.url,
-          alt: selectedImage.alt || 'Изображение для поста',
-          author: selectedImage.author || '',
-          author_url: selectedImage.author_url || '',
-          source: selectedImage.source || 'unsplash'
-        }, {
-          headers: { 'x-telegram-user-id': userId }
-        });
-        
-        // Если сервер успешно сохранил изображение, обновляем данные в selectedImage
-        if (saveImageResponse.data && saveImageResponse.data.stored_image) {
-          const storedImage = saveImageResponse.data.stored_image;
-          // Обновляем выбранное изображение с данными из Storage
-          const updatedImage = {
-            ...selectedImage,
-            id: storedImage.id || selectedImage.id,
-            url: storedImage.url, // URL в Supabase Storage
-            preview_url: storedImage.preview_url || storedImage.url,
-            source: 'supabase' // Теперь источник - Supabase Storage
-          };
-          
-          console.log("Получены данные сохраненного изображения:", storedImage);
-          finalImageData = updatedImage; // Обновляем finalImageData ПЕРЕД установкой состояния
-          setSelectedImage(updatedImage); // Это состояние может не успеть обновиться до отправки запроса
-          console.log("Изображение успешно сохранено в Supabase Storage, подготовлены данные:", finalImageData);
-        }
-      } catch (err: any) {
-        console.error("Ошибка при сохранении изображения в Storage:", err);
-        
-        // Если ошибка критическая, показываем пользователю и прерываем сохранение
-        if (err.response?.status >= 500) {
-          setError("Ошибка сервера при сохранении изображения. Пожалуйста, попробуйте позже или выберите другое изображение.");
-          setIsSavingPost(false);
-          return;
-        }
-      }
-    }
-
-    // Проверяем наличие необходимых полей у изображения перед отправкой
-    if (finalImageData) {
-      console.log("Проверка данных изображения перед отправкой:", finalImageData);
-      // Убедимся, что у изображения есть все необходимые поля
-      if (!finalImageData.id) finalImageData.id = `img-${Date.now()}`;
-      if (!finalImageData.preview_url) finalImageData.preview_url = finalImageData.url;
-      if (!finalImageData.alt) finalImageData.alt = 'Изображение для поста';
-      if (!finalImageData.source) {
-        if (finalImageData.author && finalImageData.author !== 'Пользователь (upload)') {
-          finalImageData.source = 'unsplash';
-        } else {
-          finalImageData.source = 'custom';
-        }
-      }
-    }
 
     // Prepare payload
     const postPayload: {
@@ -862,10 +774,8 @@ function App() {
       format_style: currentPostFormat,
       final_text: currentPostText,
       channel_name: channelName || undefined,
-      selected_image_data: finalImageData
+      selected_image_data: selectedImage
     };
-
-    console.log("Финальный payload для сохранения поста:", JSON.stringify(postPayload));
 
     try {
       let response;
@@ -883,7 +793,6 @@ function App() {
            headers: { 'x-telegram-user-id': userId }
         });
         setSuccess("Пост успешно сохранен");
-        console.log("Ответ сервера:", response.data);
       }
       
       if (response.data) {
@@ -902,7 +811,6 @@ function App() {
       const errorMsg = err.response?.data?.detail || err.message || (currentPostId ? 'Ошибка при обновлении поста' : 'Ошибка при сохранении поста');
       setError(errorMsg);
       console.error(currentPostId ? 'Ошибка при обновлении поста:' : 'Ошибка при сохранении поста:', err);
-      console.error('Детали ошибки:', err.response?.data);
     } finally {
       setIsSavingPost(false);
     }
@@ -966,30 +874,33 @@ function App() {
 
   // --- ДОБАВЛЕНО: Обработчик загрузки своего изображения --- 
   const handleCustomImageUpload = (imageUrl: string) => {
-    console.log("Загружено пользовательское изображение:", imageUrl);
-    
-    // Проверяем URL изображения
-    if (!imageUrl) {
-      setError("Ошибка при получении URL загруженного изображения");
-      return;
-    }
-    
-    // Создаем новый объект PostImage из загруженного изображения
+    if (!imageUrl) return;
+    // --- ИЗМЕНЕНИЕ: Преобразуем относительный URL в абсолютный ---
+    // Предполагаем, что бэкенд запущен на том же хосте, порт 8000
+    const backendBaseUrl = `${window.location.protocol}//${window.location.hostname}:8000`;
+    const absoluteImageUrl = imageUrl.startsWith('http') ? imageUrl : `${backendBaseUrl}${imageUrl}`;
+    // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
+    // Создаем объект PostImage для загруженного файла
     const uploadedImage: PostImage = {
-      id: 'upload-' + new Date().getTime(), // Временный ID для загруженного изображения
-      url: imageUrl,
-      preview_url: imageUrl,
-      alt: "Загруженное изображение",
-      author: "Пользователь (upload)",
-      source: "upload",
-      author_url: "",
+      id: `uploaded-${uuidv4()}`, // Генерируем уникальный ID
+      // --- ИЗМЕНЕНИЕ: Используем абсолютный URL ---
+      url: absoluteImageUrl,
+      preview_url: absoluteImageUrl, // Используем тот же URL для превью
+      // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+      alt: 'Загруженное изображение',
+      // --- ИЗМЕНЕНИЕ: Добавим отметку об источнике в автора для ясности ---
+      author: 'Пользователь (upload)', 
+      // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+      source: 'upload' // Указываем источник
     };
-    
-    // Автоматически выбираем загруженное изображение
-    setSelectedImage(uploadedImage);
+    setSelectedImage(uploadedImage); // Устанавливаем как выбранное
+    // Опционально: можно добавить в suggestedImages, но лучше держать их раздельно
+    // setSuggestedImages(prev => [uploadedImage, ...prev]); 
     setSuccess("Изображение успешно загружено и выбрано");
   };
-
+  // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+  
   // Функция для открытия редактирования поста
   const startEditingPost = (post: SavedPost) => {
     setCurrentPostId(post.id);
@@ -1007,18 +918,15 @@ function App() {
     // --- ИСПРАВЛЕНО: Используем selected_image_data напрямую ---
     // Проверяем, есть ли данные о выбранном изображении
     if (post.selected_image_data) {
-      console.log("Загружаем изображение из selected_image_data:", post.selected_image_data);
       // Используем данные напрямую, не нужно загружать их отдельно
       setSelectedImage(post.selected_image_data);
     } else {
       // Для обратной совместимости: если selected_image_data нет, но есть images_ids
       const savedImageId = post.images_ids && post.images_ids.length > 0 ? post.images_ids[0] : null;
       if (savedImageId) {
-        console.log("Загружаем изображение по ID:", savedImageId);
         fetchAndSetSavedImage(savedImageId);
       } else {
         // Если нет ни selected_image_data, ни images_ids, сбрасываем selectedImage
-        console.log("У поста нет связанных изображений");
         setSelectedImage(null);
       }
     }
@@ -1086,7 +994,7 @@ function App() {
       setError("Введите имя канала");
       return;
     }
-    
+
     setIsAnalyzing(true);
     // Сбрасываем флаг загрузки из БД перед новым анализом
     setAnalysisLoadedFromDB(false);
@@ -1122,16 +1030,8 @@ function App() {
       }
       // Устанавливаем флаг, что анализ загружен из БД
       setAnalysisLoadedFromDB(true);
-    } catch (err: any) {
-      // Проверяем, является ли ошибка результатом превышения лимита API
-      const errorMessage = err.response?.data?.detail || err.message || 'Ошибка при анализе канала';
-      
-      if (errorMessage.includes('Rate limit exceeded') || err.response?.status === 429) {
-        setError("Превышен лимит запросов к API. Это ограничение бесплатного тарифа OpenRouter API. Пожалуйста, повторите попытку позже.");
-      } else {
-        setError(errorMessage);
-      }
-      
+    } catch (err: any) { 
+      setError(err.response?.data?.detail || err.message || 'Ошибка при анализе канала');
       console.error('Ошибка при анализе:', err);
     } finally {
       setIsAnalyzing(false);
@@ -1258,53 +1158,33 @@ function App() {
   const handleImageSelection = (imageToSelect: PostImage | undefined) => {
     console.log('handleImageSelection вызван с изображением:', imageToSelect);
 
-    if (!imageToSelect || !imageToSelect.url) {
-      console.error("Попытка выбрать некорректное изображение без URL");
+    if (!imageToSelect) {
+      console.error("Попытка выбрать undefined изображение");
       return;
     }
 
     // Отображаем состояние до изменения
     console.log('Текущее выбранное изображение:', selectedImage);
 
-    // Проверяем, является ли выбранное изображение предложенным (из API) или загруженным
-    const isUnsplashImage = imageToSelect.source === 'unsplash' || (!imageToSelect.source && imageToSelect.author && imageToSelect.author !== 'Пользователь (upload)');
-    
     // Сравниваем URL для определения, выбрано ли уже это изображение
-    const isCurrentlySelected = selectedImage && 
-                               selectedImage.url && 
-                               imageToSelect.url && 
-                               selectedImage.url === imageToSelect.url;
-                                
+    const isCurrentlySelected = selectedImage && selectedImage.url === imageToSelect.url;
     console.log('Изображение уже выбрано?', isCurrentlySelected);
 
     if (isCurrentlySelected) {
       // Если изображение уже выбрано, снимаем выбор
       console.log('Снимаем выбор с изображения');
       setSelectedImage(null);
-      setSuccess(null);
     } else {
       // Иначе, выбираем новое изображение
       console.log('Выбираем новое изображение');
-      
-      // Создаем копию объекта изображения с обязательными полями
-      const newSelectedImage: PostImage = { 
-        ...imageToSelect,
-        // Гарантируем, что есть ID 
-        id: imageToSelect.id || `img-${Date.now()}`,
-        // Гарантируем, что preview_url будет установлен
-        preview_url: imageToSelect.preview_url || imageToSelect.url,
-        // Обеспечиваем наличие альтернативного текста
-        alt: imageToSelect.alt || 'Изображение для поста',
-        // Гарантируем наличие источника
-        source: imageToSelect.source || (isUnsplashImage ? 'unsplash' : 'custom')
-      };
-      
-      // Обновляем состояние выбранного изображения
-      setSelectedImage(newSelectedImage);
-      setSuccess("Изображение выбрано");
-      
-      // Добавляем явное логирование выбранного изображения
-      console.log('Изображение установлено в состояние:', JSON.stringify(newSelectedImage));
+      setSelectedImage(imageToSelect);
+    }
+
+    // Для наглядности покажем сообщение пользователю
+    if (!isCurrentlySelected) {
+      toast.success("Изображение выбрано"); // Используем toast для более заметного уведомления
+    } else {
+      // toast.info("Выбор изображения отменен"); // Можно добавить и для отмены
     }
   };
 
@@ -1316,7 +1196,7 @@ function App() {
         console.log(`Fetching details for new post based on idea: ${selectedIdea.topic_idea}`);
         setIsGeneratingPostDetails(true);
         setError(null);
-        setSuccess(null);
+        // setSuccess(null); // Убрано, т.к. toast используется для успеха выбора картинки
         setSuggestedImages([]); // Clear any potentially stale images
         setSelectedImage(null); // Ensure no image is pre-selected
 
@@ -1324,35 +1204,41 @@ function App() {
           const response = await axios.post(`${API_BASE_URL}/generate-post-details`, {
             topic_idea: selectedIdea.topic_idea,
           format_style: selectedIdea.format_style,
-          post_samples: analysisResult?.analyzed_posts_sample || [] // Передаем примеры постов, если есть
+          post_samples: analysisResult?.analyzed_posts_sample || [] 
         },
         {
           headers: {
-            'x-telegram-user-id': userId || 'unknown' // Передаем строку или 'unknown'
+            'x-telegram-user-id': userId || 'unknown' 
           }
         }
         );
         setCurrentPostText(response.data.generated_text);
-        setSuggestedImages(response.data.found_images || []);
-        setSuccess("Детали поста успешно сгенерированы");
+        
+        // Улучшенное формирование объектов PostImage из found_images
+        if (response.data.found_images && Array.isArray(response.data.found_images)) {
+          const formattedSuggestedImages = response.data.found_images.map((img: any) => ({
+            id: img.id || `unsplash-${uuidv4()}`, // Используем ID от Unsplash или генерируем, если нет
+            url: img.urls?.regular || img.urls?.raw || img.url || '', // URL для загрузки (предпочтительно качественный)
+            preview_url: img.urls?.small || img.urls?.thumb || img.preview_url || img.urls?.regular || '', // URL для превью
+            alt: img.alt_description || img.description || 'Предложенное изображение',
+            author: img.user?.name || '',
+            author_url: img.user?.links?.html || '',
+            source: 'unsplash' // Четко указываем источник
+          }));
+          setSuggestedImages(formattedSuggestedImages);
+        } else {
+          setSuggestedImages([]);
+        }
+        toast.success("Детали поста успешно сгенерированы"); // Используем toast
 
     } catch (err: any) {
-        // Проверяем, является ли ошибка результатом превышения лимита API
-        const errorMessage = err.response?.data?.detail || err.message || 'Ошибка при генерации деталей поста';
-        
-        if (errorMessage.includes('Rate limit exceeded') || err.response?.status === 429) {
-          setError("Превышен лимит запросов к API. Это ограничение бесплатного тарифа OpenRouter API. Пожалуйста, повторите попытку позже или введите текст поста самостоятельно.");
-        } else {
-          setError(errorMessage);
-        }
-        
+        setError(err.response?.data?.detail || err.message || 'Ошибка при генерации деталей поста');
         console.error('Ошибка при генерации деталей поста:', err);
     } finally {
           setIsGeneratingPostDetails(false);
         }
       }
-    // Зависимости для useCallback: все внешние переменные, используемые внутри
-  }, [currentView, currentPostId, selectedIdea, userId, API_BASE_URL, analysisResult, setIsGeneratingPostDetails, setError, setSuccess, setSuggestedImages, setSelectedImage, setCurrentPostText]);
+  }, [currentView, currentPostId, selectedIdea, userId, API_BASE_URL, analysisResult, setIsGeneratingPostDetails, setError, setSuggestedImages, setSelectedImage, setCurrentPostText]);
 
   // Вызываем useCallback-функцию внутри useEffect
   useEffect(() => {
@@ -1965,63 +1851,20 @@ function App() {
                   {suggestedImages.length > 0 && (
                       <div className="suggested-images-section">
                           <h3>Предложенные изображения:</h3>
-                          <p className="selection-hint" style={{ 
-                              fontSize: '14px', 
-                              color: '#666', 
-                              marginBottom: '10px', 
-                              fontStyle: 'italic' 
-                          }}>
-                              Нажмите на изображение, чтобы выбрать его для сохранения с постом.
-                              {selectedImage ? ' Выбранное изображение отмечено галочкой.' : ''}
-                          </p>
-
-                          {/* Добавляем кнопку для регенерации изображений */}
-                          <button 
-                            onClick={regeneratePostDetails}
-                            className="action-button"
-                            disabled={isGeneratingPostDetails}
-                            style={{marginBottom: '15px'}}
-                          >
-                            {isGeneratingPostDetails ? 'Обновление...' : 'Найти новые изображения'}
-                          </button>
-
-                          <div className="image-gallery suggested" style={{ display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
+                          <div className="image-gallery suggested">
                               {suggestedImages.map((image, index) => {
-                                  // Более строгая проверка, выбрано ли это изображение
-                                  const isSelected = !!selectedImage && 
-                                      !!selectedImage.url && 
-                                      !!image.url && 
-                                      selectedImage.url === image.url;
-                                  
+                                  const isSelected = selectedImage ? selectedImage.url === image.url : false;
                                   return (
                                       <div 
-                                          key={image.id || `suggested-${index}`} 
+                                          key={image.url || image.id || `suggested-${index}`} // Более надежный ключ
                                           className={`image-item ${isSelected ? 'selected' : ''}`}
-                                          onClick={() => {
-                                              console.log("Клик по изображению:", image);
-                                              handleImageSelection(image);
-                                          }}
-                                          style={{ 
-                                              cursor: 'pointer', 
-                                              position: 'relative', 
-                                              border: isSelected ? '4px solid #4CAF50' : '1px solid #ddd',
-                                              borderRadius: '8px',
-                                              width: '150px',
-                                              height: '150px',
-                                              overflow: 'hidden',
-                                              transition: 'all 0.3s ease',
-                                              boxShadow: isSelected ? '0 0 15px rgba(76, 175, 80, 0.6)' : 'none',
-                                              transform: isSelected ? 'scale(1.05)' : 'scale(1)'
-                                          }}
+                                          onClick={() => handleImageSelection(image)}
+                                          style={{ cursor: 'pointer', position: 'relative', border: isSelected ? '3px solid #1976d2' : '2px solid transparent', padding: '2px' }} // Явная рамка для выбранного
                                       >
                                       <img 
                                           src={image.preview_url || image.url} 
                                           alt={image.alt || 'Suggested image'} 
-                                          style={{ 
-                                              width: '100%', 
-                                              height: '100%', 
-                                              objectFit: 'cover'
-                                          }}
+                                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                                           onError={(e) => {
                                               const target = e.target as HTMLImageElement;
                                               target.src = 'https://via.placeholder.com/100?text=Ошибка'; 
@@ -2033,32 +1876,19 @@ function App() {
                                               position: 'absolute', 
                                               top: '5px', 
                                               right: '5px', 
-                                              backgroundColor: '#4CAF50', 
+                                              backgroundColor: '#1976d2', 
                                               color: 'white', 
                                               borderRadius: '50%', 
-                                              width: '30px',
-                                              height: '30px',
+                                              width: '20px',
+                                              height: '20px',
                                               display: 'flex',
                                               alignItems: 'center',
                                               justifyContent: 'center',
+                                              fontSize: '12px',
                                               fontWeight: 'bold',
-                                              fontSize: '18px',
                                               zIndex: 10
-                                          }}>✓</div> 
+                                          }}>✔</div> 
                                       )}
-                                      <div className="image-overlay" style={{
-                                          position: 'absolute',
-                                          bottom: '0',
-                                          left: '0',
-                                          right: '0',
-                                          background: 'rgba(0,0,0,0.6)',
-                                          color: 'white',
-                                          padding: '4px',
-                                          fontSize: '12px',
-                                          textAlign: 'center'
-                                      }}>
-                                          {isSelected ? 'Выбрано' : 'Нажмите чтобы выбрать'}
-                                      </div>
                                       </div>
                                   );
                               })}
@@ -2069,82 +1899,33 @@ function App() {
                   {/* --- Блок для своего изображения: Загрузчик и Превью --- */}
                   <div className="custom-image-section">
                      <h4>Свое изображение:</h4>
-                      {/* Показываем загрузчик */}
-                      {/* --- ИЗМЕНЕНО: Передаем userId --- */}
                       <ImageUploader onImageUploaded={handleCustomImageUpload} userId={userId} />
+                      
+                      {selectedImage && (
+                          <div className="selected-image-preview" style={{ marginTop: '15px', padding: '10px', border: '1px solid #eee', borderRadius: '8px', backgroundColor: '#f9f9f9' }}>
+                              <h5 style={{ marginTop: '0', marginBottom: '10px' }}>Выбранное изображение:</h5>
+                              <div className="preview-container" style={{ textAlign: 'center' }}>
+                                 <img 
+                                    src={selectedImage.preview_url || selectedImage.url} 
+                                    alt={selectedImage.alt || 'Выбрано'} 
+                                    style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '4px', marginBottom: '10px', border: '1px solid #ddd' }} 
+                                 />
+                                 <button 
+                                      className="action-button delete-button small remove-image-btn"
+                                      onClick={() => {
+                                        setSelectedImage(null);
+                                        // toast.info("Выбор изображения отменен");
+                                      }}
+                                      title="Удалить выбранное изображение"
+                                  >
+                                      <span>🗑️ Отменить выбор</span>
+                                  </button>
+                    </div>
                   </div>
-
-                  {selectedImage && (
-                      <div className="selected-image-preview" style={{
-                          marginTop: '20px',
-                          padding: '15px',
-                          border: '1px solid #e0e0e0',
-                          borderRadius: '8px',
-                          backgroundColor: '#f5f9ff',
-                          boxShadow: '0 2px 8px rgba(33, 150, 243, 0.2)'
-                      }}>
-                          <h5 style={{ marginBottom: '10px', color: '#2196f3', fontSize: '16px', fontWeight: 'bold' }}>
-                              <span style={{ marginRight: '8px' }}>✅</span>
-                              Выбранное изображение:
-                          </h5>
-                          <div className="preview-container" style={{ 
-                              display: 'flex', 
-                              flexDirection: 'column',
-                              alignItems: 'center' 
-                          }}>
-                             <img 
-                                 src={selectedImage.preview_url || selectedImage.url} 
-                                 alt={selectedImage.alt || 'Выбрано'} 
-                                 style={{ 
-                                     maxWidth: '100%', 
-                                     maxHeight: '300px', 
-                                     objectFit: 'contain',
-                                     borderRadius: '4px',
-                                     boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                                 }}
-                             />
-                             <div style={{ 
-                                 marginTop: '10px', 
-                                 fontSize: '14px', 
-                                 color: '#444',
-                                 textAlign: 'center',
-                                 padding: '10px',
-                                 backgroundColor: '#e8f4fe',
-                                 borderRadius: '4px',
-                                 width: '100%'
-                             }}>
-                                 {selectedImage.author && <div style={{ marginBottom: '5px' }}>
-                                     <strong>Автор:</strong> {selectedImage.author}
-                                 </div>}
-                                 <div style={{ fontWeight: 'bold', color: '#00796b', marginTop: '5px' }}>
-                                     ✅ Это изображение будет сохранено с постом
-                                 </div>
-                             </div>
-                             <button 
-                                  className="action-button delete-button small remove-image-btn"
-                                  onClick={() => setSelectedImage(null)} 
-                                  style={{
-                                      marginTop: '10px',
-                                      backgroundColor: '#f44336',
-                                      color: 'white',
-                                      border: 'none',
-                                      padding: '8px 15px',
-                                      borderRadius: '4px',
-                                      cursor: 'pointer',
-                                      fontWeight: 'bold',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '5px'
-                                  }}
-                                  title="Удалить выбранное изображение"
-                              >
-                                  <span>🗑️ Удалить</span>
-                              </button>
-                          </div>
-                      </div>
-                  )}
+                      )}
+                </div>
               </div>
-              {/* --- КОНЕЦ: Секция управления изображениями --- */}
+              {/* --- КОНЕЦ: Секция управления изображениями --- */} 
                 
               {/* Кнопки действий */}
               <div className="form-actions">
@@ -2152,36 +1933,13 @@ function App() {
                     onClick={handleSaveOrUpdatePost} 
                     className="action-button save-button"
                     disabled={isSavingPost || isGeneratingPostDetails || !currentPostText}
-                    style={{
-                      backgroundColor: currentPostText ? '#4CAF50' : '#ccc',
-                      color: 'white',
-                      padding: '10px 20px',
-                      fontSize: '16px',
-                      cursor: currentPostText ? 'pointer' : 'not-allowed'
-                    }}
                   >
                     {isSavingPost ? 'Сохранение...' : (currentPostId ? 'Обновить пост' : 'Сохранить пост')}
                   </button>
                   
-                  {/* Информация о тексте поста */}
-                  {!currentPostText && (
-                    <div style={{ color: 'red', margin: '10px 0' }}>
-                      ⚠️ Заполните текст поста для сохранения
-                    </div>
-                  )}
-                  
-                  {/* Добавляем информацию о выбранном изображении */}
-                  {selectedImage && currentPostText && (
-                    <div style={{ margin: '10px 0', color: 'green', fontWeight: 'bold', padding: '10px', backgroundColor: '#f0fff0', borderRadius: '5px', border: '1px solid #4CAF50' }}>
-                      <div style={{ marginBottom: '5px', fontSize: '16px' }}>✅ Изображение выбрано и будет сохранено с постом</div>
-                      <div style={{ fontSize: '14px' }}>
-                        <strong>URL изображения:</strong> {selectedImage.url?.substring(0, 70) + '...'}
-                      </div>
-                      {selectedImage.source && (
-                        <div style={{ fontSize: '14px' }}>
-                          <strong>Источник:</strong> {selectedImage.source}
-                        </div>
-                      )}
+                  {selectedImage && (
+                    <div style={{ marginTop: '10px', color: 'green', fontWeight: 'bold', textAlign: 'center' }}>
+                      ✅ Изображение "{selectedImage.alt?.substring(0,30) || 'Выбранное'}{selectedImage.alt && selectedImage.alt.length > 30 ? '...' : ''}" будет сохранено с постом.
                     </div>
                   )}
                  {/* Добавляем кнопку Отмена */}
