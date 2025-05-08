@@ -1819,10 +1819,6 @@ async def create_post(request: Request, post_data: PostData):
         # Извлекаем данные изображения отдельно
         selected_image = post_data.selected_image_data
         
-        # === ДОБАВЛЕНО: Логирование полученного изображения ===
-        logger.info(f"Получено selected_image_data от фронтенда: {selected_image}")
-        # === КОНЕЦ ДОБАВЛЕНИЯ ===
-
         # Создаем словарь с основными данными поста для сохранения
         post_to_save = post_data.dict(exclude={"selected_image_data"}) # Исключаем объект изображения
         post_to_save["user_id"] = int(telegram_user_id)
@@ -1845,66 +1841,71 @@ async def create_post(request: Request, post_data: PostData):
         saved_image_id = None
         if selected_image:
             try:
-                image_check = None
-                if selected_image.url:
-                    image_check_result = supabase.table("saved_images").select("id").eq("url", selected_image.url).limit(1).execute()
-                    if hasattr(image_check_result, 'data') and len(image_check_result.data) > 0:
-                        image_check = image_check_result.data[0]
-                if image_check:
-                    saved_image_id = image_check["id"]
-                    logger.info(f"Используем существующее изображение {saved_image_id} (URL: {selected_image.url}) для поста")
+                logger.info(f"Обработка выбранного изображения: {selected_image.dict() if hasattr(selected_image, 'dict') else selected_image}")
+                
+                # Проверяем, является ли изображение внешним (с Unsplash или другого источника)
+                is_external_image = selected_image.source in ["unsplash", "pexels", "openverse"]
+                
+                if is_external_image:
+                    logger.info(f"Обнаружено внешнее изображение с источником {selected_image.source}")
+                    try:
+                        # Используем новую функцию для скачивания и сохранения внешнего изображения
+                        external_image_result = await download_and_save_external_image(
+                            selected_image, 
+                            int(telegram_user_id)
+                        )
+                        saved_image_id = external_image_result["id"]
+                        
+                        # Обновляем данные об изображении, чтобы они указывали на локальную копию
+                        if external_image_result.get("is_new", False) and external_image_result.get("url"):
+                            selected_image.url = external_image_result["url"]
+                            if external_image_result.get("preview_url"):
+                                selected_image.preview_url = external_image_result["preview_url"]
+                            selected_image.source = f"{selected_image.source}_saved"
+                        
+                        logger.info(f"Внешнее изображение успешно обработано, saved_image_id: {saved_image_id}")
+                    except Exception as ext_img_err:
+                        logger.error(f"Ошибка при обработке внешнего изображения: {ext_img_err}")
+                        raise HTTPException(status_code=500, detail=f"Не удалось обработать внешнее изображение: {str(ext_img_err)}")
                 else:
-                    # --- ДОБАВЛЕНО: скачивание и загрузка внешнего изображения ---
-                    new_internal_id = str(uuid.uuid4())
-                    bucket_name = "post-images"
-                    storage_path = f"public/{new_internal_id}.jpg"
-                    public_url = None
-                    # Если изображение внешнее (например, Unsplash), скачиваем и загружаем в Storage
-                    if selected_image.source and selected_image.source.lower() in ["unsplash", "pexels", "openverse"]:
-                        try:
-                            # === ДОБАВЛЕНА ПРОВЕРКА URL ===
-                            if not selected_image.url or not selected_image.url.startswith(('http://', 'https://')):
-                                logger.error(f"Некорректный или отсутствующий URL для внешнего изображения: '{selected_image.url}'")
-                                raise HTTPException(status_code=400, detail=f"Некорректный URL для выбранного изображения: '{selected_image.url}'")
-                            # === КОНЕЦ ПРОВЕРКИ ===
-                            response = requests.get(selected_image.url, timeout=10)
-                            response.raise_for_status()
-                            file_content = response.content
-                            # Загружаем файл в Supabase Storage
-                            upload_response = supabase.storage.from_(bucket_name).upload(
-                                path=storage_path,
-                                file=file_content,
-                                file_options={"content-type": "image/jpeg", "cache-control": "3600"}
-                            )
-                            public_url_response = supabase.storage.from_(bucket_name).get_public_url(storage_path)
-                            if not public_url_response:
-                                logger.error(f"Не удалось получить публичный URL для файла: {storage_path}")
-                                raise HTTPException(status_code=500, detail="Не удалось получить URL для загруженного файла.")
-                            public_url = public_url_response
-                            logger.info(f"Внешнее изображение успешно загружено в Supabase Storage: {public_url}")
-                        except Exception as ext_img_err:
-                            logger.error(f"Ошибка при скачивании/загрузке внешнего изображения: {ext_img_err}")
-                            raise HTTPException(status_code=500, detail=f"Ошибка при скачивании/загрузке внешнего изображения: {str(ext_img_err)}")
+                    # Это локальное изображение или загруженное пользователем
+                    # Проверяем, существует ли изображение с таким URL (более надежно)
+                    image_check = None
+                    if selected_image.url:
+                        image_check_result = supabase.table("saved_images").select("id").eq("url", selected_image.url).limit(1).execute()
+                        if hasattr(image_check_result, 'data') and len(image_check_result.data) > 0:
+                            image_check = image_check_result.data[0]
+                    # --- КОНЕЦ ПРОВЕРКИ ПО URL ---
+
+                    if image_check:
+                        # Изображение уже существует, используем его ID (UUID)
+                        saved_image_id = image_check["id"]
+                        logger.info(f"Используем существующее изображение {saved_image_id} (URL: {selected_image.url}) для поста")
                     else:
-                        # Если изображение не внешнее, используем исходный URL
-                        public_url = selected_image.url
-                    image_data_to_save = {
-                        "id": new_internal_id,
-                        "url": public_url,
-                        "preview_url": selected_image.preview_url or public_url,
-                        "alt": selected_image.alt or "",
-                        "author": selected_image.author or "",
-                        "author_url": selected_image.author_url or "",
-                        "source": selected_image.source or "frontend_selection",
-                        "user_id": int(telegram_user_id),
-                    }
-                    image_result = supabase.table("saved_images").insert(image_data_to_save).execute()
-                    if hasattr(image_result, 'data') and len(image_result.data) > 0:
-                        saved_image_id = new_internal_id
-                        logger.info(f"Сохранено новое изображение {saved_image_id} для поста")
-                    else:
-                        logger.error(f"Ошибка при сохранении нового изображения: {image_result}")
-                        raise HTTPException(status_code=500, detail=f"Ошибка при сохранении нового изображения: {getattr(image_result, 'error', 'Unknown error')}")
+                        # Изображение не найдено, сохраняем новое
+                        # ГЕНЕРИРУЕМ НОВЫЙ UUID для нашей БД
+                        new_internal_id = str(uuid.uuid4()) 
+                        # --- УДАЛЕНО: Логика с external_id --- 
+                        
+                        image_data_to_save = {
+                            "id": new_internal_id, # Используем наш UUID
+                            "url": selected_image.url,
+                            "preview_url": selected_image.preview_url or selected_image.url,
+                            "alt": selected_image.alt or "",
+                            "author": selected_image.author or "", # Соответствует 'author' в PostImage
+                            "author_url": selected_image.author_url or "",
+                            "source": selected_image.source or "frontend_selection",
+                            "user_id": int(telegram_user_id),
+                            # --- УДАЛЕНО: external_id ---
+                        }
+                        
+                        image_result = supabase.table("saved_images").insert(image_data_to_save).execute()
+                        if hasattr(image_result, 'data') and len(image_result.data) > 0:
+                            saved_image_id = new_internal_id # Используем наш ID для связи
+                            logger.info(f"Сохранено новое изображение {saved_image_id} для поста")
+                        else:
+                            logger.error(f"Ошибка при сохранении нового изображения: {image_result}")
+                            raise HTTPException(status_code=500, detail=f"Ошибка при сохранении нового изображения: {getattr(image_result, 'error', 'Unknown error')}")
             except Exception as img_err:
                 logger.error(f"Ошибка при обработке/сохранении изображения: {img_err}")
                 raise HTTPException(status_code=500, detail=f"Ошибка при обработке/сохранении изображения: {str(img_err)}")
@@ -2021,36 +2022,61 @@ async def update_post(post_id: str, request: Request, post_data: PostData):
             image_processed = True # Отмечаем, что данные изображения были в запросе
             if selected_image: # Если изображение передано и оно не None/пустое
                 try:
-                    # Проверяем, существует ли изображение с таким URL
-                    image_check = None
-                    if selected_image.url:
-                        image_check_result = supabase.table("saved_images").select("id").eq("url", selected_image.url).limit(1).execute()
-                        if hasattr(image_check_result, 'data') and len(image_check_result.data) > 0:
-                            image_check = image_check_result.data[0]
-
-                    if image_check:
-                        image_id_to_set_in_post = image_check["id"]
-                        logger.info(f"Используем существующее изображение {image_id_to_set_in_post} для обновления поста {post_id}")
+                    # Проверяем, является ли изображение внешним (с Unsplash или другого источника)
+                    is_external_image = selected_image.source in ["unsplash", "pexels", "openverse"]
+                    
+                    if is_external_image:
+                        logger.info(f"Обнаружено внешнее изображение с источником {selected_image.source} при обновлении поста {post_id}")
+                        try:
+                            # Используем функцию для скачивания и сохранения внешнего изображения
+                            external_image_result = await download_and_save_external_image(
+                                selected_image, 
+                                int(telegram_user_id)
+                            )
+                            image_id_to_set_in_post = external_image_result["id"]
+                            
+                            # Обновляем данные об изображении, чтобы они указывали на локальную копию
+                            if external_image_result.get("is_new", False) and external_image_result.get("url"):
+                                selected_image.url = external_image_result["url"]
+                                if external_image_result.get("preview_url"):
+                                    selected_image.preview_url = external_image_result["preview_url"]
+                                selected_image.source = f"{selected_image.source}_saved"
+                            
+                            logger.info(f"Внешнее изображение успешно обработано при обновлении поста {post_id}, saved_image_id: {image_id_to_set_in_post}")
+                        except Exception as ext_img_err:
+                            logger.error(f"Ошибка при обработке внешнего изображения при обновлении поста {post_id}: {ext_img_err}")
+                            raise HTTPException(status_code=500, detail=f"Не удалось обработать внешнее изображение: {str(ext_img_err)}")
                     else:
-                        # Сохраняем новое изображение
-                        new_internal_id = str(uuid.uuid4())
-                        image_data_to_save = {
-                            "id": new_internal_id,
-                            "url": selected_image.url,
-                            "preview_url": selected_image.preview_url or selected_image.url,
-                            "alt": selected_image.alt or "",
-                            "author": selected_image.author or "",
-                            "author_url": selected_image.author_url or "",
-                            "source": selected_image.source or "frontend_selection",
-                            "user_id": int(telegram_user_id),
-                        }
-                        image_result = supabase.table("saved_images").insert(image_data_to_save).execute()
-                        if hasattr(image_result, 'data') and len(image_result.data) > 0:
-                            image_id_to_set_in_post = new_internal_id
-                            logger.info(f"Сохранено новое изображение {image_id_to_set_in_post} для обновления поста {post_id}")
+                        # Проверяем, существует ли изображение с таким URL
+                        image_check = None
+                        if selected_image.url:
+                            image_check_result = supabase.table("saved_images").select("id").eq("url", selected_image.url).limit(1).execute()
+                            if hasattr(image_check_result, 'data') and len(image_check_result.data) > 0:
+                                image_check = image_check_result.data[0]
+
+                        if image_check:
+                            image_id_to_set_in_post = image_check["id"]
+                            logger.info(f"Используем существующее изображение {image_id_to_set_in_post} для обновления поста {post_id}")
                         else:
-                            logger.error(f"Ошибка при сохранении нового изображения при обновлении поста: {image_result}")
-                            raise HTTPException(status_code=500, detail=f"Ошибка при сохранении нового изображения: {getattr(image_result, 'error', 'Unknown error')}")
+                            # Сохраняем новое изображение
+                            new_internal_id = str(uuid.uuid4())
+                            image_data_to_save = {
+                                "id": new_internal_id,
+                                "url": selected_image.url,
+                                "preview_url": selected_image.preview_url or selected_image.url,
+                                "alt": selected_image.alt or "",
+                                "author": selected_image.author or "",
+                                "author_url": selected_image.author_url or "",
+                                "source": selected_image.source or "frontend_selection",
+                                "user_id": int(telegram_user_id),
+                            }
+                            image_result = supabase.table("saved_images").insert(image_data_to_save).execute()
+                            if hasattr(image_result, 'data') and len(image_result.data) > 0:
+                                image_id_to_set_in_post = new_internal_id
+                                logger.info(f"Сохранено новое изображение {image_id_to_set_in_post} для обновления поста {post_id}")
+                            else:
+                                logger.error(f"Ошибка при сохранении нового изображения при обновлении поста: {image_result}")
+                                raise HTTPException(status_code=500, detail=f"Ошибка при сохранении нового изображения: {getattr(image_result, 'error', 'Unknown error')}")
                 except Exception as img_err:
                     logger.error(f"Ошибка при обработке/сохранении изображения при обновлении поста: {img_err}")
                     raise HTTPException(status_code=500, detail=f"Ошибка при обработке/сохранении изображения: {str(img_err)}")
@@ -2383,27 +2409,15 @@ async def search_unsplash_images(query: str, count: int = 5, topic: str = "", fo
         
         images = []
         for photo in selected_photos:
-            urls_data = photo.get('urls', {})
-            regular_url = urls_data.get('regular')
-            preview_url = urls_data.get('small')
-            photo_id = photo.get('id', 'unknown_id')
-
-            if not regular_url or not isinstance(regular_url, str) or not regular_url.startswith(('http://', 'https://')):
-                logger.warning(f"Unsplash photo ID {photo_id} имеет некорректный или отсутствующий regular_url: '{regular_url}'. Пропускаем это изображение.")
-                continue
-            
-            if not preview_url or not isinstance(preview_url, str) or not preview_url.startswith(('http://', 'https://')):
-                logger.warning(f"Unsplash photo ID {photo_id} имеет некорректный или отсутствующий preview_url: '{preview_url}'. Используем regular_url как fallback для preview.")
-                preview_url = regular_url
-
+            # Просто формируем объекты FoundImage без сохранения в БД
             images.append(FoundImage(
-                id=photo_id,
+                id=photo['id'],
                 source="unsplash",
-                preview_url=preview_url,
-                regular_url=regular_url,
+                preview_url=photo['urls']['small'],
+                regular_url=photo['urls']['regular'],
                 description=photo.get('description') or photo.get('alt_description') or query,
-                author_name=photo.get('user', {}).get('name'),
-                author_url=photo.get('user', {}).get('links', {}).get('html')
+                author_name=photo['user']['name'],
+                author_url=photo['user']['links']['html']
             ))
         
         logger.info(f"Найдено и отобрано {len(images)} изображений из {len(all_photos)} в Unsplash для предложения")
@@ -2600,38 +2614,19 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
             # Если была ошибка API, добавляем ее в сообщение ответа
             response_message = f"Ошибка генерации текста: {api_error_message}. Изображений найдено: {len(found_images[:IMAGE_RESULTS_COUNT])}"
         
-        # === ДОБАВЛЕНА БОЛЕЕ НАДЕЖНАЯ УСТАНОВКА ИЗОБРАЖЕНИЯ ПО УМОЛЧАНИЮ ===
-        default_selected_image = None
-        if found_images:
-            first_found = found_images[0]
-            # Проверяем, что URL существует, является строкой и имеет схему
-            if (first_found.regular_url and 
-                isinstance(first_found.regular_url, str) and 
-                first_found.regular_url.startswith(('http://', 'https://'))):
-                
-                default_selected_image = PostImage(
-                    url=first_found.regular_url,
-                    id=first_found.id,
-                    preview_url=first_found.preview_url if (first_found.preview_url and 
-                                                            isinstance(first_found.preview_url, str) and 
-                                                            first_found.preview_url.startswith(('http://', 'https://'))) 
-                              else first_found.regular_url,
-                    alt=first_found.description,
-                    author=first_found.author_name,
-                    author_url=first_found.author_url,
-                    source=first_found.source
-                )
-                logger.info(f"Установлено изображение по умолчанию (ID: {first_found.id}) с URL: {first_found.regular_url}")
-            else:
-                logger.warning(f"Первое найденное изображение (ID: {first_found.id}) имеет некорректный regular_url: '{first_found.regular_url}'. Изображение по умолчанию не будет выбрано.")
-        # === КОНЕЦ ДОБАВЛЕНИЯ ===
-        
         return PostDetailsResponse(
             generated_text=post_text, # Будет пустым или '[...]' при ошибке
             found_images=found_images[:IMAGE_RESULTS_COUNT],
             message=response_message, # <--- Сообщение включает ошибку API
             channel_name=channel_name,
-            selected_image_data=default_selected_image # Используем default_selected_image
+            selected_image_data=PostImage(
+                url=found_images[0].regular_url if found_images else "",
+                id=found_images[0].id if found_images else None,
+                preview_url=found_images[0].preview_url if found_images else "",
+                alt=found_images[0].description if found_images else "",
+                author=found_images[0].author_name if found_images else "",
+                author_url=found_images[0].author_url if found_images else ""
+            ) if found_images else None
         )
         # === КОНЕЦ ИЗМЕНЕНИЯ ===
                 
@@ -4045,4 +4040,120 @@ async def generate_invoice(request: Request):
     except Exception as e:
         logger.error(f"Ошибка при генерации инвойса: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка при генерации инвойса: {str(e)}")
+
+# --- Вспомогательная функция для скачивания и сохранения внешних изображений ---
+async def download_and_save_external_image(image_data: PostImage, user_id: int) -> Dict[str, Any]:
+    """
+    Скачивает изображение с внешнего URL и сохраняет его в Supabase Storage.
+    Возвращает информацию о сохраненном изображении, включая ID в базе данных.
+    
+    Args:
+        image_data: Данные изображения, включая URL и метаданные
+        user_id: ID пользователя, который сохраняет изображение
+        
+    Returns:
+        Dict с информацией о сохраненном изображении, включая ID
+    """
+    if not image_data or not image_data.url:
+        logger.error("Попытка скачать изображение с пустым URL")
+        raise ValueError("URL изображения не может быть пустым")
+    
+    logger.info(f"Скачивание внешнего изображения с URL: {image_data.url}, источник: {image_data.source}")
+    
+    try:
+        # Проверяем, существует ли уже это изображение в базе данных
+        image_check_result = supabase.table("saved_images").select("id").eq("url", image_data.url).limit(1).execute()
+        if hasattr(image_check_result, 'data') and len(image_check_result.data) > 0:
+            # Изображение уже существует в базе данных
+            saved_image_id = image_check_result.data[0]["id"]
+            logger.info(f"Изображение с URL {image_data.url} уже существует в базе данных с ID {saved_image_id}")
+            return {"id": saved_image_id, "is_new": False}
+        
+        # Скачиваем изображение
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            logger.info(f"Начинаем скачивание изображения с URL: {image_data.url}")
+            response = await client.get(image_data.url)
+            response.raise_for_status()  # Проверяем успешность запроса
+            
+            # Получаем расширение файла из URL или из Content-Type
+            file_ext = None
+            content_type = response.headers.get("Content-Type", "").lower()
+            
+            if "image/jpeg" in content_type or "image/jpg" in content_type:
+                file_ext = "jpg"
+            elif "image/png" in content_type:
+                file_ext = "png"
+            elif "image/webp" in content_type:
+                file_ext = "webp"
+            elif "image/gif" in content_type:
+                file_ext = "gif"
+            else:
+                # Пытаемся получить расширение из URL
+                url_path = image_data.url.split("?")[0].lower()
+                if url_path.endswith(".jpg") or url_path.endswith(".jpeg"):
+                    file_ext = "jpg"
+                elif url_path.endswith(".png"):
+                    file_ext = "png"
+                elif url_path.endswith(".webp"):
+                    file_ext = "webp"
+                elif url_path.endswith(".gif"):
+                    file_ext = "gif"
+                else:
+                    # Если не удалось определить расширение, используем jpg по умолчанию
+                    file_ext = "jpg"
+            
+            # Создаем уникальное имя файла
+            new_internal_id = str(uuid.uuid4())
+            filename = f"{new_internal_id}.{file_ext}"
+            storage_path = f"external/{filename}"
+            
+            logger.info(f"Скачано изображение, размер: {len(response.content)} байт, тип: {content_type}")
+            
+            # Сохраняем изображение в Supabase Storage
+            storage_result = supabase.storage.from_("post-images").upload(
+                storage_path,
+                response.content,
+                file_options={"content-type": content_type}
+            )
+            
+            # Получаем публичный URL для сохраненного изображения
+            public_url = supabase.storage.from_("post-images").get_public_url(storage_path)
+            logger.info(f"Изображение сохранено в Storage, публичный URL: {public_url}")
+            
+            # Сохраняем информацию об изображении в базу данных
+            image_data_to_save = {
+                "id": new_internal_id,
+                "url": public_url,  # Используем URL из нашего хранилища
+                "preview_url": image_data.preview_url or public_url,
+                "alt": image_data.alt or "",
+                "author": image_data.author or "",
+                "author_url": image_data.author_url or "",
+                "source": f"{image_data.source}_saved" if image_data.source else "external_saved",
+                "user_id": user_id,
+                "external_url": image_data.url  # Сохраняем оригинальный URL
+            }
+            
+            image_result = supabase.table("saved_images").insert(image_data_to_save).execute()
+            if not hasattr(image_result, 'data') or len(image_result.data) == 0:
+                logger.error(f"Ошибка при сохранении информации об изображении в БД: {image_result}")
+                raise Exception("Не удалось сохранить информацию об изображении в базе данных")
+            
+            logger.info(f"Информация об изображении сохранена в БД с ID: {new_internal_id}")
+            return {
+                "id": new_internal_id,
+                "is_new": True,
+                "url": public_url,
+                "preview_url": image_data.preview_url or public_url,
+                "alt": image_data.alt or "",
+                "author": image_data.author or "",
+                "author_url": image_data.author_url or "",
+                "source": f"{image_data.source}_saved" if image_data.source else "external_saved"
+            }
+    
+    except httpx.RequestError as e:
+        logger.error(f"Ошибка при скачивании изображения: {e}")
+        raise Exception(f"Не удалось скачать изображение: {str(e)}")
+    except Exception as e:
+        logger.error(f"Ошибка при обработке изображения: {e}")
+        raise Exception(f"Ошибка при обработке внешнего изображения: {str(e)}")
 
