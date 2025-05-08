@@ -1819,6 +1819,10 @@ async def create_post(request: Request, post_data: PostData):
         # Извлекаем данные изображения отдельно
         selected_image = post_data.selected_image_data
         
+        # === ДОБАВЛЕНО: Логирование полученного изображения ===
+        logger.info(f"Получено selected_image_data от фронтенда: {selected_image}")
+        # === КОНЕЦ ДОБАВЛЕНИЯ ===
+
         # Создаем словарь с основными данными поста для сохранения
         post_to_save = post_data.dict(exclude={"selected_image_data"}) # Исключаем объект изображения
         post_to_save["user_id"] = int(telegram_user_id)
