@@ -68,9 +68,7 @@ class SimpleErrorBoundary extends React.Component<
 // Типы для typescript
 declare global {
   interface Window {
-    Telegram?: {
-      WebApp?: any;
-    };
+    Telegram?: any; // Упрощенный тип для совместимости
   }
 }
 
@@ -149,8 +147,7 @@ interface SavedPost {
   image_url?: string;
   channel_name?: string;
   images_ids?: string[];
-  selected_image_data?: PostImage; // будет использоваться для обратной совместимости
-  selected_images_data?: PostImage[]; // новое поле для хранения массива изображений
+  selected_image_data?: PostImage; // Добавляем поле для данных выбранного изображения
 }
 
 // Тип для дня календаря
@@ -407,8 +404,9 @@ function App() {
   const [suggestedImages, setSuggestedImages] = useState<PostImage[]>([]);
   const [error, setError] = useState<string | null>(null); 
   const [success, setSuccess] = useState<string | null>(null);
-  const [selectedImage, setSelectedImage] = useState<PostImage | null>(null); // оставляем для обратной совместимости
+  // ИЗМЕНЕНО: Состояние для МНОЖЕСТВЕННОГО выбора изображений
   const [selectedImages, setSelectedImages] = useState<PostImage[]>([]);
+  const MAX_SELECTED_IMAGES = 5; // Максимальное количество выбираемых изображений
 
   // Состояния для календаря и сохраненных постов
   const [savedPosts, setSavedPosts] = useState<SavedPost[]>([]);
@@ -772,15 +770,13 @@ function App() {
       final_text: string;
       channel_name?: string;
       selected_image_data?: PostImage | null;
-      selected_images_data?: PostImage[]; // Добавляем массив изображений
     } = {
       target_date: currentPostDate,
       topic_idea: currentPostTopic,
       format_style: currentPostFormat,
       final_text: currentPostText,
       channel_name: channelName || undefined,
-      selected_image_data: selectedImage, // для обратной совместимости
-      selected_images_data: selectedImages.length > 0 ? selectedImages : undefined
+      selected_image_data: selectedImages[0]
     };
 
     try {
@@ -810,8 +806,7 @@ function App() {
         setCurrentPostTopic('');
         setCurrentPostFormat('');
         setCurrentPostText('');
-        setSelectedImage(null);
-        setSelectedImages([]); // Очищаем массив выбранных изображений
+        setSelectedImages([]);
         setSuggestedImages([]);
       }
     } catch (err: any) { 
@@ -844,7 +839,7 @@ function App() {
   };
   
   // Функция для загрузки данных сохраненного изображения и установки его как выбранного
-  const fetchAndSetSavedImage = async (imageId: string) => {
+  const fetchAndSetSavedImage = async (imageId: string, addToSelection: boolean = false) => {
     if (!imageId) return;
     try {
       console.log(`Загрузка данных для сохраненного изображения: ${imageId}`);
@@ -859,20 +854,25 @@ function App() {
               url: imageData.url,
               preview_url: imageData.preview_url || imageData.url, 
               alt: imageData.alt || '',
-              author: imageData.author_name || '',
+              author: imageData.author_name || '', // Используем author_name из БД
               author_url: imageData.author_url || '',
               source: imageData.source || 'db'
           };
-          
-          // Устанавливаем изображение и в одиночное, и в множественный массив
-          setSelectedImage(imageObject);
-          setSelectedImages([imageObject]);
-          
+          // ИЗМЕНЕНО: Логика для множественного или одиночного выбора при загрузке
+          if (addToSelection) {
+            setSelectedImages(prev => {
+              if (!prev.find(img => img.id === imageObject.id) && prev.length < MAX_SELECTED_IMAGES) {
+                return [...prev, imageObject];
+              }
+              return prev;
+            });
+          } else {
+            setSelectedImages([imageObject]); // Заменяем текущий выбор
+          }
           console.log(`Установлено сохраненное изображение:`, imageObject);
       } else {
           console.warn(`Не удалось загрузить данные для изображения ${imageId}.`);
-          setSelectedImage(null);
-          setSelectedImages([]);
+          setSelectedImages([]); // Сбрасываем, если не удалось загрузить
       }
     } catch (err: any) {
         if (err.response && err.response.status === 404) {
@@ -880,8 +880,7 @@ function App() {
         } else {
             console.error(`Ошибка при загрузке сохраненного изображения ${imageId}:`, err);
         }
-        setSelectedImage(null);
-        setSelectedImages([]);
+        setSelectedImages([]); // Сбрасываем при любой ошибке
     }
   };
 
@@ -891,25 +890,30 @@ function App() {
     const backendBaseUrl = `${window.location.protocol}//${window.location.hostname}:8000`;
     const absoluteImageUrl = imageUrl.startsWith('http') ? imageUrl : `${backendBaseUrl}${imageUrl}`;
 
-    // Создаем объект PostImage для загруженного файла
     const uploadedImage: PostImage = {
-      id: `uploaded-${uuidv4()}`,
+      id: `uploaded-${uuidv4()}`, 
       url: absoluteImageUrl,
-      preview_url: absoluteImageUrl,
+      preview_url: absoluteImageUrl, 
       alt: 'Загруженное изображение',
-      author: 'Пользователь (upload)',
+      author: 'Пользователь (upload)', 
       source: 'upload'
     };
 
-    // Добавляем в массив выбранных изображений
-    setSelectedImages(prev => [...prev, uploadedImage]);
-    
-    // Для обратной совместимости
-    if (selectedImages.length === 0) {
-      setSelectedImage(uploadedImage);
-    }
-    
-    setSuccess("Изображение успешно загружено и добавлено в выбранные");
+    // ИЗМЕНЕНО: Логика для множественного выбора
+    setSelectedImages(prevSelected => {
+      if (prevSelected.find(img => img.url === uploadedImage.url)) {
+        // ИЗМЕНЕНО: Используем стандартный toast для информационного сообщения
+        toast("Это изображение уже добавлено.");
+        return prevSelected;
+      }
+      if (prevSelected.length < MAX_SELECTED_IMAGES) {
+        setSuccess("Изображение успешно загружено и добавлено в выбранные");
+        return [...prevSelected, uploadedImage];
+      } else {
+        toast.error(`Можно выбрать не более ${MAX_SELECTED_IMAGES} изображений.`);
+        return prevSelected;
+      }
+    });
   };
   // --- КОНЕЦ ДОБАВЛЕНИЯ ---
   
@@ -927,27 +931,18 @@ function App() {
     setSuccess(null);
     setCurrentView('edit');
 
-    // Проверяем наличие множественных изображений
-    if (post.selected_images_data && post.selected_images_data.length > 0) {
-      setSelectedImages(post.selected_images_data);
-      // Для обратной совместимости устанавливаем selectedImage на первое изображение
-      setSelectedImage(post.selected_images_data[0]);
-    } 
-    // Проверяем, есть ли одиночное изображение (для обратной совместимости)
-    else if (post.selected_image_data) {
-      setSelectedImage(post.selected_image_data);
+    // ИЗМЕНЕНО: Логика для множественного выбора
+    // Сбрасываем предыдущие выбранные изображения
+    setSelectedImages([]); 
+    // Если в сохраненном посте есть selected_image_data (старый формат, одно изображение)
+    if (post.selected_image_data) {
+      // Добавляем его в массив выбранных
       setSelectedImages([post.selected_image_data]);
     } 
-    // Для старых постов с ID изображений
-    else {
-      const savedImageId = post.images_ids && post.images_ids.length > 0 ? post.images_ids[0] : null;
-      if (savedImageId) {
-        fetchAndSetSavedImage(savedImageId);
-      } else {
-        setSelectedImage(null);
-        setSelectedImages([]);
-      }
-    }
+    // TODO: В будущем, если бэкенд будет возвращать массив images_ids или selected_images_data,
+    // нужно будет реализовать логику их загрузки и установки в setSelectedImages.
+    // Например, если есть post.images_ids:
+    // post.images_ids.forEach(id => fetchAndSetSavedImage(id, true)); // true - для добавления в массив
   };
   
   // Функция для сохранения идей в базу данных
@@ -1163,7 +1158,7 @@ function App() {
     setCurrentPostFormat(idea.format_style);
     setCurrentPostDate(new Date().toISOString().split('T')[0]);
     setCurrentPostText('');
-      setSelectedImage(null);
+      setSelectedImages([]);
     setSuggestedImages([]);
     setError(null);
     setSuccess(null);
@@ -1172,44 +1167,31 @@ function App() {
   };
 
   // Function to handle selecting/deselecting a suggested image
-  const handleImageSelection = (imageToSelect: PostImage | undefined) => {
-    console.log('handleImageSelection вызван с изображением:', imageToSelect);
-
-    if (!imageToSelect || !imageToSelect.url) {
-      console.error("Попытка выбрать изображение без URL");
+  // ИЗМЕНЕНО: Логика для множественного выбора
+  const handleImageSelection = (imageToToggle: PostImage | undefined) => {
+    if (!imageToToggle || !imageToToggle.url) {
+      console.error("Попытка выбрать изображение с некорректными данными.");
       return;
     }
 
-    // Проверяем, выбрано ли уже это изображение
-    const isAlreadySelected = selectedImages.some(img => img.url === imageToSelect.url);
-    console.log('Изображение уже выбрано?', isAlreadySelected);
-    
-    if (isAlreadySelected) {
-      // Если изображение уже выбрано, удаляем его из списка выбранных
-      console.log('Удаляем изображение из выбранных');
-      setSelectedImages(prev => prev.filter(img => img.url !== imageToSelect.url));
-      
-      // Для обратной совместимости: если это было единственное выбранное изображение, сбрасываем selectedImage
-      if (selectedImages.length === 1 && selectedImages[0].url === imageToSelect.url) {
-        setSelectedImage(null);
-      }
-    } else {
-      // Иначе добавляем изображение в список выбранных
-      console.log('Добавляем изображение в выбранные');
-      setSelectedImages(prev => [...prev, imageToSelect]);
-      
-      // Для обратной совместимости: устанавливаем также selectedImage на первое выбранное изображение
-      if (selectedImages.length === 0) {
-        setSelectedImage(imageToSelect);
-      }
-    }
+    setSelectedImages(prevSelected => {
+      const isAlreadySelected = prevSelected.some(img => img.url === imageToToggle.url);
 
-    // Показываем сообщение пользователю
-    if (!isAlreadySelected) {
-      setSuccess("Изображение добавлено в выбранные");
-    } else {
-      setSuccess("Изображение удалено из выбранных");
-    }
+      if (isAlreadySelected) {
+        // Удаляем изображение из массива
+        toast.success("Выбор изображения отменен.");
+        return prevSelected.filter(img => img.url !== imageToToggle.url);
+      } else {
+        // Добавляем изображение, если лимит не достигнут
+        if (prevSelected.length < MAX_SELECTED_IMAGES) {
+          toast.success("Изображение выбрано.");
+          return [...prevSelected, imageToToggle];
+        } else {
+          toast.error(`Можно выбрать не более ${MAX_SELECTED_IMAGES} изображений.`);
+          return prevSelected; // Лимит достигнут, не добавляем
+        }
+      }
+    });
   };
 
   // Effect to fetch post details when creating a new post from an idea
@@ -1222,7 +1204,7 @@ function App() {
         setError(null);
         setSuccess(null);
         setSuggestedImages([]); // Clear any potentially stale images
-        setSelectedImage(null); // Ensure no image is pre-selected
+        setSelectedImages([]); // Ensure no image is pre-selected
 
         try {
           const response = await axios.post(`${API_BASE_URL}/generate-post-details`, {
@@ -1248,7 +1230,7 @@ function App() {
         }
       }
     // Зависимости для useCallback: все внешние переменные, используемые внутри
-  }, [currentView, currentPostId, selectedIdea, userId, API_BASE_URL, analysisResult, setIsGeneratingPostDetails, setError, setSuccess, setSuggestedImages, setSelectedImage, setCurrentPostText]);
+  }, [currentView, currentPostId, selectedIdea, userId, API_BASE_URL, analysisResult, setIsGeneratingPostDetails, setError, setSuccess, setSuggestedImages, setSelectedImages, setCurrentPostText]);
 
   // Вызываем useCallback-функцию внутри useEffect
   useEffect(() => {
@@ -1861,144 +1843,42 @@ function App() {
                   {suggestedImages.length > 0 && (
                       <div className="suggested-images-section">
                           <h3>Предложенные изображения:</h3>
-                          <div className="image-gallery suggested" style={{ 
-                              display: 'grid', 
-                              gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', 
-                              gap: '15px',
-                              marginBottom: '20px' 
-                          }}>
-                              {suggestedImages.map((image, index) => {
-                                  // Проверяем, выбрано ли это изображение
-                                  const isSelected = selectedImages.some(img => img.url === image.url);
-                                  
-                                  return (
-                                      <div 
-                                          key={image.id || `suggested-${index}`} 
-                                          className={`image-item ${isSelected ? 'selected' : ''}`}
-                                          onClick={() => handleImageSelection(image)}
-                                          style={{ 
-                                              cursor: 'pointer', 
-                                              position: 'relative', 
-                                              borderRadius: '8px',
-                                              overflow: 'hidden',
-                                              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                                              border: isSelected ? '3px solid #2196f3' : '3px solid transparent',
-                                              transition: 'all 0.2s ease'
-                                          }}
-                                      >
-                                          <img 
-                                              src={image.preview_url || image.url} 
-                                              alt={image.alt || 'Suggested image'} 
-                                              style={{ 
-                                                  width: '100%', 
-                                                  height: '120px', 
-                                                  objectFit: 'cover',
-                                                  display: 'block'
-                                              }}
-                                              onError={(e) => {
-                                                  const target = e.target as HTMLImageElement;
-                                                  target.src = 'https://via.placeholder.com/100?text=Ошибка'; 
-                                                  console.error('Image load error:', image.preview_url || image.url);
-                                              }}
-                                          />
-                                          {isSelected && (
-                                              <div style={{ 
-                                                  position: 'absolute', 
-                                                  top: '5px', 
-                                                  right: '5px', 
-                                                  backgroundColor: '#2196f3', 
-                                                  color: 'white', 
-                                                  borderRadius: '50%', 
-                                                  width: '24px',
-                                                  height: '24px',
-                                                  display: 'flex',
-                                                  alignItems: 'center',
-                                                  justifyContent: 'center',
-                                                  fontWeight: 'bold',
-                                                  zIndex: 10,
-                                                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-                                              }}>✓</div> 
-                                          )}
-                                          <div style={{
-                                              padding: '8px',
-                                              fontSize: '12px',
-                                              backgroundColor: 'rgba(0,0,0,0.03)'
-                                          }}>
-                                              {image.author && <div style={{color: '#666'}}>Автор: {image.author}</div>}
-                                          </div>
-                                      </div>
-                                  );
-                              })}
-                          </div>
-                      </div>
-                  )}
-                  
-                  {/* --- Выбранные изображения --- */}
-                  {selectedImages.length > 0 && (
-                      <div className="selected-images-section" style={{marginBottom: '20px'}}>
-                          <h3>Выбранные изображения ({selectedImages.length}):</h3>
-                          <div style={{
-                              display: 'flex',
-                              flexWrap: 'wrap',
-                              gap: '10px',
-                              marginBottom: '15px'
-                          }}>
-                              {selectedImages.map((image, index) => (
-                                  <div key={`selected-${image.id || index}`} style={{
-                                      position: 'relative',
-                                      width: '120px',
-                                      borderRadius: '6px',
-                                      overflow: 'hidden',
-                                      boxShadow: '0 2px 6px rgba(0,0,0,0.2)'
-                                  }}>
-                                      <img 
-                                          src={image.preview_url || image.url} 
-                                          alt={image.alt || 'Selected image'} 
-                                          style={{
-                                              width: '100%',
-                                              height: '90px',
-                                              objectFit: 'cover',
-                                              display: 'block'
-                                          }}
-                                      />
-                                      <button 
-                                          onClick={(e) => {
-                                              e.stopPropagation();
-                                              // Удаляем изображение из выбранных
-                                              setSelectedImages(prev => prev.filter(img => img.url !== image.url));
-                                              // Если это было последнее изображение или то же самое, что в selectedImage
-                                              if (selectedImages.length === 1 || (selectedImage && selectedImage.url === image.url)) {
-                                                  setSelectedImage(null);
-                                              }
-                                          }}
-                                          style={{
-                                              position: 'absolute',
-                                              top: '3px',
-                                              right: '3px',
-                                              background: 'rgba(255,255,255,0.8)',
-                                              color: '#f44336',
-                                              border: 'none',
-                                              borderRadius: '50%',
-                                              width: '22px',
-                                              height: '22px',
-                                              cursor: 'pointer',
-                                              display: 'flex',
-                                              alignItems: 'center',
-                                              justifyContent: 'center',
-                                              fontSize: '14px'
-                                          }}
-                                      >✕</button>
+                          <div className="image-gallery suggested">
+                              {suggestedImages.map((image, index) => (
+                                  <div 
+                                      key={image.id || `suggested-${index}`} 
+                                      className={`image-item ${selectedImages.some(si => si.url === image.url) ? 'selected' : ''}`}
+                                      onClick={() => handleImageSelection(image)}
+                                      style={{ cursor: 'pointer', position: 'relative', border: '2px solid transparent' }}
+                                  >
+                                  <img 
+                                      src={image.preview_url || image.url} 
+                                      alt={image.alt || 'Suggested image'} 
+                                      style={{ width: '100%', height: 'auto' }}
+                                      onError={(e) => {
+                                          const target = e.target as HTMLImageElement;
+                                          target.src = 'https://via.placeholder.com/100?text=Ошибка'; 
+                                          console.error('Image load error:', image.preview_url || image.url);
+                                      }}
+                                  />
+                                  {selectedImages.some(si => si.url === image.url) && (
+                                      <div className="checkmark" style={{ 
+                                          position: 'absolute', 
+                                          top: '5px', 
+                                          right: '5px', 
+                                          backgroundColor: '#2196f3', 
+                                          color: 'white', 
+                                          borderRadius: '50%', 
+                                          padding: '2px',
+                                          fontWeight: 'bold',
+                                          zIndex: 10
+                                      }}>✔</div> 
+                                  )}
                                   </div>
                               ))}
-                          </div>
                       </div>
+                    </div>
                   )}
-                  
-                  {/* --- Блок для своего изображения: Загрузчик --- */}
-                  <div className="custom-image-section" style={{marginBottom: '20px'}}>
-                      <h4>Загрузить своё изображение:</h4>
-                      <ImageUploader onImageUploaded={handleCustomImageUpload} userId={userId} />
-                  </div>
                   
                   {/* --- Блок для своего изображения: Загрузчик и Превью --- */}
                   <div className="custom-image-section">
@@ -2007,22 +1887,41 @@ function App() {
                       {/* --- ИЗМЕНЕНО: Передаем userId --- */}
                       <ImageUploader onImageUploaded={handleCustomImageUpload} userId={userId} />
                       
-                      {/* Показываем превью ВЫБРАННОГО изображения (любого) и кнопку удаления */} 
-                      {selectedImage && (
-                          <div className="selected-image-preview">
-                              <h5>Выбранное изображение:</h5>
-                              <div className="preview-container">
-                                 <img src={selectedImage.preview_url || selectedImage.url} alt={selectedImage.alt || 'Выбрано'} />
-                                 <button 
-                                      className="action-button delete-button small remove-image-btn"
-                                      onClick={() => setSelectedImage(null)} // Сброс выбранного изображения
-                                      title="Удалить выбранное изображение"
-                                  >
-                                      <span>🗑️ Удалить</span>
-                                  </button>
-                    </div>
-                  </div>
-                      )}
+                      {/* ИЗМЕНЕНО: Секция предпросмотра ВЫБРАННЫХ изображений */}
+                      {selectedImages.length > 0 && (
+                           <div className="selected-image-preview">
+                              <h5>Выбранные изображения ({selectedImages.length}/{MAX_SELECTED_IMAGES}):</h5>
+                              <div className="image-gallery selected-preview" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '10px' }}>
+                                {selectedImages.map(sImg => (
+                                  <div key={sImg.url} className="image-item-preview" style={{ position: 'relative', width: '100px', height: '100px', border: '1px solid #ccc', borderRadius: '4px', overflow: 'hidden' }}>
+                                    <img 
+                                        src={sImg.preview_url || sImg.url} 
+                                        alt={sImg.alt || 'Выбрано'} 
+                                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                    />
+                                    <button
+                                      className="action-button delete-button x-small remove-from-selection-btn" // Добавим класс x-small
+                                      onClick={() => handleImageSelection(sImg)} // Используем handleImageSelection для удаления
+                                      title="Убрать из выбранных"
+                                      style={{ 
+                                        position: 'absolute', 
+                                        top: '2px', 
+                                        right: '2px', 
+                                        padding: '2px', 
+                                        minWidth: 'auto', // Уменьшаем кнопку
+                                        width: '20px', 
+                                        height: '20px',
+                                        fontSize: '10px', // Уменьшаем иконку
+                                        lineHeight: '16px'
+                                      }}
+                                    >
+                                      <span>🗑️</span>
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                       )}
                 </div>
               </div>
               {/* --- КОНЕЦ: Секция управления изображениями --- */} {/* <-- ИСПРАВЛЕНО: Убран лишний символ */} 
@@ -2037,12 +1936,11 @@ function App() {
                     {isSavingPost ? 'Сохранение...' : (currentPostId ? 'Обновить пост' : 'Сохранить пост')}
                   </button>
                   
-                  {/* Добавляем информацию о выбранных изображениях */}
+                  {/* Добавляем информацию о выбранном изображении */}
                   {selectedImages.length > 0 && (
-                      <div style={{ margin: '10px 0', color: 'green', fontWeight: 'bold' }}>
-                          ✅ Выбрано {selectedImages.length} {selectedImages.length === 1 ? 'изображение' : 
-                                    (selectedImages.length >= 2 && selectedImages.length <= 4) ? 'изображения' : 'изображений'}
-                      </div>
+                    <div style={{ margin: '10px 0', color: 'green', fontWeight: 'bold' }}>
+                      ✅ Изображения выбраны и будут сохранены с постом
+                    </div>
                   )}
                  {/* Добавляем кнопку Отмена */}
                   <button 
@@ -2054,7 +1952,6 @@ function App() {
                         setCurrentPostTopic('');
                         setCurrentPostFormat('');
                         setCurrentPostText('');
-                        setSelectedImage(null);
                         setSelectedImages([]);
                         setSuggestedImages([]);
                     }}
