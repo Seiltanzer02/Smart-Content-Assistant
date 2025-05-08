@@ -1157,13 +1157,19 @@ function App() {
   };
 
   // Function to handle selecting/deselecting a suggested image
-  const handleImageSelection = (image: PostImage | undefined) => {
-    if (image) {
-      // Если кликнутое изображение уже выбрано (сравниваем по ID или URL), снимаем выбор
-      // Иначе, выбираем кликнутое изображение
-      setSelectedImage(prevSelected => (prevSelected?.id === image.id || prevSelected?.url === image.url) ? null : image);
+  const handleImageSelection = (imageToSelect: PostImage | undefined) => {
+    if (imageToSelect && imageToSelect.url) { // Убедимся, что у изображения есть URL
+      setSelectedImage(prevSelected => {
+        // Если ранее было что-то выбрано и URL совпадает, снимаем выбор (ставим null)
+        if (prevSelected && prevSelected.url === imageToSelect.url) {
+          return null;
+        }
+        // Иначе, выбираем новое изображение
+        return imageToSelect;
+      });
     } else {
-      console.error("Attempted to select an image with undefined data.");
+      console.error("Attempted to select an image with undefined data or missing URL.");
+      setSelectedImage(null); // Если данные некорректны, сбрасываем выбор
     }
   };
 
@@ -1820,7 +1826,7 @@ function App() {
                               {suggestedImages.map((image, index) => (
                                   <div 
                                       key={image.id || `suggested-${index}`} 
-                                      className={`image-item ${selectedImage?.id === image.id || selectedImage?.url === image.url ? 'selected' : ''}`}
+                                      className={`image-item ${selectedImage && selectedImage.url === image.url ? 'selected' : ''}`}
                                       onClick={() => handleImageSelection(image)}
                                   >
                                   <img 
@@ -1832,7 +1838,7 @@ function App() {
                                           console.error('Image load error:', image.preview_url || image.url);
                                       }}
                                   />
-                                  {(selectedImage?.id === image.id || selectedImage?.url === image.url) && (
+                                  {selectedImage && selectedImage.url === image.url && (
                                       <div className="checkmark">✔</div> 
                                   )}
                                   </div>
