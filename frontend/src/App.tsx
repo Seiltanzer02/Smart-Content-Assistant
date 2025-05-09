@@ -1600,68 +1600,12 @@ function App() {
           
           {/* --- НАЧАЛО: НОВЫЙ Вид "Посты" с таблицей --- */}
           {currentView === 'posts' && (
-            <div className="view posts-view"> {/* Добавляем класс posts-view для возможных специфичных стилей */} 
+            <div className="view posts-view">
               <h2>
-                Список сохраненных постов 
-                {selectedChannels.length > 0 
-                  ? `(Каналы: ${selectedChannels.join(', ')})` 
-                  : channelName 
-                    ? `(Канал: @${channelName})` 
-                    : '(Все каналы)'}
+                Список сохраненных постов
+                {/* Убираем отображение выбранных каналов */}
               </h2>
-              
-              {/* Фильтр по каналам (копируем из календаря) */}
-              <div className="channels-filter">
-                 <h3>Фильтр по каналам:</h3>
-                  <div className="channels-actions">
-                     <button 
-                        className="action-button"
-                        onClick={() => {
-                           if (channelName && !selectedChannels.includes(channelName)) {
-                              const updatedSelected = [...selectedChannels, channelName];
-                              setSelectedChannels(updatedSelected);
-                              // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
-                              const key = getUserSpecificKey('selectedChannels', userId);
-                              if (key) {
-                                localStorage.setItem(key, JSON.stringify(updatedSelected));
-                              }
-                              // --- КОНЕЦ ИЗМЕНЕНИЯ ---
-                           }
-                        }}
-                     >
-                        + Добавить текущий канал
-              </button>
-                     <button
-                        className="action-button"
-                        onClick={filterPostsByChannels}
-                     >
-                        Применить фильтр
-                     </button>
-                  </div>
-                  <div className="selected-channels">
-                     {selectedChannels.map((channel) => (
-                        <div key={channel} className="selected-channel">
-                           <span className="channel-name">@{channel}</span>
-                           <button 
-                              className="remove-channel"
-                              onClick={() => {
-                                 const updatedSelected = selectedChannels.filter(c => c !== channel);
-                                 setSelectedChannels(updatedSelected);
-                                 // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
-                                 const key = getUserSpecificKey('selectedChannels', userId);
-                                 if (key) {
-                                    localStorage.setItem(key, JSON.stringify(updatedSelected));
-                                 }
-                                 // --- КОНЕЦ ИЗМЕНЕНИЯ ---
-                              }}
-                           >
-                              ✕
-                           </button>
-                        </div>
-                     ))}
-                  </div>
-              </div>
-              
+              {/* Удалён фильтр по каналам для вкладки Посты */}
               {/* Таблица постов (перемещенный код) */}
               <div className="posts-table-container">
                  {loadingSavedPosts ? (

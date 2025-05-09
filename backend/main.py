@@ -2225,7 +2225,7 @@ async def delete_post(post_id: str, request: Request):
             raise HTTPException(status_code=500, detail="Ошибка при удалении поста")
             
         logger.info(f"Пользователь {telegram_user_id} удалил пост {post_id}")
-        return {"message": "Пост успешно удален"}
+        return {"success": True, "message": "Пост успешно удален"}
         
     except HTTPException as http_err:
         # Перехватываем HTTP исключения

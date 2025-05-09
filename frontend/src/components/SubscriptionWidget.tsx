@@ -478,8 +478,8 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
         </div>
       ) : (
         <div className="free-block">
-          <h4>Бесплатный доступ</h4>
-          <p>Для доступа к премиум-функциям оформите подписку.</p>
+          <h4>Базовый доступ</h4>
+          <p>Для Премиум доступа без ограничений оформите подписку.</p>
           <div className="buy-section">
             <button
               className="subscribe-button"
