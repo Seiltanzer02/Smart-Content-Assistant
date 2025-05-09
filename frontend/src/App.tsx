@@ -431,6 +431,8 @@ function App() {
   const [channelInput, setChannelInput] = useState<string>('');
   const [userSettings, setUserSettings] = useState<ApiUserSettings | null>(null);
   const [progress, setProgress] = useState(0);
+  const [analyzeLimitExceeded, setAnalyzeLimitExceeded] = useState(false);
+  const [ideasLimitExceeded, setIdeasLimitExceeded] = useState(false);
 
   // === ДОБАВЛЕНО: ФУНКЦИИ ДЛЯ РАБОТЫ С API НАСТРОЕК ===
   const fetchUserSettings = async (): Promise<ApiUserSettings | null> => {
@@ -1041,6 +1043,7 @@ function App() {
     setError(null);
     setSuccess(null);
     setAnalysisResult(null);
+    setAnalyzeLimitExceeded(false);
     try {
       const response = await axios.post('/analyze', { username: normalized }, {
         headers: { 'x-telegram-user-id': userId }
@@ -1051,12 +1054,16 @@ function App() {
         const updatedChannels = [...allChannels, normalized];
         setAllChannels(updatedChannels);
         saveUserSettings({ allChannels: updatedChannels });
-        }
-      // Устанавливаем channelName из channelInput, чтобы синхронизировать с текущим анализом
+      }
       setChannelName(normalized);
       setAnalysisLoadedFromDB(true);
-    } catch (err: any) { 
-      setError(err.response?.data?.detail || err.message || 'Ошибка при анализе канала');
+    } catch (err) {
+      if (err.response && err.response.status === 403 && err.response.data?.error?.includes('лимит анализа')) {
+        setAnalyzeLimitExceeded(true);
+        toast.error(err.response.data.error);
+      } else {
+        setError(err.response?.data?.detail || err.message || 'Ошибка при анализе канала');
+      }
       console.error('Ошибка при анализе:', err);
     } finally {
       setIsAnalyzing(false);
@@ -1065,27 +1072,22 @@ function App() {
 
   // Функция для генерации идей
   const generateIdeas = async () => {
+    setIdeasLimitExceeded(false);
     try {
-      // Если уже есть идеи, спрашиваем подтверждение
       if (suggestedIdeas.length > 0) {
         const confirmed = confirm("У вас уже есть сгенерированные идеи. Сгенерировать новые? Старые идеи будут удалены.");
         if (!confirmed) {
           return;
         }
       }
-      
       setIsGeneratingIdeas(true);
       setError("");
       setSuggestedIdeas([]);
-
-      // Если анализ не завершен
       if (!analysisResult) {
         setError("Пожалуйста, сначала проведите анализ канала");
         setIsGeneratingIdeas(false);
-      return;
-    }
-
-      // Запрос на генерацию идей
+        return;
+      }
       const response = await axios.post(
         `${API_BASE_URL}/generate-plan`,
         {
@@ -1100,28 +1102,26 @@ function App() {
           }
         }
       );
-
       if (response.data && response.data.plan) {
-        console.log('Полученные идеи:', response.data.plan);
-        
-        // Преобразуем полученные идеи в нужный формат
-        const formattedIdeas = response.data.plan.map((idea: any, index: number) => ({
+        const formattedIdeas = response.data.plan.map((idea, index) => ({
           id: `idea-${Date.now()}-${index}`,
           topic_idea: idea.topic_idea || idea.title,
           format_style: idea.format_style || idea.format,
           day: idea.day,
-          channel_name: channelName, // Привязываем к текущему каналу
-          isNew: true, // Помечаем как новые
+          channel_name: channelName,
+          isNew: true,
         }));
-
         setSuggestedIdeas(formattedIdeas);
         setSuccess('Идеи успешно сгенерированы');
-        
-        // Сохраняем сгенерированные идеи В ФОНЕ (не ждем завершения)
-        saveIdeasToDatabase(formattedIdeas); // Передаем новые идеи в функцию сохранения
+        saveIdeasToDatabase(formattedIdeas);
       }
-    } catch (err: any) { 
-      setError(err.response?.data?.detail || err.message || 'Ошибка при генерации идей');
+    } catch (err) {
+      if (err.response && err.response.status === 403 && err.response.data?.error?.includes('лимит генерации идей')) {
+        setIdeasLimitExceeded(true);
+        toast.error(err.response.data.error);
+      } else {
+        setError(err.response?.data?.detail || err.message || 'Ошибка при генерации идей');
+      }
       console.error('Ошибка при генерации идей:', err);
     } finally {
       setIsGeneratingIdeas(false);
@@ -1456,7 +1456,7 @@ function App() {
                 <button 
                   onClick={handleAnalyzeClick} 
                   className="action-button"
-                  disabled={isAnalyzing || !channelInput}
+                  disabled={isAnalyzing || !channelInput || analyzeLimitExceeded}
                 >
                   {isAnalyzing ? 'Анализ...' : 'Анализировать'}
         </button>
@@ -1492,15 +1492,22 @@ function App() {
               <button 
                     onClick={generateIdeas} 
                     className="action-button generate-button"
-                    disabled={isGeneratingIdeas || !analysisResult} 
+                    disabled={isGeneratingIdeas || !analysisResult || ideasLimitExceeded} 
+                    style={{marginTop: '20px'}}
                   >
-                    {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать идеи'}
+                    {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать новые идеи'}
               </button>
+              {ideasLimitExceeded && (
+                <div className="error-message small">Достигнут лимит генерации идей для бесплатной подписки. Оформите подписку для снятия ограничений.</div>
+              )}
           </div>
       )}
 
               {!analysisResult && !isAnalyzing && (
                 <p>Введите имя канала для начала анализа. Например: durov</p>
+      )}
+      {analyzeLimitExceeded && (
+        <div className="error-message small">Достигнут лимит анализа каналов для бесплатной подписки. Оформите подписку для снятия ограничений.</div>
       )}
     </div>
           )}
@@ -1550,11 +1557,14 @@ function App() {
         <button 
                     onClick={generateIdeas} 
                     className="action-button generate-button"
-                    disabled={isGeneratingIdeas || !analysisResult} 
+                    disabled={isGeneratingIdeas || !analysisResult || ideasLimitExceeded} 
                     style={{marginTop: '20px'}} // Добавим отступ
                   >
                     {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать новые идеи'}
         </button>
+        {ideasLimitExceeded && (
+          <div className="error-message small">Достигнут лимит генерации идей для бесплатной подписки. Оформите подписку для снятия ограничений.</div>
+        )}
              </div>
               )}
             {/* Сообщение, если канал не выбран для идей */} 
