@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import axios from 'axios';
 import './App.css';
 import { TelegramAuth } from './components/TelegramAuth';
@@ -385,13 +385,34 @@ const CalendarDay = ({
   );
 };
 
+// === ДОБАВЛЯЕМ ИНТЕРФЕЙСЫ ДЛЯ НАСТРОЕК ПОЛЬЗОВАТЕЛЯ ===
+interface ApiUserSettings {
+  channelName: string | null;
+  selectedChannels: string[];
+  allChannels: string[];
+  // Можно добавить id, user_id, created_at, updated_at если они нужны на фронте
+}
+
+interface UserSettingsPayload {
+  channelName?: string | null;
+  selectedChannels?: string[];
+  allChannels?: string[];
+}
+// === КОНЕЦ ИНТЕРФЕЙСОВ ===
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // Общий флаг загрузки приложения
   const [userId, setUserId] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<ViewType>('analyze');
   const [channelName, setChannelName] = useState<string>('');
-  
+  const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
+  const [allChannels, setAllChannels] = useState<string[]>([]);
+
+  // === ДОБАВЛЕНО: Состояние для отслеживания загрузки настроек ===
+  const [initialSettingsLoaded, setInitialSettingsLoaded] = useState(false);
+  // === КОНЕЦ ДОБАВЛЕНИЯ ===
+
   // Состояния для функциональности приложения
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
@@ -412,8 +433,6 @@ function App() {
   const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
   
   const [isSavingPost, setIsSavingPost] = useState(false);
-  const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
-  const [allChannels, setAllChannels] = useState<string[]>([]);
 
   // Состояния для редактирования/создания поста
   const [currentPostId, setCurrentPostId] = useState<string | null>(null);
@@ -428,80 +447,138 @@ function App() {
   // --- ВОССТАНОВЛЕНО: Состояние для текущего месяца календаря --- 
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
 
-  // --- ИЗМЕНЕНИЕ: Загрузка состояния ИЗ localStorage ПОСЛЕ аутентификации ---
+  // === ДОБАВЛЕНО: ФУНКЦИИ ДЛЯ РАБОТЫ С API НАСТРОЕК ===
+  const fetchUserSettings = async (): Promise<ApiUserSettings | null> => {
+    if (!userId) return null;
+    try {
+      const response = await axios.get<ApiUserSettings>(`${API_BASE_URL}/api/user/settings`);
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        console.log('User settings not found (404), returning null.');
+        return null; // Настройки еще не созданы для этого пользователя
+      }
+      console.error('Failed to fetch user settings:', error);
+      throw error; // Перебрасываем ошибку для обработки выше
+    }
+  };
+
+  const saveUserSettings = async (settings: UserSettingsPayload) => {
+    if (!userId) return;
+    try {
+      await axios.put(`${API_BASE_URL}/api/user/settings`, settings);
+      // console.log('User settings saved successfully.');
+    } catch (error) {
+      console.error('Failed to save user settings:', error);
+      toast.error('Ошибка сохранения настроек на сервере.');
+      // Можно добавить более сложную логику обработки ошибок, например, retry
+    }
+  };
+  // === КОНЕЦ ФУНКЦИЙ API ===
+
+  // --- ИЗМЕНЕНИЕ: Загрузка состояния ИЗ API ПОСЛЕ аутентификации ---
   useEffect(() => {
-    if (isAuthenticated && userId) {
-      // Восстанавливаем состояние из localStorage, используя user-specific ключи
-      const channelKey = getUserSpecificKey('channelName', userId);
-      if (channelKey) {
-        const storedChannel = localStorage.getItem(channelKey);
-    if (storedChannel) {
-      setChannelName(storedChannel);
-        }
-    }
-    
-      const selectedChannelsKey = getUserSpecificKey('selectedChannels', userId);
-      if (selectedChannelsKey) {
-        const storedSelectedChannels = localStorage.getItem(selectedChannelsKey);
-    if (storedSelectedChannels) {
-      try {
-        setSelectedChannels(JSON.parse(storedSelectedChannels));
-    } catch (e) {
-        console.error('Ошибка при восстановлении выбранных каналов:', e);
-      }
-    }
-      }
-
-      const allChannelsKey = getUserSpecificKey('allChannels', userId);
-      if (allChannelsKey) {
-        const storedChannels = localStorage.getItem(allChannelsKey);
-      if (storedChannels) {
+    const loadData = async () => {
+      if (isAuthenticated && userId) {
+        setLoading(true); // Используем общий loading или можно ввести loadingSettings
+        setInitialSettingsLoaded(false);
         try {
-          setAllChannels(JSON.parse(storedChannels));
-        } catch (e) {
-          console.error('Ошибка при восстановлении списка каналов:', e);
+          const settings = await fetchUserSettings();
+          if (settings) {
+            setChannelName(settings.channelName || '');
+            setSelectedChannels(settings.selectedChannels || []);
+            setAllChannels(settings.allChannels || []);
+          } else {
+            // Если настроек нет, устанавливаем значения по умолчанию (пустые)
+            setChannelName('');
+            setSelectedChannels([]);
+            setAllChannels([]);
+          }
+        } catch (error) {
+          console.error('Error fetching initial user settings:', error);
+          toast.error('Не удалось загрузить настройки пользователя.');
+          // В случае ошибки, оставляем значения по умолчанию (пустые)
+          setChannelName('');
+          setSelectedChannels([]);
+          setAllChannels([]);
         }
-        }
+        setInitialSettingsLoaded(true);
+
+        // Загружаем остальные данные, которые зависят от userId
+        // (например, fetchSavedPosts, fetchSavedIdeas, и т.д.)
+        // Убедитесь, что эти вызовы не конфликтуют с channelName, selectedChannels, allChannels
+        // которые только что были установлены.
+        fetchSavedPosts(); // Эта функция может использовать allChannels, поэтому порядок важен
+        
+        // Загрузка сохраненного анализа для ТЕКУЩЕГО выбранного канала (если он есть)
+        // Этот useEffect должен зависеть от channelName и initialSettingsLoaded
+        // if (channelName) { // channelName будет установлен выше, если есть в localStorage
+        //   fetchSavedAnalysis(channelName);
+        // }
       } else {
-          // Если список каналов не найден, загружаем его из постов
-          // (Это произойдет ниже в другом useEffect, зависящем от isAuthenticated)
+        // Если не аутентифицирован, сбрасываем состояние настроек
+        setChannelName('');
+        setSelectedChannels([]);
+        setAllChannels([]);
+        setInitialSettingsLoaded(false);
       }
-      
-      // Загружаем сохраненные посты (перенесено сюда для ясности, т.к. зависит от userId для заголовка)
-      fetchSavedPosts();
+      setLoading(false); // Общий loading завершен
+    };
 
-      // Загрузка сохраненного анализа для ТЕКУЩЕГО выбранного канала
-      if (channelName) { // channelName будет установлен выше, если есть в localStorage
-        fetchSavedAnalysis(channelName);
-    }
-    }
+    loadData();
 
-    // Устанавливаем флаг загрузки после попытки аутентификации/загрузки
-    // (Перенесено из старого useEffect)
-    setTimeout(() => {
-      setLoading(false);
-    }, 500);
+    // Убираем прямую загрузку channelName, selectedChannels, allChannels из localStorage
+    // Эта логика теперь обрабатывается через fetchUserSettings
+
   }, [isAuthenticated, userId]); // Запускаем при изменении статуса аутентификации и userId
 
-  // --- ИЗМЕНЕНИЕ: Сохраняем канал в localStorage при изменении (ИСПОЛЬЗУЯ user-specific ключ) ---
-  useEffect(() => {
-    const key = getUserSpecificKey('channelName', userId);
-    if (key && channelName) {
-      localStorage.setItem(key, channelName);
-    }
-  }, [channelName, userId]); // Запускаем при изменении канала ИЛИ userId
+  // --- ИЗМЕНЕНИЕ: Удаляем useEffect, который сохранял channelName в localStorage ---
+  // useEffect(() => {
+  //   const key = getUserSpecificKey('channelName', userId);
+  //   if (key && channelName) {
+  //     localStorage.setItem(key, channelName);
+  //   }
+  // }, [channelName, userId]); 
 
-  // Загружаем список всех каналов при авторизации (этот useEffect можно упростить или объединить)
+  // === ДОБАВЛЕНО: useEffect для сохранения настроек на сервере ===
+  const settingsToSave = useMemo(() => ({
+    channelName,
+    selectedChannels,
+    allChannels,
+  }), [channelName, selectedChannels, allChannels]);
+
   useEffect(() => {
-    if (isAuthenticated && userId) {
-       // Если allChannels пуст после попытки загрузки из localStorage, пробуем собрать из постов
-       if (allChannels.length === 0) {
-         console.log("Список каналов пуст, пытаемся обновить из постов...");
-         updateChannelsFromPosts(savedPosts); // Используем уже загруженные посты
-       }
+    if (isAuthenticated && userId && initialSettingsLoaded) {
+      // Дебаунсинг для предотвращения слишком частых запросов
+      const handler = setTimeout(() => {
+        saveUserSettings(settingsToSave);
+      }, 1500); // Задержка в 1.5 секунды
+
+      return () => {
+        clearTimeout(handler);
+      };
     }
-  }, [isAuthenticated, userId, allChannels.length, savedPosts]); // Добавили allChannels.length и savedPosts
-  
+  }, [isAuthenticated, userId, initialSettingsLoaded, settingsToSave]);
+  // === КОНЕЦ useEffect для сохранения настроек ===
+
+  // ... (существующий useEffect для загрузки списка всех каналов при авторизации, если он еще нужен)
+  // useEffect(() => {
+  //   if (isAuthenticated && userId && initialSettingsLoaded) { // Добавлено initialSettingsLoaded
+  //      if (allChannels.length === 0) {
+  //        console.log("Список каналов пуст, пытаемся обновить из постов...");
+  //        updateChannelsFromPosts(savedPosts); 
+  //      }
+  //   }
+  // }, [isAuthenticated, userId, initialSettingsLoaded, allChannels.length, savedPosts]);
+  // Этот useEffect может быть изменен или удален, т.к. allChannels теперь синхронизируется
+
+  // ... (существующий useEffect для fetchSavedAnalysis)
+  useEffect(() => {
+    if (isAuthenticated && userId && initialSettingsLoaded && channelName) {
+        fetchSavedAnalysis(channelName);
+    }
+  }, [isAuthenticated, userId, initialSettingsLoaded, channelName]); // Добавлен initialSettingsLoaded
+
   // --- ВОССТАНОВЛЕНО: useEffect для генерации дней календаря --- 
   useEffect(() => {
     if (currentMonth && currentView === 'calendar') { // Добавляем проверку currentView
@@ -694,11 +771,11 @@ function App() {
       // --- ИЗМЕНЕНИЕ: Обновляем, беря текущее состояние и добавляя новые каналы ---
       setAllChannels(prevChannels => {
         const updatedChannels = [...new Set([...prevChannels, ...newChannels])];
-        // Сохраняем обновленный список в localStorage
-        const key = getUserSpecificKey('allChannels', userId);
-        if (key) {
-          localStorage.setItem(key, JSON.stringify(updatedChannels));
-        }
+        // --- УДАЛЯЕМ: Сохранение в localStorage ---
+        // const key = getUserSpecificKey('allChannels', userId);
+        // if (key) {
+        //   localStorage.setItem(key, JSON.stringify(updatedChannels));
+        // }
         return updatedChannels; // Возвращаем новое состояние
       });
       // --- КОНЕЦ ИЗМЕНЕНИЯ ---
@@ -987,8 +1064,10 @@ function App() {
   const handleAuthSuccess = (authUserId: string) => {
     console.log('Авторизация успешна:', authUserId);
     setUserId(authUserId);
-    setIsAuthenticated(true);
+    // Устанавливаем глобальный заголовок для всех запросов axios
     axios.defaults.headers.common['X-Telegram-User-Id'] = authUserId;
+    setIsAuthenticated(true);
+    // setLoading(false); // Управление loading теперь в useEffect [isAuthenticated, userId]
   };
 
   // Функция для анализа канала

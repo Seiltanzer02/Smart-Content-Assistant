@@ -4157,3 +4157,149 @@ async def download_and_save_external_image(image_data: PostImage, user_id: int) 
         logger.error(f"Ошибка при обработке изображения: {e}")
         raise Exception(f"Ошибка при обработке внешнего изображения: {str(e)}")
 
+# === ДОБАВЛЯЕМ МОДЕЛИ PYDANTIC ДЛЯ USER_SETTINGS ===
+class UserSettingsBase(BaseModel):
+    channelName: Optional[str] = None
+    selectedChannels: List[str] = Field(default_factory=list)
+    allChannels: List[str] = Field(default_factory=list)
+
+class UserSettingsCreate(UserSettingsBase):
+    pass
+
+class UserSettingsResponse(UserSettingsBase):
+    id: uuid.UUID
+    user_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True # For Pydantic v2, replaces orm_mode
+# === КОНЕЦ МОДЕЛЕЙ USER_SETTINGS ===
+
+# ... existing code ...
+# Placeholder for get_telegram_user_id_from_request dependency
+# This should ideally be a shared dependency that extracts user_id from headers
+async def get_telegram_user_id_from_request(request: Request) -> int:
+    telegram_user_id_str = request.headers.get("X-Telegram-User-Id")
+    if not telegram_user_id_str:
+        logger.warning("Запрос без X-Telegram-User-Id заголовка")
+        raise HTTPException(status_code=401, detail="X-Telegram-User-Id header missing")
+    try:
+        user_id = int(telegram_user_id_str)
+        return user_id
+    except ValueError:
+        logger.warning(f"Некорректный X-Telegram-User-Id: {telegram_user_id_str}")
+        raise HTTPException(status_code=400, detail="Invalid X-Telegram-User-Id format")
+
+# ... existing code ...
+# (Найдите подходящее место для добавления новых эндпоинтов, например, сгруппировав их с другими API относящимися к пользователю)
+
+# === API ЭНДПОИНТЫ ДЛЯ USER_SETTINGS ===
+
+@app.get("/api/user/settings", response_model=Optional[UserSettingsResponse])
+async def get_user_settings(
+    request: Request,
+    user_id: int = Depends(get_telegram_user_id_from_request)
+):
+    """
+    Получение пользовательских настроек.
+    """
+    if not supabase:
+        logger.error("Supabase клиент не инициализирован при получении настроек пользователя")
+        raise HTTPException(status_code=503, detail="База данных недоступна")
+
+    try:
+        response = await asyncio.to_thread(
+            supabase.table("user_settings")
+            .select("*")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute
+        )
+        if response.data:
+            return UserSettingsResponse(**response.data)
+        return None # Возвращаем None если настроек нет, фронтенд обработает
+    except APIError as e:
+        logger.error(f"Supabase APIError при получении настроек пользователя {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка базы данных: {e.message}")
+    except Exception as e:
+        logger.error(f"Непредвиденная ошибка при получении настроек пользователя {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
+
+@app.put("/api/user/settings", response_model=UserSettingsResponse)
+async def update_user_settings(
+    settings_data: UserSettingsCreate,
+    request: Request,
+    user_id: int = Depends(get_telegram_user_id_from_request)
+):
+    """
+    Обновление или создание пользовательских настроек.
+    """
+    if not supabase:
+        logger.error("Supabase клиент не инициализирован при обновлении настроек пользователя")
+        raise HTTPException(status_code=503, detail="База данных недоступна")
+
+    now = datetime.now(timezone.utc)
+    
+    # Преобразуем Pydantic модель в словарь для Supabase
+    # Для Pydantic v1: .dict(), для v2: .model_dump()
+    # Будем использовать .dict(exclude_unset=True) чтобы не перезаписывать поля пустыми значениями, если они не переданы
+    # Однако, для selectedChannels и allChannels, если придет пустой список, он должен сохраниться.
+    # Поэтому лучше использовать .dict() без exclude_unset для этих полей, или обеспечить их передачу.
+    # Модель UserSettingsCreate имеет default_factory, так что поля всегда будут.
+    data_to_save = settings_data.model_dump() if hasattr(settings_data, 'model_dump') else settings_data.dict()
+    data_to_save["user_id"] = user_id
+    data_to_save["updated_at"] = now
+
+    try:
+        # Проверяем, существуют ли настройки для этого пользователя
+        existing_settings_response = await asyncio.to_thread(
+            supabase.table("user_settings")
+            .select("id") # Достаточно одного поля для проверки существования
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute
+        )
+
+        if existing_settings_response.data:
+            # Обновляем существующие настройки
+            response = await asyncio.to_thread(
+                supabase.table("user_settings")
+                .update(data_to_save)
+                .eq("user_id", user_id)
+                .execute
+            )
+        else:
+            # Создаем новые настройки
+            data_to_save["created_at"] = now
+            # data_to_save["id"] = uuid.uuid4() # PK генерируется базой данных по умолчанию
+            response = await asyncio.to_thread(
+                supabase.table("user_settings")
+                .insert(data_to_save)
+                .execute
+            )
+        
+        if response.data:
+            # Возвращаем первую запись из результата (должна быть одна)
+            return UserSettingsResponse(**response.data[0])
+        else:
+            logger.error(f"Ошибка при сохранении настроек пользователя {user_id}: ответ Supabase не содержит данных. Response: {response}")
+            raise HTTPException(status_code=500, detail="Не удалось сохранить настройки пользователя")
+
+    except APIError as e:
+        logger.error(f"Supabase APIError при сохранении настроек пользователя {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка базы данных: {e.message}")
+    except Exception as e:
+        logger.error(f"Непредвиденная ошибка при сохранении настроек пользователя {user_id}: {e}")
+        # Добавляем traceback для лучшей диагностики
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
+
+# === КОНЕЦ API ЭНДПОИНТОВ USER_SETTINGS ===
+
+# ... existing code ...
+# Убедитесь, что эти эндпоинты добавлены до любых "catch-all" маршрутов, если они есть.
+# Например, до @app.get("/{rest_of_path:path}")
+# ... existing code ...
+
