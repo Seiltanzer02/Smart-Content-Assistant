@@ -986,28 +986,23 @@ async def save_suggested_idea(idea_data: Dict[str, Any]) -> str:
 async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[str, List[str]]:
     """Анализ контента с использованием модели DeepSeek через OpenRouter API."""
     
-    # Проверяем наличие API ключа
     if not api_key:
         logger.warning("Анализ контента с DeepSeek невозможен: отсутствует OPENROUTER_API_KEY")
         return {
-            "themes": ["Тема 1", "Тема 2", "Тема 3", "Тема 4", "Тема 5"],
-            "styles": ["Формат 1", "Формат 2", "Формат 3", "Формат 4", "Формат 5"]
+            "themes": ["Тема 1 (API недоступен)", "Тема 2", "Тема 3"],
+            "styles": ["Стиль 1 (API недоступен)", "Стиль 2"]
         }
     
-    # Если нет текстов или API ключа, возвращаем пустой результат
-    if not texts or not api_key:
-        logger.error("Отсутствуют тексты или API ключ для анализа")
+    if not texts:
+        logger.error("Отсутствуют тексты для анализа")
         return {"themes": [], "styles": []}
     
-    # Объединяем тексты для анализа
-    combined_text = "\n\n".join([f"Пост {i+1}: {text}" for i, text in enumerate(texts)])
+    combined_text = "\\n\\n".join([f"Пост {i+1}: {text}" for i, text in enumerate(texts)])
     logger.info(f"Подготовлено {len(texts)} текстов для анализа через DeepSeek")
     
-    # --- ИЗМЕНЕНИЕ: Уточненные промпты для анализа --- 
     system_prompt = """Ты - эксперт по анализу контента Telegram-каналов. 
 Твоя задача - глубоко проанализировать предоставленные посты и выявить САМЫЕ ХАРАКТЕРНЫЕ, ДОМИНИРУЮЩИЕ темы и стили/форматы, отражающие СУТЬ и УНИКАЛЬНОСТЬ канала. 
 Избегай слишком общих формулировок, если они не являются ключевыми. Сосредоточься на качестве, а не на количестве.
-
 Выдай результат СТРОГО в формате JSON с двумя ключами: "themes" и "styles". Каждый ключ должен содержать массив из 3-5 наиболее РЕЛЕВАНТНЫХ строк."""
     
     user_prompt = f"""Проанализируй СТРОГО следующие посты из Telegram-канала:
@@ -1015,23 +1010,18 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
 
 Определи 3-5 САМЫХ ХАРАКТЕРНЫХ тем и 3-5 САМЫХ РАСПРОСТРАНЕННЫХ стилей/форматов подачи контента, которые наилучшим образом отражают специфику ИМЕННО ЭТОГО канала. 
 Основывайся ТОЛЬКО на предоставленных текстах. 
-
 Представь результат ТОЛЬКО в виде JSON объекта с ключами "themes" и "styles". Никакого другого текста."""
-    # --- КОНЕЦ ИЗМЕНЕНИЯ --- 
     
-    # Делаем запрос к API
     analysis_result = {"themes": [], "styles": []}
     
     try:
-        # Инициализируем клиент
         client = AsyncOpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key
         )
         
-        # Запрашиваем ответ от API
         response = await client.chat.completions.create(
-            model="deepseek/deepseek-chat-v3-0324:free", # <--- ИЗМЕНЕНО НА НОВУЮ БЕСПЛАТНУЮ МОДЕЛЬ
+            model="deepseek/deepseek-chat-v3-0324:free",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -1045,49 +1035,54 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
             }
         )
         
-        # Получаем текст ответа
-        analysis_text = response.choices[0].message.content.strip()
-        logger.info(f"Получен ответ от DeepSeek: {analysis_text[:100]}...")
+        analysis_text = ""
+        if response.choices and response.choices[0].message and response.choices[0].message.content:
+            analysis_text = response.choices[0].message.content.strip()
+            logger.info(f"Получен ответ от DeepSeek (первые 100 символов): {analysis_text[:100]}...")
+        else:
+            logger.error(f"DeepSeek response content is empty or missing. Full response: {response}")
+            return {"themes": ["Ошибка API DeepSeek"], "styles": ["Ответ пуст"]}
+
+        if not analysis_text:
+            logger.error(f"DeepSeek вернул пустой текст после strip. Original: '{response.choices[0].message.content if response.choices and response.choices[0].message else 'N/A'}'. Full response: {response}")
+            return {"themes": ["Ошибка API DeepSeek"], "styles": ["Ответ пуст"]}
         
-        # Извлекаем JSON из ответа
         json_match = re.search(r'(\{.*\})', analysis_text, re.DOTALL)
         if json_match:
-            analysis_text = json_match.group(1)
-        
-        # Парсим JSON
-        analysis_json = json.loads(analysis_text)
-        
-        # --- ИЗМЕНЕНИЕ: Обработка ключей themes и styles/style --- 
-        themes = analysis_json.get("themes", [])
-        # Пытаемся получить стили по ключу "styles" или "style"
-        styles = analysis_json.get("styles", analysis_json.get("style", [])) 
-        
-        if isinstance(themes, list) and isinstance(styles, list):
-            analysis_result = {"themes": themes, "styles": styles}
-            logger.info(f"Успешно извлечены темы ({len(themes)}) и стили ({len(styles)}) из JSON.")
+            analysis_text_json_part = json_match.group(1)
         else:
-            logger.warning(f"Некорректный тип данных для тем или стилей в JSON: {analysis_json}")
-            # Оставляем analysis_result пустым или сбрасываем в дефолтное значение
-            analysis_result = {"themes": [], "styles": []}
-        # --- КОНЕЦ ИЗМЕНЕНИЯ --- 
-    
-    except json.JSONDecodeError as e:
-        # Если не удалось распарсить JSON, используем регулярные выражения
-        logger.error(f"Ошибка парсинга JSON: {e}, текст: {analysis_text}")
-        
-        themes_match = re.findall(r'"themes":\s*\[(.*?)\]', analysis_text, re.DOTALL)
-        if themes_match:
-            theme_items = re.findall(r'"([^"]+)"', themes_match[0])
-            analysis_result["themes"] = theme_items
-        
-        styles_match = re.findall(r'"styles":\s*\[(.*?)\]', analysis_text, re.DOTALL)
-        if styles_match:
-            style_items = re.findall(r'"([^"]+)"', styles_match[0])
-            analysis_result["styles"] = style_items
-    
+            analysis_text_json_part = analysis_text # Если JSON не обрамлен, пытаемся парсить как есть
+
+        try:
+            analysis_json = json.loads(analysis_text_json_part)
+            themes = analysis_json.get("themes", [])
+            styles = analysis_json.get("styles", analysis_json.get("style", []))
+            
+            if isinstance(themes, list) and isinstance(styles, list):
+                analysis_result = {"themes": themes, "styles": styles}
+                logger.info(f"Успешно извлечены темы ({len(themes)}) и стили ({len(styles)}) из JSON.")
+            else:
+                logger.warning(f"Некорректный тип данных для тем или стилей в JSON: {analysis_json}")
+                analysis_result = {"themes": [], "styles": []}
+        except json.JSONDecodeError as e:
+            logger.error(f"Ошибка парсинга JSON от DeepSeek: {e}, текст для парсинга: '{analysis_text_json_part}' (полный текст ответа: '{analysis_text}')")
+            # Пробуем извлечь через регулярные выражения как fallback
+            themes_match_fallback = re.findall(r'"themes":\\s*\\[(.*?)\\]', analysis_text, re.DOTALL) # Исправлен regex
+            if themes_match_fallback:
+                theme_items = re.findall(r'"([^"]+)"', themes_match_fallback[0])
+                analysis_result["themes"] = theme_items
+            
+            styles_match_fallback = re.findall(r'"styles":\\s*\\[(.*?)\\]', analysis_text, re.DOTALL) # Исправлен regex
+            if styles_match_fallback:
+                style_items = re.findall(r'"([^"]+)"', styles_match_fallback[0])
+                analysis_result["styles"] = style_items
+            
+            if not analysis_result["themes"] and not analysis_result["styles"]:
+                 analysis_result = {"themes": ["Ошибка парсинга ответа"], "styles": ["Не удалось извлечь данные"]}
+
     except Exception as e:
-        # Обрабатываем любые другие ошибки
-        logger.error(f"Ошибка при анализе контента через DeepSeek: {e}")
+        logger.error(f"Ошибка при анализе контента через DeepSeek: {e}", exc_info=True)
+        analysis_result = {"themes": [f"Ошибка API: {type(e).__name__}"], "styles": ["Сбой анализа"]}
     
     return analysis_result
 
