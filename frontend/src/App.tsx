@@ -402,50 +402,20 @@ interface UserSettingsPayload {
 
 // === ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЛЯ ФОРМАТА КАНАЛА ===
 const normalizeChannelName = (name: string) => name.replace(/^@/, '').toLowerCase();
-// ... существующий код ...
-// === ОБЪЕДИНЕНИЕ КАНАЛОВ ИЗ ПОСТОВ И НАСТРОЕК ===
-useEffect(() => {
-  if (savedPosts.length > 0 || (userSettings && userSettings.allChannels)) {
-    const channelsFromPosts = savedPosts.map(post => normalizeChannelName(post.channel_name || '')).filter(Boolean);
-    const channelsFromSettings = (userSettings?.allChannels || []).map(normalizeChannelName).filter(Boolean);
-    const uniqueChannels = [...new Set([...channelsFromPosts, ...channelsFromSettings])];
-    setAllChannels(uniqueChannels);
-    // Сохраняем на сервере, если изменился список
-    if (userSettings && JSON.stringify(uniqueChannels) !== JSON.stringify(userSettings.allChannels)) {
-      saveUserSettings({ allChannels: uniqueChannels });
-    }
-  }
-}, [savedPosts, userSettings]);
-// ... существующий код ...
-// === ДОБАВЛЕНИЕ КАНАЛА ПРИ АНАЛИЗЕ ===
-const handleAnalyze = async () => {
-  const normalized = normalizeChannelName(channelInput);
-  if (!allChannels.includes(normalized)) {
-    const updatedChannels = [...allChannels, normalized];
-    setAllChannels(updatedChannels);
-    saveUserSettings({ allChannels: updatedChannels });
-  }
-  setChannelName(normalized);
-  // ... остальной код анализа ...
-};
-// ... существующий код ...
-// === ВСЕ ФИЛЬТРАЦИИ ПО КАНАЛУ ДЕЛАЮТСЯ ПО normalizeChannelName(channel_name) ===
-// ... существующий код ...
+// === КОНЕЦ ФУНКЦИИ ===
+
+// Код, который вызывал ошибки Cannot find name, перемещен внутрь функции App
 
 function App() {
+  // --- ВСЕ useState ТОЛЬКО ЗДЕСЬ ---
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [loading, setLoading] = useState(true); // Общий флаг загрузки приложения
+  const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<ViewType>('analyze');
   const [channelName, setChannelName] = useState<string>('');
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
   const [allChannels, setAllChannels] = useState<string[]>([]);
-
-  // === ДОБАВЛЕНО: Состояние для отслеживания загрузки настроек ===
   const [initialSettingsLoaded, setInitialSettingsLoaded] = useState(false);
-  // === КОНЕЦ ДОБАВЛЕНИЯ ===
-
-  // Состояния для функциональности приложения
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
@@ -455,32 +425,22 @@ function App() {
   const [selectedIdea, setSelectedIdea] = useState<SuggestedIdea | null>(null);
   const [isGeneratingPostDetails, setIsGeneratingPostDetails] = useState<boolean>(false);
   const [suggestedImages, setSuggestedImages] = useState<PostImage[]>([]);
-  const [error, setError] = useState<string | null>(null); 
+  const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<PostImage | null>(null);
-
-  // Состояния для календаря и сохраненных постов
   const [savedPosts, setSavedPosts] = useState<SavedPost[]>([]);
   const [loadingSavedPosts, setLoadingSavedPosts] = useState(false);
   const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
-  
   const [isSavingPost, setIsSavingPost] = useState(false);
-
-  // Состояния для редактирования/создания поста
   const [currentPostId, setCurrentPostId] = useState<string | null>(null);
   const [currentPostDate, setCurrentPostDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [currentPostTopic, setCurrentPostTopic] = useState('');
   const [currentPostFormat, setCurrentPostFormat] = useState('');
   const [currentPostText, setCurrentPostText] = useState('');
-
-  // Добавляем состояние для подписки
   const [showSubscription, setShowSubscription] = useState<boolean>(false);
-
-  // --- ВОССТАНОВЛЕНО: Состояние для текущего месяца календаря --- 
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
-
-  // === ДОБАВЛЕНО: Состояние для поля ввода канала ===
   const [channelInput, setChannelInput] = useState<string>('');
+  const [userSettings, setUserSettings] = useState<ApiUserSettings | null>(null);
 
   // === ДОБАВЛЕНО: ФУНКЦИИ ДЛЯ РАБОТЫ С API НАСТРОЕК ===
   const fetchUserSettings = async (): Promise<ApiUserSettings | null> => {
@@ -508,6 +468,20 @@ function App() {
     }
   };
   // === КОНЕЦ ФУНКЦИЙ API ===
+
+  // === ОБЪЕДИНЕНИЕ КАНАЛОВ ИЗ ПОСТОВ И НАСТРОЕК ===
+  useEffect(() => {
+    if (savedPosts.length > 0 || (userSettings && userSettings.allChannels)) {
+      const channelsFromPosts = savedPosts.map(post => normalizeChannelName(post.channel_name || '')).filter(Boolean);
+      const channelsFromSettings = (userSettings?.allChannels || []).map(normalizeChannelName).filter(Boolean);
+      const uniqueChannels = [...new Set([...channelsFromPosts, ...channelsFromSettings])];
+      setAllChannels(uniqueChannels);
+      // Сохраняем на сервере, если изменился список
+      if (userSettings && JSON.stringify(uniqueChannels) !== JSON.stringify(userSettings.allChannels)) {
+        saveUserSettings({ allChannels: uniqueChannels });
+      }
+    }
+  }, [savedPosts, userSettings]);
 
   // --- ИЗМЕНЕНИЕ: Загрузка состояния ИЗ API ПОСЛЕ аутентификации ---
   useEffect(() => {
@@ -1047,7 +1021,7 @@ function App() {
 
   // Функция для анализа канала
   const analyzeChannel = async () => {
-    const normalized = normalizeChannelName(channelName);
+    const normalized = normalizeChannelName(channelInput);
     if (!normalized) {
       setError("Введите имя канала");
       return;
@@ -1068,6 +1042,8 @@ function App() {
         setAllChannels(updatedChannels);
         saveUserSettings({ allChannels: updatedChannels });
       }
+      // Устанавливаем channelName из channelInput, чтобы синхронизировать с текущим анализом
+      setChannelName(normalized);
       setAnalysisLoadedFromDB(true);
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Ошибка при анализе канала');
