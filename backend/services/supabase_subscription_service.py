@@ -4,9 +4,11 @@ from typing import Dict, Any, Optional
 from dateutil.relativedelta import relativedelta
 
 # Константы для бесплатных лимитов
-FREE_ANALYSIS_LIMIT = 2
-FREE_POST_LIMIT = 2
+FREE_ANALYSIS_LIMIT = 5
+FREE_POST_LIMIT = 3
+FREE_IDEAS_LIMIT = 2
 SUBSCRIPTION_DURATION_MONTHS = 1
+RESET_PERIOD_DAYS = 14
 
 logger = logging.getLogger("subscription_service")
 
@@ -18,73 +20,44 @@ class SupabaseSubscriptionService:
     async def get_user_usage(self, user_id: int) -> Dict[str, Any]:
         """Получает статистику использования бесплатных функций."""
         try:
-            # Получаем данные о текущем использовании
+            now = datetime.now()
             result = self.supabase.table("user_usage_stats").select("*").eq("user_id", user_id).execute()
-            
             if result.data and len(result.data) > 0:
                 usage_data = result.data[0]
-                
-                # Проверяем, не нужно ли сбросить счетчики
                 reset_at_str = usage_data.get("reset_at")
                 if reset_at_str:
-                    try:
-                        # Парсим дату сброса
-                        if 'Z' in reset_at_str:
-                            reset_at = datetime.fromisoformat(reset_at_str.replace('Z', '+00:00'))
-                        else:
-                            reset_at = datetime.fromisoformat(reset_at_str)
-                        
-                        # Если дата сброса в прошлом, сбрасываем счетчики
-                        if datetime.now() >= reset_at:
-                            return await self.reset_usage_counters(user_id)
-                    except Exception as date_error:
-                        logger.error(f"Ошибка при парсинге даты сброса счетчиков: {date_error}")
-                
+                    reset_at = datetime.fromisoformat(reset_at_str)
+                    if now >= reset_at:
+                        return await self.reset_usage_counters(user_id)
                 return usage_data
-            
-            # Если записи нет, создаем новую
-            now = datetime.now()
-            next_reset_date = now + relativedelta(months=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            # Если записи нет — создаём с reset_at через 14 дней
+            next_reset = now + timedelta(days=RESET_PERIOD_DAYS)
             new_record = {
                 "user_id": user_id,
                 "analysis_count": 0,
                 "post_generation_count": 0,
-                "reset_at": next_reset_date.isoformat(),
+                "reset_at": next_reset.isoformat(),
                 "created_at": now.isoformat(),
                 "updated_at": now.isoformat()
             }
-            
-            create_result = self.supabase.table("user_usage_stats").insert(new_record).execute()
-            
-            if create_result.data and len(create_result.data) > 0:
-                return create_result.data[0]
-            
+            self.supabase.table("user_usage_stats").insert(new_record).execute()
             return new_record
-            
         except Exception as e:
             logger.error(f"Ошибка при получении статистики использования: {e}")
-            # Возвращаем дефолтные значения в случае ошибки
             return {"user_id": user_id, "analysis_count": 0, "post_generation_count": 0}
     
     async def increment_analysis_usage(self, user_id: int) -> Dict[str, Any]:
         """Увеличивает счетчик использования анализа."""
         try:
-            # Сначала получаем текущую статистику
             usage = await self.get_user_usage(user_id)
-            
-            # Обновляем счетчик
             update_data = {
                 "analysis_count": usage.get("analysis_count", 0) + 1,
                 "updated_at": datetime.now().isoformat()
             }
-            
             result = self.supabase.table("user_usage_stats").update(update_data).eq("user_id", user_id).execute()
-            
             if result.data and len(result.data) > 0:
                 return result.data[0]
-            
             return usage
-            
         except Exception as e:
             logger.error(f"Ошибка при увеличении счетчика анализа: {e}")
             return {"user_id": user_id, "analysis_count": 0, "post_generation_count": 0}
@@ -193,12 +166,9 @@ class SupabaseSubscriptionService:
     
     async def can_analyze_channel(self, user_id: int) -> bool:
         """Проверяет, может ли пользователь анализировать канал."""
-        # Проверяем наличие подписки
         has_subscription = await self.has_active_subscription(user_id)
         if has_subscription:
             return True
-        
-        # Проверяем использование бесплатного лимита
         usage = await self.get_user_usage(user_id)
         return usage.get("analysis_count", 0) < FREE_ANALYSIS_LIMIT
     
@@ -215,42 +185,27 @@ class SupabaseSubscriptionService:
     
     async def reset_usage_counters(self, user_id: int) -> Dict[str, Any]:
         """Сбрасывает счетчики использования и устанавливает новую дату сброса."""
-        try:
-            # Устанавливаем дату следующего сброса на первое число следующего месяца
-            next_reset_date = datetime.now() + relativedelta(months=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-            
-            # Обновляем счетчики и дату сброса
-            update_data = {
-                "analysis_count": 0,
-                "post_generation_count": 0,
-                "reset_at": next_reset_date.isoformat(),
-                "updated_at": datetime.now().isoformat()
-            }
-            
-            result = self.supabase.table("user_usage_stats").update(update_data).eq("user_id", user_id).execute()
-            
-            if result.data and len(result.data) > 0:
-                return result.data[0]
-            
-            # Если запись не найдена, создаем новую
-            new_record = {
-                "user_id": user_id,
-                "analysis_count": 0,
-                "post_generation_count": 0,
-                "reset_at": next_reset_date.isoformat(),
-                "updated_at": datetime.now().isoformat()
-            }
-            
-            create_result = self.supabase.table("user_usage_stats").insert(new_record).execute()
-            
-            if create_result.data and len(create_result.data) > 0:
-                return create_result.data[0]
-            
-            return new_record
-            
-        except Exception as e:
-            logger.error(f"Ошибка при сбросе счетчиков использования: {e}")
-            return {"user_id": user_id, "analysis_count": 0, "post_generation_count": 0}
+        now = datetime.now()
+        next_reset = now + timedelta(days=RESET_PERIOD_DAYS)
+        update_data = {
+            "analysis_count": 0,
+            "post_generation_count": 0,
+            "reset_at": next_reset.isoformat(),
+            "updated_at": now.isoformat()
+        }
+        result = self.supabase.table("user_usage_stats").update(update_data).eq("user_id", user_id).execute()
+        if result.data and len(result.data) > 0:
+            return result.data[0]
+        # Если запись не найдена, создаём новую
+        new_record = {
+            "user_id": user_id,
+            "analysis_count": 0,
+            "post_generation_count": 0,
+            "reset_at": next_reset.isoformat(),
+            "updated_at": now.isoformat()
+        }
+        self.supabase.table("user_usage_stats").insert(new_record).execute()
+        return new_record
     
     async def check_reset_counters(self, user_id: int) -> Dict[str, Any]:
         """Проверяет, не пора ли сбросить счетчики использования."""
@@ -285,4 +240,26 @@ class SupabaseSubscriptionService:
             
         except Exception as e:
             logger.error(f"Ошибка при проверке сброса счетчиков использования: {e}")
-            return {"user_id": user_id, "analysis_count": 0, "post_generation_count": 0} 
+            return {"user_id": user_id, "analysis_count": 0, "post_generation_count": 0}
+    
+    async def can_generate_idea(self, user_id: int) -> bool:
+        has_subscription = await self.has_active_subscription(user_id)
+        if has_subscription:
+            return True
+        usage = await self.get_user_usage(user_id)
+        return usage.get("ideas_generation_count", 0) < FREE_IDEAS_LIMIT
+
+    async def increment_idea_usage(self, user_id: int) -> Dict[str, Any]:
+        try:
+            usage = await self.get_user_usage(user_id)
+            update_data = {
+                "ideas_generation_count": usage.get("ideas_generation_count", 0) + 1,
+                "updated_at": datetime.now().isoformat()
+            }
+            result = self.supabase.table("user_usage_stats").update(update_data).eq("user_id", user_id).execute()
+            if result.data and len(result.data) > 0:
+                return result.data[0]
+            return usage
+        except Exception as e:
+            logger.error(f"Ошибка при увеличении счетчика генерации идей: {e}")
+            return {"user_id": user_id, "ideas_generation_count": 0} 
