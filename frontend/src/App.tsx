@@ -400,6 +400,38 @@ interface UserSettingsPayload {
 }
 // === КОНЕЦ ИНТЕРФЕЙСОВ ===
 
+// === ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЛЯ ФОРМАТА КАНАЛА ===
+const normalizeChannelName = (name: string) => name.replace(/^@/, '').toLowerCase();
+// ... существующий код ...
+// === ОБЪЕДИНЕНИЕ КАНАЛОВ ИЗ ПОСТОВ И НАСТРОЕК ===
+useEffect(() => {
+  if (savedPosts.length > 0 || (userSettings && userSettings.allChannels)) {
+    const channelsFromPosts = savedPosts.map(post => normalizeChannelName(post.channel_name || '')).filter(Boolean);
+    const channelsFromSettings = (userSettings?.allChannels || []).map(normalizeChannelName).filter(Boolean);
+    const uniqueChannels = [...new Set([...channelsFromPosts, ...channelsFromSettings])];
+    setAllChannels(uniqueChannels);
+    // Сохраняем на сервере, если изменился список
+    if (userSettings && JSON.stringify(uniqueChannels) !== JSON.stringify(userSettings.allChannels)) {
+      saveUserSettings({ allChannels: uniqueChannels });
+    }
+  }
+}, [savedPosts, userSettings]);
+// ... существующий код ...
+// === ДОБАВЛЕНИЕ КАНАЛА ПРИ АНАЛИЗЕ ===
+const handleAnalyze = async () => {
+  const normalized = normalizeChannelName(channelInput);
+  if (!allChannels.includes(normalized)) {
+    const updatedChannels = [...allChannels, normalized];
+    setAllChannels(updatedChannels);
+    saveUserSettings({ allChannels: updatedChannels });
+  }
+  setChannelName(normalized);
+  // ... остальной код анализа ...
+};
+// ... существующий код ...
+// === ВСЕ ФИЛЬТРАЦИИ ПО КАНАЛУ ДЕЛАЮТСЯ ПО normalizeChannelName(channel_name) ===
+// ... существующий код ...
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true); // Общий флаг загрузки приложения
@@ -469,8 +501,7 @@ function App() {
   const saveUserSettings = async (settings: UserSettingsPayload) => {
     if (!userId) return;
     try {
-      await axios.patch(`${API_BASE_URL}/api/user/settings`, settings); // PATCH вместо PUT
-      // console.log('User settings saved successfully.');
+      await axios.put(`${API_BASE_URL}/api/user/settings`, settings); // PUT вместо PATCH
     } catch (error) {
       console.error('Failed to save user settings:', error);
       toast.error('Ошибка сохранения настроек на сервере.');
@@ -683,7 +714,7 @@ function App() {
       let url = `${API_BASE_URL}/posts`;
       const params: any = {};
       if (channelName) {
-        params.channel_name = channelName; // channelName должен быть оригинальным (с @, если так в базе)
+        params.channel_name = normalizeChannelName(channelName);
       }
       const response = await axios.get(url, {
         params,
@@ -1016,47 +1047,29 @@ function App() {
 
   // Функция для анализа канала
   const analyzeChannel = async () => {
-    if (!channelName) {
+    const normalized = normalizeChannelName(channelName);
+    if (!normalized) {
       setError("Введите имя канала");
       return;
     }
-
     setIsAnalyzing(true);
-    // Сбрасываем флаг загрузки из БД перед новым анализом
     setAnalysisLoadedFromDB(false);
     setError(null);
     setSuccess(null);
     setAnalysisResult(null);
-
     try {
-      const response = await axios.post('/analyze', { username: channelName }, {
+      const response = await axios.post('/analyze', { username: normalized }, {
         headers: { 'x-telegram-user-id': userId }
       });
       setAnalysisResult(response.data);
       setSuccess('Анализ успешно завершен');
-      
-      // Только после успешного анализа добавляем канал в список всех каналов
-      if (!allChannels.includes(channelName)) {
-        const updatedChannels = [...allChannels, channelName];
+      if (!allChannels.includes(normalized)) {
+        const updatedChannels = [...allChannels, normalized];
         setAllChannels(updatedChannels);
-        const allKey = getUserSpecificKey('allChannels', userId);
-        if (allKey) {
-          localStorage.setItem(allKey, JSON.stringify(updatedChannels));
-        }
-      
-        // Добавляем канал в список выбранных, если его там нет
-        if (!selectedChannels.includes(channelName)) {
-          const updatedSelected = [...selectedChannels, channelName];
-          setSelectedChannels(updatedSelected);
-          const selectedKey = getUserSpecificKey('selectedChannels', userId);
-          if (selectedKey) {
-            localStorage.setItem(selectedKey, JSON.stringify(updatedSelected));
-          }
-        }
+        saveUserSettings({ allChannels: updatedChannels });
       }
-      // Устанавливаем флаг, что анализ загружен из БД
       setAnalysisLoadedFromDB(true);
-    } catch (err: any) { 
+    } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Ошибка при анализе канала');
       console.error('Ошибка при анализе:', err);
     } finally {
@@ -1292,6 +1305,19 @@ function App() {
     }
   };
 
+  // === ИСПРАВЛЕНИЕ: Формирование allChannels из постов ===
+  useEffect(() => {
+    if (savedPosts.length > 0) {
+      const uniqueChannels = [
+        ...new Set(savedPosts.map(post => post.channel_name).filter((c): c is string => typeof c === 'string' && c.length > 0))
+      ];
+      setAllChannels(uniqueChannels);
+      // Можно также обновить настройки пользователя на сервере, если нужно
+      // saveUserSettings({ allChannels: uniqueChannels });
+    }
+  }, [savedPosts]);
+  // ... существующий код ...
+
   // Компонент загрузки
   if (loading) {
     return (
@@ -1410,11 +1436,8 @@ function App() {
         <div className="channel-selector">
           <label>Каналы: </label>
           <select 
-            value={channelName} 
-            onChange={e => {
-              setChannelName(e.target.value);
-              setChannelInput(e.target.value);
-            }}
+            value={channelName}
+            onChange={e => setChannelName(normalizeChannelName(e.target.value))}
             className="channel-select"
           >
             <option value="">Выберите канал</option>
