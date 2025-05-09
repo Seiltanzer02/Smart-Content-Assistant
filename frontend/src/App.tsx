@@ -425,7 +425,7 @@ function App() {
   const [selectedIdea, setSelectedIdea] = useState<SuggestedIdea | null>(null);
   const [isGeneratingPostDetails, setIsGeneratingPostDetails] = useState<boolean>(false);
   const [suggestedImages, setSuggestedImages] = useState<PostImage[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); 
   const [success, setSuccess] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<PostImage | null>(null);
   const [savedPosts, setSavedPosts] = useState<SavedPost[]>([]);
@@ -585,7 +585,7 @@ function App() {
         fetchSavedAnalysis(channelName);
     }
   }, [isAuthenticated, userId, initialSettingsLoaded, channelName]); // Добавлен initialSettingsLoaded
-
+  
   // --- ВОССТАНОВЛЕНО: useEffect для генерации дней календаря --- 
   useEffect(() => {
     if (currentMonth && currentView === 'calendar') { // Добавляем проверку currentView
@@ -692,8 +692,8 @@ function App() {
       }
       const response = await axios.get(url, {
         params,
-        headers: { 'x-telegram-user-id': userId }
-      });
+          headers: { 'x-telegram-user-id': userId } 
+        });
       setSavedPosts(response.data || []);
     } catch (err) {
       // обработка ошибок
@@ -1041,11 +1041,11 @@ function App() {
         const updatedChannels = [...allChannels, normalized];
         setAllChannels(updatedChannels);
         saveUserSettings({ allChannels: updatedChannels });
-      }
+        }
       // Устанавливаем channelName из channelInput, чтобы синхронизировать с текущим анализом
       setChannelName(normalized);
       setAnalysisLoadedFromDB(true);
-    } catch (err: any) {
+    } catch (err: any) { 
       setError(err.response?.data?.detail || err.message || 'Ошибка при анализе канала');
       console.error('Ошибка при анализе:', err);
     } finally {
@@ -1263,15 +1263,15 @@ function App() {
         headers: { 'x-telegram-user-id': userId }
       });
       if (response.data && !response.data.error) {
-        setAnalysisResult(response.data);
+        setAnalysisResult(response.data); 
         setSuccess(`Загружен сохраненный анализ для @${channel}`);
         setAnalysisLoadedFromDB(true);
       } else {
-        setAnalysisResult(null);
+        setAnalysisResult(null); 
       }
     } catch (err: any) {
       if (err.response && err.response.status === 404) {
-        setAnalysisResult(null);
+         setAnalysisResult(null);
       } else {
         setError(err.response?.data?.detail || err.message || 'Ошибка при загрузке сохраненного анализа');
         setAnalysisResult(null);
@@ -1294,6 +1294,18 @@ function App() {
   }, [savedPosts]);
   // ... существующий код ...
 
+  // Добавляю функцию-обработчик для кнопки "Анализировать"
+  const handleAnalyzeClick = () => {
+    const normalized = normalizeChannelName(channelInput);
+    // Если канал не выбран или его нет в списке, просто выбираем канал (ищем)
+    if (!normalized || !allChannels.includes(normalized)) {
+      setChannelName(normalized);
+      return;
+    }
+    // Если канал уже выбран, запускаем анализ
+    analyzeChannel();
+  };
+
   // Компонент загрузки
   if (loading) {
     return (
@@ -1308,18 +1320,6 @@ function App() {
   if (!isAuthenticated) {
     return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
   }
-
-  // Добавляю функцию-обработчик для кнопки "Анализировать"
-  const handleAnalyzeClick = () => {
-    const normalized = normalizeChannelName(channelInput);
-    // Если канал не выбран или его нет в списке, просто выбираем канал (ищем)
-    if (!normalized || !allChannels.includes(normalized)) {
-      setChannelName(normalized);
-      return;
-    }
-    // Если канал уже выбран, запускаем анализ
-    analyzeChannel();
-  };
 
   // Основной интерфейс
   return (
@@ -1424,7 +1424,7 @@ function App() {
         <div className="channel-selector">
           <label>Каналы: </label>
           <select 
-            value={channelName}
+            value={channelName} 
             onChange={e => setChannelName(normalizeChannelName(e.target.value))}
             className="channel-select"
           >
