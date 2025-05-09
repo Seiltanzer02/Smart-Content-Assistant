@@ -41,6 +41,58 @@ function App() {
   const [allChannels, setAllChannels] = useState<string[]>([]);
   const [filteredPosts, setFilteredPosts] = useState<SavedPost[]>([]);
 
+  // Функция для получения ID пользователя из Telegram WebApp
+  const getTelegramUserId = useCallback(() => {
+    try {
+      // Пытаемся получить из Telegram WebApp
+      if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
+        return String(window.Telegram.WebApp.initDataUnsafe.user.id);
+      }
+      
+      // Пытаемся получить из URL параметров
+      const urlParams = new URLSearchParams(window.location.search);
+      const userIdParam = urlParams.get('user_id');
+      if (userIdParam) {
+        return userIdParam;
+      }
+      
+      // В крайнем случае можно попробовать использовать инжектированные данные
+      if (window.INJECTED_USER_ID) {
+        return String(window.INJECTED_USER_ID);
+      }
+      
+      return null;
+    } catch (e) {
+      console.error('Ошибка при получении userId из Telegram:', e);
+      return null;
+    }
+  }, []);
+
+  // Эффект для авторизации пользователя
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        const tgUserId = getTelegramUserId();
+        if (tgUserId) {
+          setIsAuthenticated(true);
+          setUserId(tgUserId);
+          console.log('[App] Пользователь авторизован с Telegram ID:', tgUserId);
+        } else {
+          console.warn('[App] Telegram user ID не найден');
+          setIsAuthenticated(false);
+        }
+      } catch (error) {
+        console.error('[App] Ошибка при инициализации авторизации:', error);
+        setIsAuthenticated(false);
+      } finally {
+        // Устанавливаем флаг загрузки в false в любом случае
+        setTimeout(() => setLoading(false), 300);
+      }
+    };
+
+    initAuth();
+  }, [getTelegramUserId]);
+
   // Функция для загрузки сохраненных постов
   const fetchSavedPosts = async () => {
     if (!isAuthenticated || !userId) return;
@@ -109,41 +161,8 @@ function App() {
         } catch (error) {
           console.error('[App] Ошибка при загрузке настроек пользователя:', error);
           
-          // Если не удалось загрузить настройки с сервера, используем локальные данные (временное решение)
-          // Это будет удалено после полного перехода на API
-          const channelKey = `${userId}_channelName`;
-          const storedChannel = localStorage.getItem(channelKey);
-          if (storedChannel) {
-            setChannelName(storedChannel);
-          }
-    
-          const selectedChannelsKey = `${userId}_selectedChannels`;
-          const storedSelectedChannels = localStorage.getItem(selectedChannelsKey);
-          if (storedSelectedChannels) {
-            try {
-              setSelectedChannels(JSON.parse(storedSelectedChannels));
-            } catch (e) {
-              console.error('Ошибка при восстановлении выбранных каналов:', e);
-            }
-          }
-
-          const allChannelsKey = `${userId}_allChannels`;
-          const storedChannels = localStorage.getItem(allChannelsKey);
-          if (storedChannels) {
-            try {
-              setAllChannels(JSON.parse(storedChannels));
-            } catch (e) {
-              console.error('Ошибка при восстановлении списка каналов:', e);
-            }
-          }
-      
-          // Загружаем сохраненные посты
+          // Даже при ошибке загрузки настроек пробуем загрузить посты
           fetchSavedPosts();
-
-          // Загрузка сохраненного анализа для текущего выбранного канала
-          if (channelName) {
-            fetchSavedAnalysis(channelName);
-          }
         }
       };
       
@@ -170,9 +189,6 @@ function App() {
           console.log('[App] Настройки успешно сохранены на сервере');
         } catch (error) {
           console.error('[App] Ошибка при сохранении настроек:', error);
-          
-          // Временное решение: сохраняем в localStorage в случае ошибки API
-          localStorage.setItem(`${userId}_channelName`, channelName);
         }
       };
       
@@ -194,9 +210,6 @@ function App() {
           console.log('[App] Настройки (выбранные каналы) успешно сохранены на сервере');
         } catch (error) {
           console.error('[App] Ошибка при сохранении настроек (выбранные каналы):', error);
-          
-          // Временное решение: сохраняем в localStorage в случае ошибки API
-          localStorage.setItem(`${userId}_selectedChannels`, JSON.stringify(selectedChannels));
         }
       };
       
@@ -218,9 +231,6 @@ function App() {
           console.log('[App] Настройки (все каналы) успешно сохранены на сервере');
         } catch (error) {
           console.error('[App] Ошибка при сохранении настроек (все каналы):', error);
-          
-          // Временное решение: сохраняем в localStorage в случае ошибки API
-          localStorage.setItem(`${userId}_allChannels`, JSON.stringify(allChannels));
         }
       };
       
@@ -242,7 +252,7 @@ function App() {
     setAllChannels(prevChannels => {
       const updatedChannels = [...new Set([...prevChannels, ...channels])];
       
-      // Сохраняем через API вместо localStorage
+      // Сохраняем через API
       if (userId) {
         saveUserSettings({
           channelName,
@@ -250,11 +260,6 @@ function App() {
           allChannels: updatedChannels
         }).catch(err => {
           console.error('[App] Ошибка при сохранении обновленных каналов:', err);
-          // В случае ошибки, сохраняем в localStorage как резервный вариант
-          const key = `${userId}_allChannels`;
-          if (key) {
-            localStorage.setItem(key, JSON.stringify(updatedChannels));
-          }
         });
       }
       

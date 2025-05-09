@@ -1,27 +1,31 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Smart Content Assistant</title>
-    <!-- Telegram WebApp JS API -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="MobileOptimized" content="176" />
+    <meta name="HandheldFriendly" content="True" />
+    <meta name="robots" content="noindex,nofollow" />
+    <!-- Интеграция с Telegram WebApp -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <!-- === ДОБАВЛЕНО: Отключение свайпа для Mini App === -->
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            if (window.Telegram && window.Telegram.WebApp) {
-                try {
-                    window.Telegram.WebApp.disableVerticalSwipes();
-                    window.Telegram.WebApp.ready(); // Вызываем ready здесь же
-                    console.log('Telegram WebApp vertical swipes disabled.');
-                } catch (e) {
-                    console.error('Error disabling vertical swipes:', e);
-                }
-            }
-        });
+      // Отключаем вертикальные свайпы, чтобы не мешали работе приложения
+      document.addEventListener('DOMContentLoaded', function() {
+        try {
+          if (window.Telegram && window.Telegram.WebApp) {
+            window.Telegram.WebApp.setSwipeSettings({allow_vertical_swipe: false});
+            window.Telegram.WebApp.ready();
+            console.log('Telegram WebApp vertical swipes disabled.');
+          }
+        } catch (e) {
+          console.error('Error disabling WebApp swipes:', e);
+        }
+      });
     </script>
-    <!-- === КОНЕЦ ДОБАВЛЕНИЯ === -->
+    <title>Content Manager</title>
   </head>
   <body>
     <div id="root"></div>
