@@ -1345,7 +1345,6 @@ function App() {
       {showSubscription && (
         <>
           <SubscriptionWidget userId={userId} isActive={true}/> {/* Передаем isActive в старый виджет */} 
-          <DirectPremiumStatus userId={userId} /> {/* <-- Добавляем новый компонент */} 
         </>
       )}
 
