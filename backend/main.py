@@ -1098,6 +1098,12 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
     telegram_user_id = request.headers.get("X-Telegram-User-Id")
     if telegram_user_id:
         logger.info(f"Анализ для пользователя Telegram ID: {telegram_user_id}")
+        # Проверка лимита анализа каналов
+        from services.supabase_subscription_service import SupabaseSubscriptionService
+        subscription_service = SupabaseSubscriptionService(supabase)
+        can_analyze = await subscription_service.can_analyze_channel(int(telegram_user_id))
+        if not can_analyze:
+            raise HTTPException(status_code=403, detail="Достигнут лимит анализа каналов для бесплатной подписки. Оформите подписку для снятия ограничений.")
     
     # Обработка имени пользователя
     username = req.username.replace("@", "").strip()
@@ -1284,6 +1290,9 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         analyzed_posts_count=len(posts),
         message=error_message
     )
+    # После успешного анализа (до return AnalyzeResponse)
+    if telegram_user_id:
+        await subscription_service.increment_analysis_usage(int(telegram_user_id))
 
 # --- Маршрут для получения сохраненного анализа канала ---
 @app.get("/channel-analysis", response_model=Dict[str, Any])
@@ -2437,6 +2446,13 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
     try:
         # Получение telegram_user_id из заголовков
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if telegram_user_id:
+            # Проверка лимита генерации идей
+            from services.supabase_subscription_service import SupabaseSubscriptionService
+            subscription_service = SupabaseSubscriptionService(supabase)
+            can_generate = await subscription_service.can_generate_post(int(telegram_user_id))
+            if not can_generate:
+                raise HTTPException(status_code=403, detail="Достигнут лимит генерации идей для бесплатной подписки. Оформите подписку для снятия ограничений.")
         if not telegram_user_id:
             logger.warning("Запрос генерации поста без идентификации пользователя Telegram")
             # Используем HTTPException для корректного ответа
@@ -2628,6 +2644,9 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
                 author_url=found_images[0].author_url if found_images else ""
             ) if found_images else None
         )
+        # После успешной генерации (до return PostDetailsResponse)
+        if telegram_user_id:
+            await subscription_service.increment_post_usage(int(telegram_user_id))
         # === КОНЕЦ ИЗМЕНЕНИЯ ===
                 
     except HTTPException as http_err:

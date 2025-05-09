@@ -4,8 +4,8 @@ from typing import Dict, Any, Optional
 from dateutil.relativedelta import relativedelta
 
 # Константы для бесплатных лимитов
-FREE_ANALYSIS_LIMIT = 2
-FREE_POST_LIMIT = 2
+FREE_ANALYSIS_LIMIT = 3
+FREE_POST_LIMIT = 5
 SUBSCRIPTION_DURATION_MONTHS = 1
 
 logger = logging.getLogger("subscription_service")
@@ -44,7 +44,7 @@ class SupabaseSubscriptionService:
             
             # Если записи нет, создаем новую
             now = datetime.now()
-            next_reset_date = now + relativedelta(months=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            next_reset_date = now + timedelta(days=14)
             new_record = {
                 "user_id": user_id,
                 "analysis_count": 0,
@@ -215,7 +215,7 @@ class SupabaseSubscriptionService:
         """Сбрасывает счетчики использования и устанавливает новую дату сброса."""
         try:
             # Устанавливаем дату следующего сброса на первое число следующего месяца
-            next_reset_date = datetime.now() + relativedelta(months=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            next_reset_date = datetime.now() + timedelta(days=14)
             
             # Обновляем счетчики и дату сброса
             update_data = {
