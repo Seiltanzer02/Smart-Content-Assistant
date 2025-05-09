@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Dict, Any, Optional
 from dateutil.relativedelta import relativedelta
@@ -139,9 +139,11 @@ class SupabaseSubscriptionService:
                         end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
                     else:
                         end_date = datetime.fromisoformat(end_date_str)
-                    
-                    # Проверяем, не истекла ли подписка
-                    if end_date <= datetime.now():
+                    # === ИСПРАВЛЕНИЕ: всегда сравниваем с datetime.now(timezone.utc) ===
+                    now_utc = datetime.now(timezone.utc)
+                    if end_date.tzinfo is None:
+                        end_date = end_date.replace(tzinfo=timezone.utc)
+                    if end_date <= now_utc:
                         # Подписка истекла, деактивируем её
                         self.supabase.table("user_subscription").update({"is_active": False}).eq("id", subscription.get("id")).execute()
                         logger.info(f"Деактивирована истекшая подписка пользователя {user_id}")
