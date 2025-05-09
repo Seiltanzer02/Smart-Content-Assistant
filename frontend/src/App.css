@@ -35,17 +35,19 @@ body {
 }
 
 .app-header {
-  background-color: var(--tg-theme-secondary-bg-color, #1a73e8); /* Вторичный цвет фона */
-  color: var(--tg-theme-button-text-color, white); /* Цвет текста на кнопках */
-  padding: 10px 15px; /* Уменьшаем padding */
-  text-align: center;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  min-height: 36px !important;
+  padding: 6px 0 !important;
+  font-size: 1.1em !important;
+  background: var(--tg-theme-bg-color, #222);
+  box-shadow: none;
+  margin-bottom: 0;
 }
 
 .app-header h1 {
   margin: 0;
-  font-size: 1.2rem; /* Уменьшаем размер заголовка */
-  font-weight: 500;
+  font-size: 1.2em;
+  font-weight: 600;
+  text-align: center;
 }
 
 .app-main {
@@ -753,16 +755,14 @@ h1 {
     margin-bottom: 10px;
 }
 
-.post-textarea {
-    width: 100%;
-    padding: 10px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-family: inherit; /* Наследуем шрифт */
-    font-size: 15px;
-    min-height: 150px; /* Минимальная высота */
-    resize: vertical; /* Разрешаем изменять размер по вертикали */
-    box-sizing: border-box; /* Учитываем padding и border в ширине */
+.post-textarea, .post-text-editor textarea, .editor-view textarea#final_text, textarea#postText {
+  min-height: 220px !important;
+  font-size: 1.1em !important;
+  padding: 14px !important;
+  border-radius: 8px !important;
+  width: 100%;
+  resize: vertical;
+  box-sizing: border-box;
 }
 
 .image-selection {
@@ -1055,14 +1055,15 @@ h1 {
 
 /* --- СТИЛИ ДЛЯ ОГРАНИЧЕНИЯ РАЗМЕРА КАРТИНКИ --- */
 .editor-view .image-preview-container img {
-  display: block; /* Убираем лишние отступы */
-  max-width: 100%; /* Картинка не будет шире контейнера */
-  max-height: 200px; /* Ограничиваем максимальную высоту */
-  width: auto; /* Позволяем ширине подстраиваться */
-  height: auto; /* Позволяем высоте подстраиваться */
-  object-fit: contain; /* Масштабируем с сохранением пропорций */
-  border-radius: 4px;
-  background-color: #333; /* Фон на случай прозрачности */
+  display: block;
+  max-width: 100%;
+  height: auto;
+  max-height: 60vh;
+  margin: 0 auto;
+  background: none !important;
+  border-radius: 8px;
+  box-shadow: none !important;
+  border: none !important;
 }
 /* ----------------------------------------------- */
 
