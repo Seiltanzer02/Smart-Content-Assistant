@@ -1014,6 +1014,13 @@ function App() {
 
   // Обработчик успешной авторизации
   const handleAuthSuccess = (authUserId: string) => {
+    // Валидация userId
+    if (!authUserId || authUserId === '123456789' || isNaN(Number(authUserId))) {
+      setError('Ошибка авторизации: не удалось получить корректный Telegram ID. Пожалуйста, откройте приложение внутри Telegram.');
+      setIsAuthenticated(false);
+      setUserId(null);
+      return;
+    }
     console.log('Авторизация успешна:', authUserId);
     setUserId(authUserId);
     // Устанавливаем глобальный заголовок для всех запросов axios

@@ -994,8 +994,11 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
     """Анализ канала Telegram на основе запроса."""
     # Получение telegram_user_id из заголовков
     telegram_user_id = request.headers.get("X-Telegram-User-Id")
-    if telegram_user_id:
-        logger.info(f"Анализ для пользователя Telegram ID: {telegram_user_id}")
+    # Валидация user_id
+    if not telegram_user_id or telegram_user_id == '123456789' or not telegram_user_id.isdigit():
+        logger.error(f"Некорректный или отсутствующий Telegram ID: {telegram_user_id}")
+        return JSONResponse(status_code=401, content={"error": "Ошибка авторизации: не удалось получить корректный Telegram ID. Откройте приложение внутри Telegram."})
+    logger.info(f"Анализ для пользователя Telegram ID: {telegram_user_id}")
     
     # Обработка имени пользователя
     username = req.username.replace("@", "").strip()
@@ -1190,8 +1193,9 @@ async def get_channel_analysis(request: Request, channel_name: str):
     try:
         # Получение telegram_user_id из заголовков
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            return {"error": "Для получения анализа необходимо авторизоваться через Telegram"}
+        if not telegram_user_id or telegram_user_id == '123456789' or not telegram_user_id.isdigit():
+            logger.error(f"Некорректный или отсутствующий Telegram ID: {telegram_user_id}")
+            return JSONResponse(status_code=401, content={"error": "Ошибка авторизации: не удалось получить корректный Telegram ID. Откройте приложение внутри Telegram."})
         
         if not supabase:
             return {"error": "База данных недоступна"}
@@ -1217,8 +1221,9 @@ async def get_analyzed_channels(request: Request):
     try:
         # Получение telegram_user_id из заголовков
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            return []
+        if not telegram_user_id or telegram_user_id == '123456789' or not telegram_user_id.isdigit():
+            logger.error(f"Некорректный или отсутствующий Telegram ID: {telegram_user_id}")
+            return JSONResponse(status_code=401, content={"error": "Ошибка авторизации: не удалось получить корректный Telegram ID. Откройте приложение внутри Telegram."})
         
         if not supabase:
             return []
@@ -1356,12 +1361,9 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
     try:
         # Получение telegram_user_id из заголовков
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            logger.warning("Запрос генерации плана без идентификации пользователя Telegram")
-            return PlanGenerationResponse(
-                message="Для генерации плана необходимо авторизоваться через Telegram",
-                plan=[]
-            )
+        if not telegram_user_id or telegram_user_id == '123456789' or not telegram_user_id.isdigit():
+            logger.error(f"Некорректный или отсутствующий Telegram ID: {telegram_user_id}")
+            return JSONResponse(status_code=401, content={"error": "Ошибка авторизации: не удалось получить корректный Telegram ID. Откройте приложение внутри Telegram."})
             
         themes = req.themes
         styles = req.styles
@@ -2283,14 +2285,10 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
     try:
         # Получение telegram_user_id из заголовков
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            logger.warning("Запрос генерации поста без идентификации пользователя Telegram")
-            # Используем HTTPException для корректного ответа
-            raise HTTPException(
-                status_code=401, 
-                detail="Для генерации постов необходимо авторизоваться через Telegram"
-            )
-            
+        if not telegram_user_id or telegram_user_id == '123456789' or not telegram_user_id.isdigit():
+            logger.error(f"Некорректный или отсутствующий Telegram ID: {telegram_user_id}")
+            return JSONResponse(status_code=401, content={"error": "Ошибка авторизации: не удалось получить корректный Telegram ID. Откройте приложение внутри Telegram."})
+        
         topic_idea = req.topic_idea
         format_style = req.format_style
         # channel_name уже определен выше
@@ -2636,9 +2634,9 @@ async def save_image(request: Request, image_data: Dict[str, Any]):
     try:
         # Получение telegram_user_id из заголовков
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        if not telegram_user_id:
-            logger.warning("Запрос сохранения изображения без идентификации пользователя Telegram")
-            raise HTTPException(status_code=401, detail="Для сохранения изображения необходимо авторизоваться через Telegram")
+        if not telegram_user_id or telegram_user_id == '123456789' or not telegram_user_id.isdigit():
+            logger.error(f"Некорректный или отсутствующий Telegram ID: {telegram_user_id}")
+            return JSONResponse(status_code=401, content={"error": "Ошибка авторизации: не удалось получить корректный Telegram ID. Откройте приложение внутри Telegram."})
         
         if not supabase:
             logger.error("Клиент Supabase не инициализирован")
@@ -2861,8 +2859,9 @@ async def get_user_images_legacy(request: Request, limit: int = 20):
 @app.post("/save-suggested-idea", response_model=Dict[str, Any])
 async def save_suggested_idea(idea_data: Dict[str, Any], request: Request):
     telegram_user_id = request.headers.get("x-telegram-user-id")
-    if not telegram_user_id:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not telegram_user_id or telegram_user_id == '123456789' or not telegram_user_id.isdigit():
+        logger.error(f"Некорректный или отсутствующий Telegram ID: {telegram_user_id}")
+        return JSONResponse(status_code=401, content={"error": "Ошибка авторизации: не удалось получить корректный Telegram ID. Откройте приложение внутри Telegram."})
     
     if not supabase:
         logging.error("Supabase client not initialized")
@@ -2908,8 +2907,8 @@ async def check_db_tables():
             
         # Для проверки просто запрашиваем одну строку из таблицы, чтобы убедиться, что соединение работает
         try:
-        result = supabase.table("suggested_ideas").select("id").limit(1).execute()
-        logger.info("Таблица suggested_ideas существует и доступна.")
+            result = supabase.table("suggested_ideas").select("id").limit(1).execute()
+            logger.info("Таблица suggested_ideas существует и доступна.")
         except Exception as e:
             logger.error(f"Ошибка при проверке соединения с Supabase: {e}")
             return False
@@ -3335,10 +3334,11 @@ class SaveIdeasRequest(BaseModel):
 
 @app.post("/save-suggested-ideas", response_model=Dict[str, Any])
 async def save_suggested_ideas_batch(payload: SaveIdeasRequest, request: Request):
-    """Сохраняет список предложенных идей в базу данных."""
-    telegram_user_id = request.headers.get("x-telegram-user-id")
-    if not telegram_user_id:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    """Сохранение нескольких предложенных идей."""
+    telegram_user_id = request.headers.get("X-Telegram-User-Id")
+    if not telegram_user_id or telegram_user_id == '123456789' or not telegram_user_id.isdigit():
+        logger.error(f"Некорректный или отсутствующий Telegram ID: {telegram_user_id}")
+        return JSONResponse(status_code=401, content={"error": "Ошибка авторизации: не удалось получить корректный Telegram ID. Откройте приложение внутри Telegram."})
     
     # Преобразуем ID пользователя в целое число
     try:
@@ -3367,7 +3367,7 @@ async def save_suggested_ideas_batch(payload: SaveIdeasRequest, request: Request
                 .eq("user_id", int(telegram_user_id))\
                 .eq("channel_name", channel_name)\
                 .execute()
-            logger.info(f"Удалено {len(delete_result.data)} старых идей для канала {channel_name}")
+            logger.info(f"Удалено {len(delete_result.data) if hasattr(delete_result, 'data') else 0} старых идей для канала {channel_name}")
         except Exception as del_err:
             logger.error(f"Ошибка при удалении старых идей для канала {channel_name}: {del_err}")
             # Не прерываем выполнение, но логируем ошибку
@@ -3413,7 +3413,6 @@ async def save_suggested_ideas_batch(payload: SaveIdeasRequest, request: Request
             }
             records_to_insert.append(record)
             saved_ids.append(idea_id)
-
         except Exception as e:
             errors.append(f"Ошибка подготовки идеи {idea_data.get('topic_idea')}: {str(e)}")
             logger.error(f"Ошибка подготовки идеи {idea_data.get('topic_idea')}: {str(e)}")
@@ -3439,25 +3438,25 @@ async def save_suggested_ideas_batch(payload: SaveIdeasRequest, request: Request
             saved_count_single = 0
             saved_ids_single = []
             for record in records_to_insert:
-                 try:
-                     single_result = supabase.table("suggested_ideas").insert(record).execute()
-                     if hasattr(single_result, 'data') and single_result.data:
-                         saved_count_single += 1
-                         saved_ids_single.append(record['id'])
-                     else:
-                         single_error = getattr(single_result, 'error', 'Unknown error')
-                         errors.append(f"Ошибка сохранения идеи {record.get('topic_idea')}: {single_error}")
-                         logger.error(f"Ошибка сохранения идеи {record.get('topic_idea')}: {single_error}")
-                 except Exception as single_e:
-                     errors.append(f"Исключение при сохранении идеи {record.get('topic_idea')}: {str(single_e)}")
-                     logger.error(f"Исключение при сохранении идеи {record.get('topic_idea')}: {str(single_e)}")
-                     
+                try:
+                    single_result = supabase.table("suggested_ideas").insert(record).execute()
+                    if hasattr(single_result, 'data') and single_result.data:
+                        saved_count_single += 1
+                        saved_ids_single.append(record['id'])
+                    else:
+                        single_error = getattr(single_result, 'error', 'Unknown error')
+                        errors.append(f"Ошибка сохранения идеи {record.get('topic_idea')}: {single_error}")
+                        logger.error(f"Ошибка сохранения идеи {record.get('topic_idea')}: {single_error}")
+                except Exception as single_e:
+                    errors.append(f"Исключение при сохранении идеи {record.get('topic_idea')}: {str(single_e)}")
+                    logger.error(f"Исключение при сохранении идеи {record.get('topic_idea')}: {str(single_e)}")
+                    
             logger.info(f"Сохранено {saved_count_single} идей по одной.")
             return {
-                 "message": f"Сохранено {saved_count_single} идей (остальные с ошибкой).", 
-                 "saved_count": saved_count_single, 
-                 "saved_ids": saved_ids_single, 
-                 "errors": errors
+                "message": f"Сохранено {saved_count_single} идей (остальные с ошибкой).", 
+                "saved_count": saved_count_single, 
+                "saved_ids": saved_ids_single, 
+                "errors": errors
             }
 
     except Exception as e:
@@ -3474,9 +3473,9 @@ logger.info(f"Папка для загруженных изображений: {
 async def upload_image(request: Request, file: UploadFile = File(...)):
     """Загружает файл изображения в Supabase Storage."""
     telegram_user_id = request.headers.get("X-Telegram-User-Id")
-    if not telegram_user_id:
-        logger.warning("Запрос загрузки изображения без идентификации пользователя Telegram")
-        raise HTTPException(status_code=401, detail="Для загрузки изображения необходимо авторизоваться через Telegram")
+    if not telegram_user_id or telegram_user_id == '123456789' or not telegram_user_id.isdigit():
+        logger.error(f"Некорректный или отсутствующий Telegram ID: {telegram_user_id}")
+        return JSONResponse(status_code=401, content={"error": "Ошибка авторизации: не удалось получить корректный Telegram ID. Откройте приложение внутри Telegram."})
 
     # Преобразуем ID пользователя в целое число
     try:
@@ -3649,13 +3648,15 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
         # Логируем информацию о запросе
         logger.info(f"Прямая проверка премиум-статуса для user_id: {effective_user_id}")
             
-        if not effective_user_id:
+        # Проверка на валидность ID
+        if not effective_user_id or effective_user_id == '123456789' or not effective_user_id.isdigit():
+            logger.error(f"Некорректный или отсутствующий Telegram ID для премиум-проверки: {effective_user_id}")
             return JSONResponse(
                 content={
                     "has_premium": False,
                     "user_id": None,
-                    "error": "ID пользователя не предоставлен",
-                    "message": "Не удалось определить ID пользователя"
+                    "error": "Ошибка авторизации: не удалось получить корректный Telegram ID",
+                    "message": "Для проверки премиум-статуса необходим корректный Telegram ID. Откройте приложение внутри Telegram."
                 },
                 headers=headers
             )
@@ -3867,7 +3868,7 @@ async def direct_premium_check(request: Request, user_id: Optional[str] = None):
 # Добавляем эндпоинт для API v2 для проверки премиум-статуса
 @app.get("/api-v2/premium/check", status_code=200)
 async def premium_check_v2(request: Request, user_id: Optional[str] = None):
-    """Альтернативный эндпоинт для проверки премиум-статуса (API v2)"""
+    """API v2 для проверки премиум-статуса."""
     return await direct_premium_check(request, user_id)
 
 # Добавляем raw API эндпоинт для обхода SPA роутера
@@ -3926,13 +3927,18 @@ async def bot_style_premium_check(user_id: str, request: Request):
     try:
         logger.info(f"[BOT-STYLE] Запрос премиум-статуса для пользователя: {user_id}")
         
-        # Проверяем, что user_id предоставлен и преобразуем его в int
-        if not user_id:
+        # Проверка на валидность ID
+        if not user_id or user_id == '123456789' or not user_id.isdigit():
+            logger.error(f"Некорректный Telegram ID для bot-style-premium-check: {user_id}")
             return JSONResponse(
-                status_code=400,
-                content={"success": False, "error": "ID пользователя не указан"}
+                status_code=401, 
+                content={
+                    "success": False, 
+                    "error": "Ошибка авторизации: не удалось получить корректный Telegram ID."
+                }
             )
         
+        # Проверяем, что user_id предоставлен и преобразуем его в int
         try:
             user_id_int = int(user_id)
         except ValueError:
