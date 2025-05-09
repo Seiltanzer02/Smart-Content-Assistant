@@ -433,6 +433,7 @@ function App() {
   const [progress, setProgress] = useState(0);
   const [analyzeLimitExceeded, setAnalyzeLimitExceeded] = useState(false);
   const [ideasLimitExceeded, setIdeasLimitExceeded] = useState(false);
+  const [postLimitExceeded, setPostLimitExceeded] = useState(false);
 
   // === ДОБАВЛЕНО: ФУНКЦИИ ДЛЯ РАБОТЫ С API НАСТРОЕК ===
   const fetchUserSettings = async (): Promise<ApiUserSettings | null> => {
@@ -793,6 +794,7 @@ function App() {
     setIsSavingPost(true);
     setError("");
     setSuccess("");
+    setPostLimitExceeded(false);
 
     // Prepare payload
     const postPayload: {
@@ -842,9 +844,14 @@ function App() {
         setSuggestedImages([]);
       }
     } catch (err: any) { 
-      const errorMsg = err.response?.data?.detail || err.message || (currentPostId ? 'Ошибка при обновлении поста' : 'Ошибка при сохранении поста');
-      setError(errorMsg);
-      console.error(currentPostId ? 'Ошибка при обновлении поста:' : 'Ошибка при сохранении поста:', err);
+      if (err.response && err.response.status === 403 && err.response.data?.error?.includes('лимит генерации постов')) {
+        setPostLimitExceeded(true);
+        toast.error(err.response.data.error);
+      } else {
+        const errorMsg = err.response?.data?.detail || err.message || (currentPostId ? 'Ошибка при обновлении поста' : 'Ошибка при сохранении поста');
+        setError(errorMsg);
+        console.error(currentPostId ? 'Ошибка при обновлении поста:' : 'Ошибка при сохранении поста:', err);
+      }
     } finally {
       setIsSavingPost(false);
     }
@@ -1848,7 +1855,7 @@ function App() {
                   <button 
                     onClick={handleSaveOrUpdatePost} 
                     className="action-button save-button"
-                    disabled={isSavingPost || isGeneratingPostDetails || !currentPostText}
+                    disabled={isSavingPost || isGeneratingPostDetails || !currentPostText || postLimitExceeded}
                   >
                     {isSavingPost ? 'Сохранение...' : (currentPostId ? 'Обновить пост' : 'Сохранить пост')}
                   </button>
