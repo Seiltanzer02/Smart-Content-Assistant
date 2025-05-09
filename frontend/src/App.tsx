@@ -1309,6 +1309,18 @@ function App() {
     return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
   }
 
+  // Добавляю функцию-обработчик для кнопки "Анализировать"
+  const handleAnalyzeClick = () => {
+    const normalized = normalizeChannelName(channelInput);
+    // Если канал не выбран или его нет в списке, просто выбираем канал (ищем)
+    if (!normalized || !allChannels.includes(normalized)) {
+      setChannelName(normalized);
+      return;
+    }
+    // Если канал уже выбран, запускаем анализ
+    analyzeChannel();
+  };
+
   // Основной интерфейс
   return (
     <div className="app-container">
@@ -1439,7 +1451,7 @@ function App() {
                   disabled={isAnalyzing}
                 />
                 <button 
-                  onClick={() => setChannelName(channelInput)} 
+                  onClick={handleAnalyzeClick} 
                   className="action-button"
                   disabled={isAnalyzing || !channelInput}
                 >
