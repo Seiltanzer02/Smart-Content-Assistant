@@ -1339,45 +1339,6 @@ function App() {
     <div className="app-container">
       <header className="app-header">
         <div className="logo">Smart Content Assistant</div>
-        <div className="header-icons">
-          {/* Кнопка для управления подпиской */}
-          <button
-            className="icon-button"
-            onClick={() => setShowSubscription(!showSubscription)}
-            title="Управление подпиской"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
-            </svg>
-          </button>
-          <button
-            className={`icon-button ${currentView === 'analyze' ? 'active' : ''}`}
-            onClick={() => {setCurrentView('analyze'); setShowSubscription(false);}}
-            title="Анализ канала"
-          >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M10 20H14V4H10V20ZM4 20H8V12H4V20ZM16 9V20H20V9H16Z" fill="currentColor"/>
-            </svg>
-          </button>
-          <button
-            className={`icon-button ${currentView === 'suggestions' ? 'active' : ''}`}
-            onClick={() => {setCurrentView('suggestions'); setShowSubscription(false);}}
-            title="Идеи для постов"
-          >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 22C6.477 22 2 17.523 2 12C2 6.477 6.477 2 12 2C17.523 2 22 6.477 22 12C22 17.523 17.523 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 7H13V9H11V7ZM11 11H13V17H11V11Z" fill="currentColor"/>
-            </svg>
-          </button>
-          <button
-            className={`icon-button ${currentView === 'calendar' ? 'active' : ''}`}
-            onClick={() => {setCurrentView('calendar'); setShowSubscription(false);}}
-            title="Календарь"
-          >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M17 3H21C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H7V1H9V3H15V1H17V3ZM4 9V19H20V9H4ZM4 5V7H20V5H4ZM6 11H8V13H6V11ZM10 11H12V13H10V11ZM14 11H16V13H14V11Z" fill="currentColor"/>
-            </svg>
-          </button>
-        </div>
       </header>
       
       {/* Блок подписки */}
@@ -1395,42 +1356,59 @@ function App() {
 
         {/* Навигация */}
     <div className="navigation-buttons">
-          <button 
-            onClick={() => setCurrentView('analyze')} 
-            className={`action-button ${currentView === 'analyze' ? 'active' : ''}`}
-          >
-            Анализ
-          </button>
-          <button 
-            onClick={() => {
-              setCurrentView('suggestions');
-              if (suggestedIdeas.length === 0) {
-                fetchSavedIdeas();
-              }
-            }} 
-            className={`action-button ${currentView === 'suggestions' ? 'active' : ''}`}
-            disabled={!channelName}
-          >
-            Идеи
-          </button>
-          <button 
-            onClick={() => {
-              setCurrentView('calendar');
-              fetchSavedPosts();
-            }} 
-            className={`action-button ${currentView === 'calendar' ? 'active' : ''}`}
-          >
-            Календарь
-          </button>
-          <button 
-            onClick={() => {
-              setCurrentView('posts');
-              fetchSavedPosts();
-            }} 
-            className={`action-button ${currentView === 'posts' ? 'active' : ''}`}
-          >
-            Посты
-          </button>
+      <button 
+        onClick={() => setShowSubscription(true)} 
+        className="action-button"
+      >
+        {/* SVG звезды */}
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight: '8px'}}>
+          <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+        </svg>
+        <span>Подписка</span>
+      </button>
+      <button 
+        onClick={() => setCurrentView('analyze')} 
+        className={`action-button ${currentView === 'analyze' ? 'active' : ''}`}
+      >
+        {/* SVG анализ */}
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginRight: '8px'}}>
+          <path d="M10 20H14V4H10V20ZM4 20H8V12H4V20ZM16 9V20H20V9H16Z" fill="currentColor"/>
+        </svg>
+        <span>Анализ</span>
+      </button>
+      <button 
+        onClick={() => { setCurrentView('suggestions'); if (suggestedIdeas.length === 0) fetchSavedIdeas(); }} 
+        className={`action-button ${currentView === 'suggestions' ? 'active' : ''}`}
+        disabled={!channelName}
+      >
+        {/* SVG идея */}
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginRight: '8px'}}>
+          <path d="M12 22C6.477 22 2 17.523 2 12C2 6.477 6.477 2 12 2C17.523 2 22 6.477 22 12C22 17.523 17.523 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 7H13V9H11V7ZM11 11H13V17H11V11Z" fill="currentColor"/>
+        </svg>
+        <span>Идеи</span>
+      </button>
+      <button 
+        onClick={() => { setCurrentView('calendar'); fetchSavedPosts(); }} 
+        className={`action-button ${currentView === 'calendar' ? 'active' : ''}`}
+      >
+        {/* SVG календарь */}
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginRight: '8px'}}>
+          <path d="M17 3H21C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H7V1H9V3H15V1H17V3ZM4 9V19H20V9H4ZM4 5V7H20V5H4ZM6 11H8V13H6V11ZM10 11H12V13H10V11ZM14 11H16V13H14V11Z" fill="currentColor"/>
+        </svg>
+        <span>Календарь</span>
+      </button>
+      <button 
+        onClick={() => { setCurrentView('posts'); fetchSavedPosts(); }} 
+        className={`action-button ${currentView === 'posts' ? 'active' : ''}`}
+      >
+        {/* SVG посты (добавляю иконку списка) */}
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginRight: '8px'}}>
+          <rect x="4" y="5" width="16" height="2" fill="currentColor"/>
+          <rect x="4" y="11" width="16" height="2" fill="currentColor"/>
+          <rect x="4" y="17" width="16" height="2" fill="currentColor"/>
+        </svg>
+        <span>Посты</span>
+      </button>
     </div>
 
         {/* Выбор канала */}
@@ -1576,93 +1554,30 @@ function App() {
           {currentView === 'calendar' && (
             <div className="view calendar-view">
               <h2>Календарь публикаций</h2>
-              
-              {/* Фильтр по каналам (оставляем) */}
-              <div className="channels-filter">
-                <h3>Фильтр по каналам:</h3>
-                
-                {/* Компактная кнопка добавления/удаления канала в фильтр */}
-                <div className="channels-actions">
-                <button 
-                    className="action-button"
-                    onClick={() => {
-                      // Добавить текущий канал в фильтр, если его еще нет
-                      if (channelName && !selectedChannels.includes(channelName)) {
-                        const updatedSelected = [...selectedChannels, channelName];
-                        setSelectedChannels(updatedSelected);
-                        // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
-                        const key = getUserSpecificKey('selectedChannels', userId);
-                        if (key) {
-                          localStorage.setItem(key, JSON.stringify(updatedSelected));
-                        }
-                        // --- КОНЕЦ ИЗМЕНЕНИЯ ---
-                      }
-                    }}
-                  >
-                    + Добавить текущий канал
-                </button>
-                  
-                  <button
-                    className="action-button"
-                    onClick={filterPostsByChannels}
-                  >
-                    Применить фильтр
-                </button>
-          </div>
-                
-                {/* Отображение выбранных каналов */}
-                <div className="selected-channels">
-                  {selectedChannels.map((channel) => (
-                    <div key={channel} className="selected-channel">
-                      <span className="channel-name">@{channel}</span>
-                      <button 
-                        className="remove-channel"
-                        onClick={() => {
-                          const updatedSelected = selectedChannels.filter(c => c !== channel);
-                          setSelectedChannels(updatedSelected);
-                          // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
-                          const key = getUserSpecificKey('selectedChannels', userId);
-                          if (key) {
-                             localStorage.setItem(key, JSON.stringify(updatedSelected));
-                          }
-                          // --- КОНЕЦ ИЗМЕНЕНИЯ ---
-                        }}
-                      >
-                        ✕
-                      </button>
-      </div>
-                  ))}
-      </div>
-              </div>
-              
               {/* Календарь - ВОССТАНОВЛЕННЫЙ КОД */}
               <div className="calendar-container">
                 {/* Заголовок с названием месяца и навигацией */}
                 <div className="calendar-header">
                   <button 
                     className="nav-button"
-                    onClick={goToPrevMonth} // Используем восстановленную функцию
+                    onClick={goToPrevMonth}
                   >
                     &lt;
                   </button>
-                  
                   <h3>{currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}</h3>
-                  
                   <button 
                     className="nav-button"
-                    onClick={goToNextMonth} // Используем восстановленную функцию
+                    onClick={goToNextMonth}
                   >
                     &gt;
                   </button>
                 </div>
-                
                 {/* Дни недели */}
                 <div className="weekdays">
                   {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day) => (
                     <div key={day} className="weekday">{day}</div>
                   ))}
                 </div>
-                
                 {/* Дни календаря */}
                 <div className="calendar-grid">
                   {calendarDays.map((day, index) => (
