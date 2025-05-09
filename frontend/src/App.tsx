@@ -447,6 +447,9 @@ function App() {
   // --- ВОССТАНОВЛЕНО: Состояние для текущего месяца календаря --- 
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
 
+  // === ДОБАВЛЕНО: Состояние для поля ввода канала ===
+  const [channelInput, setChannelInput] = useState<string>('');
+
   // === ДОБАВЛЕНО: ФУНКЦИИ ДЛЯ РАБОТЫ С API НАСТРОЕК ===
   const fetchUserSettings = async (): Promise<ApiUserSettings | null> => {
     if (!userId) return null;
@@ -1408,7 +1411,10 @@ function App() {
           <label>Каналы: </label>
           <select 
             value={channelName} 
-            onChange={(e) => setChannelName(e.target.value)}
+            onChange={e => {
+              setChannelName(e.target.value);
+              setChannelInput(e.target.value);
+            }}
             className="channel-select"
           >
             <option value="">Выберите канал</option>
@@ -1428,15 +1434,15 @@ function App() {
         <input
           type="text"
           className="channel-input"
-          value={channelName}
-          onChange={(e) => setChannelName(e.target.value.replace(/^@/, ''))}
+          value={channelInput}
+          onChange={e => setChannelInput(e.target.value.replace(/^@/, ''))}
           placeholder="Введите username канала (без @)"
                   disabled={isAnalyzing}
                 />
                 <button 
-                  onClick={analyzeChannel} 
+                  onClick={() => setChannelName(channelInput)} 
                   className="action-button"
-                  disabled={isAnalyzing || !channelName}
+                  disabled={isAnalyzing || !channelInput}
                 >
                   {isAnalyzing ? 'Анализ...' : 'Анализировать'}
         </button>
