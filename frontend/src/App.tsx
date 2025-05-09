@@ -472,14 +472,27 @@ function App() {
   // === ОБЪЕДИНЕНИЕ КАНАЛОВ ИЗ ПОСТОВ И НАСТРОЕК ===
   useEffect(() => {
     if (savedPosts.length > 0 || (userSettings && userSettings.allChannels)) {
+      // Получаем каналы из текущих постов
       const channelsFromPosts = savedPosts.map(post => normalizeChannelName(post.channel_name || '')).filter(Boolean);
+      
+      // Получаем каналы из настроек пользователя
       const channelsFromSettings = (userSettings?.allChannels || []).map(normalizeChannelName).filter(Boolean);
+      
+      // Объединяем каналы из текущих постов и из настроек
       const uniqueChannels = [...new Set([...channelsFromPosts, ...channelsFromSettings])];
-      setAllChannels(uniqueChannels);
-      // Сохраняем на сервере, если изменился список
-      if (userSettings && JSON.stringify(uniqueChannels) !== JSON.stringify(userSettings.allChannels)) {
-        saveUserSettings({ allChannels: uniqueChannels });
-      }
+      
+      // ВАЖНО: Сохраняем предыдущие каналы, чтобы они не исчезали при фильтрации
+      setAllChannels(prevChannels => {
+        // Объединяем с предыдущими каналами, чтобы не терять их при фильтрации
+        const mergedChannels = [...new Set([...prevChannels, ...uniqueChannels])];
+        
+        // Сохраняем на сервере только если список действительно изменился
+        if (userSettings && JSON.stringify(mergedChannels) !== JSON.stringify(userSettings.allChannels)) {
+          saveUserSettings({ allChannels: mergedChannels });
+        }
+        
+        return mergedChannels;
+      });
     }
   }, [savedPosts, userSettings]);
 
@@ -654,12 +667,12 @@ function App() {
   // --- ИЗМЕНЕНИЕ: useEffect для загрузки данных при смене канала --- 
   useEffect(() => {
     if (isAuthenticated && channelName) {
-      // --- ДОБАВЛЕНО: Очистка состояния перед загрузкой ---
-      setAnalysisResult(null); // Очищаем предыдущий анализ
-      setSuggestedIdeas([]);  // Очищаем предыдущие идеи
-      setSavedPosts([]); // Очищаем предыдущие посты
-      setSelectedIdea(null); // Сбрасываем выбранную идею
-      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+      // --- ИЗМЕНЕНО: Не очищаем полностью посты, чтобы не терять список каналов ---
+      // setAnalysisResult(null); // Очищаем предыдущий анализ
+      // setSuggestedIdeas([]);  // Очищаем предыдущие идеи
+      // setSavedPosts([]); // Очищаем предыдущие посты - УБРАНО, чтобы сохранить каналы
+      // setSelectedIdea(null); // Сбрасываем выбранную идею
+      // --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
       // Загрузка сохраненного анализа для выбранного канала
       fetchSavedAnalysis(channelName);
@@ -671,12 +684,12 @@ function App() {
       // Если канал не выбран, очищаем специфичные для канала данные
       setAnalysisResult(null);
       setSuggestedIdeas([]);
-      // --- ДОБАВЛЕНО: Также очищаем посты, если канал сброшен ---
-      setSavedPosts([]); 
-      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
-    setSelectedIdea(null); 
-      // Возможно, загрузить все посты пользователя, если канал не выбран?
-      fetchSavedPosts(); // Загружаем все посты пользователя
+      // --- ИЗМЕНЕНО: Не очищаем посты, чтобы сохранить список каналов ---
+      // setSavedPosts([]); 
+      // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+      setSelectedIdea(null); 
+      // Загружаем все посты пользователя
+      fetchSavedPosts(); 
     }
   }, [isAuthenticated, channelName]); // Зависимости остаются прежними
   // --- КОНЕЦ ИЗМЕНЕНИЯ --- 
