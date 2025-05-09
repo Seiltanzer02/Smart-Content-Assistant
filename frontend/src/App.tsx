@@ -336,19 +336,14 @@ const PostImageGallery = ({
 // Компонент для отображения дня календаря
 const CalendarDay = ({ 
   day, 
-  onEditPost, 
-  onDeletePost 
+  onEditPost
 }: { 
   day: CalendarDay; 
   onEditPost: (post: SavedPost) => void;
-  onDeletePost: (postId: string) => void;
 }) => {
   const { date, posts, isCurrentMonth, isToday } = day;
   const dayNumber = date.getDate();
-  
-  // Класс для ячейки календаря
   const cellClass = `calendar-day ${isCurrentMonth ? '' : 'other-month'} ${isToday ? 'today' : ''}`;
-  
   return (
     <div className={cellClass}>
       <div className="day-number">{dayNumber}</div>
@@ -358,7 +353,7 @@ const CalendarDay = ({
             <div key={post.id} className="post-item">
               <div className="post-title" title={post.topic_idea}>
                 {post.topic_idea.length > 25 
-                  ? post.topic_idea.substring(0, 22) + '...' 
+                  ? post.topic_idea.substring(0, 22) + '...'
                   : post.topic_idea
                 }
               </div>
@@ -369,13 +364,6 @@ const CalendarDay = ({
                   title="Редактировать"
                 >
                   <span>📝</span>
-                </button>
-                <button 
-                  className="action-button delete-button" 
-                  onClick={() => onDeletePost(post.id)}
-                  title="Удалить"
-                >
-                  <span>🗑️</span>
                 </button>
               </div>
             </div>
@@ -1355,8 +1343,8 @@ function App() {
   // Основной интерфейс
   return (
     <div className="app-container">
-      <header className="app-header">
-        <div className="logo">Smart Content Assistant</div>
+      <header className="app-header" style={{ minHeight: '36px', padding: '6px 0', fontSize: '1.1em' }}>
+        <h1 style={{ margin: 0, fontSize: '1.2em', fontWeight: 600 }}>Smart Content Assistant</h1>
       </header>
       
       {/* Блок подписки */}
@@ -1602,11 +1590,6 @@ function App() {
                       key={index} 
                       day={day} 
                       onEditPost={startEditingPost}
-                      onDeletePost={(postId) => {
-                        if (window.confirm('Вы уверены, что хотите удалить этот пост?')) {
-                          deletePost(postId);
-                        }
-                      }}
                     />
                   ))}
                 </div>
@@ -1749,7 +1732,8 @@ function App() {
                   id="postText"
                   value={currentPostText}
                   onChange={(e) => setCurrentPostText(e.target.value)}
-                  rows={10}
+                  rows={16}
+                  style={{ minHeight: '220px', fontSize: '1.1em', padding: '14px', borderRadius: '8px' }}
                   placeholder="Введите или сгенерируйте текст поста..."
                   disabled={isSavingPost || isGeneratingPostDetails}
                   />
@@ -1816,11 +1800,15 @@ function App() {
                           <div className="selected-image-preview" style={{ marginTop: '15px', padding: '10px', border: '1px solid #eee', borderRadius: '8px', backgroundColor: '#f9f9f9' }}>
                               <h5 style={{ marginTop: '0', marginBottom: '10px' }}>Выбранное изображение:</h5>
                               <div className="preview-container" style={{ textAlign: 'center' }}>
-                                 <img 
-                                    src={selectedImage.preview_url || selectedImage.url} 
-                                    alt={selectedImage.alt || 'Выбрано'} 
-                                    style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '4px', marginBottom: '10px', border: '1px solid #ddd' }} 
-                                 />
+                                 <div className="image-preview-container" style={{ background: 'none', maxWidth: '100%', margin: 0, padding: 0 }}>
+                                   {selectedImage && (
+                                     <img
+                                       src={selectedImage.preview_url || selectedImage.url}
+                                       alt={selectedImage.alt || 'Изображение'}
+                                       style={{ display: 'block', maxWidth: '100%', height: 'auto', maxHeight: '60vh', margin: '0 auto', background: 'none', borderRadius: '8px' }}
+                                     />
+                                   )}
+                                 </div>
                                  <button 
                                       className="action-button delete-button small remove-image-btn"
                                       onClick={() => {
