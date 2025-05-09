@@ -7,6 +7,7 @@ import { Toaster, toast } from 'react-hot-toast';
 import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
 import DirectPremiumStatus from './components/DirectPremiumStatus'; // <-- Импортируем новый компонент
+import ProgressBar from './components/ProgressBar';
 
 // Определяем базовый URL API
 // Так как фронтенд и API на одном домене, используем пустую строку
@@ -441,6 +442,7 @@ function App() {
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   const [channelInput, setChannelInput] = useState<string>('');
   const [userSettings, setUserSettings] = useState<ApiUserSettings | null>(null);
+  const [progress, setProgress] = useState(0);
 
   // === ДОБАВЛЕНО: ФУНКЦИИ ДЛЯ РАБОТЫ С API НАСТРОЕК ===
   const fetchUserSettings = async (): Promise<ApiUserSettings | null> => {
@@ -1319,6 +1321,22 @@ function App() {
     analyzeChannel();
   };
 
+  useEffect(() => {
+    let interval: number | null = null;
+    if (isAnalyzing || isGeneratingPostDetails) {
+      setProgress(0);
+      interval = window.setInterval(() => {
+        setProgress(prev => (prev < 98 ? prev + Math.random() * 3 : prev));
+      }, 100);
+    } else if (!isAnalyzing && !isGeneratingPostDetails) {
+      setProgress(100);
+      setTimeout(() => setProgress(0), 500);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isAnalyzing, isGeneratingPostDetails]);
+
   // Компонент загрузки
   if (loading) {
     return (
@@ -1458,8 +1476,8 @@ function App() {
               )}
 
               {isAnalyzing && (
-                <div className="loading-indicator">
-                  <div className="loading-spinner"></div>
+                <div style={{ margin: '20px 0' }}>
+                  <ProgressBar progress={progress} />
                   <p>Анализируем канал...</p>
                 </div>
               )}
@@ -1670,6 +1688,13 @@ function App() {
                  <div className="loading-indicator small">
                     <div className="loading-spinner small"></div>
                     <p>Генерация деталей поста...</p>
+                </div>
+              )}
+
+              {isGeneratingPostDetails && (
+                <div style={{ margin: '20px 0' }}>
+                  <ProgressBar progress={progress} />
+                  <p>Генерация деталей поста...</p>
                 </div>
               )}
 
