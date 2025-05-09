@@ -1576,93 +1576,30 @@ function App() {
           {currentView === 'calendar' && (
             <div className="view calendar-view">
               <h2>Календарь публикаций</h2>
-              
-              {/* Фильтр по каналам (оставляем) */}
-              <div className="channels-filter">
-                <h3>Фильтр по каналам:</h3>
-                
-                {/* Компактная кнопка добавления/удаления канала в фильтр */}
-                <div className="channels-actions">
-                <button 
-                    className="action-button"
-                    onClick={() => {
-                      // Добавить текущий канал в фильтр, если его еще нет
-                      if (channelName && !selectedChannels.includes(channelName)) {
-                        const updatedSelected = [...selectedChannels, channelName];
-                        setSelectedChannels(updatedSelected);
-                        // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
-                        const key = getUserSpecificKey('selectedChannels', userId);
-                        if (key) {
-                          localStorage.setItem(key, JSON.stringify(updatedSelected));
-                        }
-                        // --- КОНЕЦ ИЗМЕНЕНИЯ ---
-                      }
-                    }}
-                  >
-                    + Добавить текущий канал
-                </button>
-                  
-                  <button
-                    className="action-button"
-                    onClick={filterPostsByChannels}
-                  >
-                    Применить фильтр
-                </button>
-          </div>
-                
-                {/* Отображение выбранных каналов */}
-                <div className="selected-channels">
-                  {selectedChannels.map((channel) => (
-                    <div key={channel} className="selected-channel">
-                      <span className="channel-name">@{channel}</span>
-                      <button 
-                        className="remove-channel"
-                        onClick={() => {
-                          const updatedSelected = selectedChannels.filter(c => c !== channel);
-                          setSelectedChannels(updatedSelected);
-                          // --- ИЗМЕНЕНИЕ: Сохраняем selectedChannels с user-specific ключом ---
-                          const key = getUserSpecificKey('selectedChannels', userId);
-                          if (key) {
-                             localStorage.setItem(key, JSON.stringify(updatedSelected));
-                          }
-                          // --- КОНЕЦ ИЗМЕНЕНИЯ ---
-                        }}
-                      >
-                        ✕
-                      </button>
-      </div>
-                  ))}
-      </div>
-              </div>
-              
               {/* Календарь - ВОССТАНОВЛЕННЫЙ КОД */}
               <div className="calendar-container">
                 {/* Заголовок с названием месяца и навигацией */}
                 <div className="calendar-header">
                   <button 
                     className="nav-button"
-                    onClick={goToPrevMonth} // Используем восстановленную функцию
+                    onClick={goToPrevMonth}
                   >
                     &lt;
                   </button>
-                  
                   <h3>{currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}</h3>
-                  
                   <button 
                     className="nav-button"
-                    onClick={goToNextMonth} // Используем восстановленную функцию
+                    onClick={goToNextMonth}
                   >
                     &gt;
                   </button>
                 </div>
-                
                 {/* Дни недели */}
                 <div className="weekdays">
                   {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day) => (
                     <div key={day} className="weekday">{day}</div>
                   ))}
                 </div>
-                
                 {/* Дни календаря */}
                 <div className="calendar-grid">
                   {calendarDays.map((day, index) => (
