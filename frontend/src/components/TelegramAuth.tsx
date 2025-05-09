@@ -20,13 +20,10 @@ export const TelegramAuth: React.FC<TelegramAuthProps> = ({ onAuthSuccess }) => 
         console.log('Получены данные пользователя:', userData);
         const userId = String(userData.id);
         console.log('Используем реальный Telegram ID пользователя:', userId);
-    
-    // Задержка для стабильности
-    setTimeout(() => {
-      setLoading(false);
+        setTimeout(() => {
+          setLoading(false);
           onAuthSuccess(userId);
         }, 100);
-    
       } else {
         console.error('Данные пользователя Telegram не найдены. Приложение должно быть запущено внутри Telegram.');
         setError('Не удалось получить данные пользователя. Пожалуйста, убедитесь, что приложение запущено в Telegram.');
