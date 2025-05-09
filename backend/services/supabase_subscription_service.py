@@ -36,6 +36,7 @@ class SupabaseSubscriptionService:
                 "user_id": user_id,
                 "analysis_count": 0,
                 "post_generation_count": 0,
+                "ideas_generation_count": 0,
                 "reset_at": next_reset.isoformat(),
                 "created_at": now.isoformat(),
                 "updated_at": now.isoformat()
@@ -201,6 +202,7 @@ class SupabaseSubscriptionService:
             "user_id": user_id,
             "analysis_count": 0,
             "post_generation_count": 0,
+            "ideas_generation_count": 0,
             "reset_at": next_reset.isoformat(),
             "updated_at": now.isoformat()
         }
