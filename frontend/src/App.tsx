@@ -12,15 +12,18 @@ import { getUserSettings, saveUserSettings } from './api/userSettings';
 // Определяем базовый URL API
 const API_BASE_URL = '';
 
-// --- ИЗМЕНЕНО: Убираем функцию для localStorage, так как теперь используем API ---
-// const getUserSpecificKey = (baseKey: string, userId: string | null): string | null => {
-//   if (!userId) return null; // Не работаем с localStorage без ID пользователя
-//   return `${userId}_${baseKey}`;
-// };
-
-// --- ДОПОЛНИТЕЛЬНЫЕ ФУНКЦИИ И ТИПЫ ОСТАЮТСЯ БЕЗ ИЗМЕНЕНИЙ ---
-
-// Оставляем остальной код без изменений
+// Определяем интерфейс для сохраненных постов
+interface SavedPost {
+  id: string;
+  target_date: string;
+  topic_idea: string;
+  format_style: string;
+  final_text: string;
+  image_url?: string;
+  channel_name?: string;
+  created_at: string;
+  updated_at: string;
+}
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -37,6 +40,41 @@ function App() {
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
   const [allChannels, setAllChannels] = useState<string[]>([]);
   const [filteredPosts, setFilteredPosts] = useState<SavedPost[]>([]);
+
+  // Функция для загрузки сохраненных постов
+  const fetchSavedPosts = async () => {
+    if (!isAuthenticated || !userId) return;
+    try {
+      setLoadingSavedPosts(true);
+      const response = await axios.get(`${API_BASE_URL}/posts`);
+      if (response.data && Array.isArray(response.data)) {
+        setSavedPosts(response.data);
+        // Обновляем список каналов на основе полученных постов
+        updateChannelsFromPosts(response.data);
+      }
+    } catch (error) {
+      console.error('Ошибка при загрузке постов:', error);
+    } finally {
+      setLoadingSavedPosts(false);
+    }
+  };
+
+  // Функция для загрузки сохраненного анализа канала
+  const fetchSavedAnalysis = async (channelName: string) => {
+    if (!isAuthenticated || !userId || !channelName) return;
+    try {
+      setLoadingAnalysis(true);
+      const response = await axios.get(`${API_BASE_URL}/channel-analysis?channel_name=${encodeURIComponent(channelName)}`);
+      if (response.data) {
+        setSavedAnalysis(response.data);
+      }
+    } catch (error) {
+      console.error('Ошибка при загрузке анализа канала:', error);
+      setSavedAnalysis(null);
+    } finally {
+      setLoadingAnalysis(false);
+    }
+  };
 
   // --- МОДИФИЦИРОВАНО: Добавляем эффект для загрузки настроек пользователя с API ---
   useEffect(() => {
@@ -74,38 +112,38 @@ function App() {
           // Если не удалось загрузить настройки с сервера, используем локальные данные (временное решение)
           // Это будет удалено после полного перехода на API
           const channelKey = `${userId}_channelName`;
-        const storedChannel = localStorage.getItem(channelKey);
-    if (storedChannel) {
-      setChannelName(storedChannel);
-    }
+          const storedChannel = localStorage.getItem(channelKey);
+          if (storedChannel) {
+            setChannelName(storedChannel);
+          }
     
           const selectedChannelsKey = `${userId}_selectedChannels`;
-        const storedSelectedChannels = localStorage.getItem(selectedChannelsKey);
-    if (storedSelectedChannels) {
-      try {
-        setSelectedChannels(JSON.parse(storedSelectedChannels));
-    } catch (e) {
-        console.error('Ошибка при восстановлении выбранных каналов:', e);
-    }
-      }
+          const storedSelectedChannels = localStorage.getItem(selectedChannelsKey);
+          if (storedSelectedChannels) {
+            try {
+              setSelectedChannels(JSON.parse(storedSelectedChannels));
+            } catch (e) {
+              console.error('Ошибка при восстановлении выбранных каналов:', e);
+            }
+          }
 
           const allChannelsKey = `${userId}_allChannels`;
-        const storedChannels = localStorage.getItem(allChannelsKey);
-      if (storedChannels) {
-        try {
-          setAllChannels(JSON.parse(storedChannels));
-        } catch (e) {
-          console.error('Ошибка при восстановлении списка каналов:', e);
-        }
-      }
+          const storedChannels = localStorage.getItem(allChannelsKey);
+          if (storedChannels) {
+            try {
+              setAllChannels(JSON.parse(storedChannels));
+            } catch (e) {
+              console.error('Ошибка при восстановлении списка каналов:', e);
+            }
+          }
       
           // Загружаем сохраненные посты
-      fetchSavedPosts();
+          fetchSavedPosts();
 
           // Загрузка сохраненного анализа для текущего выбранного канала
           if (channelName) {
-        fetchSavedAnalysis(channelName);
-    }
+            fetchSavedAnalysis(channelName);
+          }
         }
       };
       
@@ -200,7 +238,7 @@ function App() {
   // Обновление списка каналов на основе полученных постов
   const updateChannelsFromPosts = (posts: SavedPost[]) => {
     if (!posts.length) return;
-    const channels = Array.from(new Set(posts.map(post => post.channel_name)));
+    const channels = Array.from(new Set(posts.map(post => post.channel_name))).filter(Boolean) as string[];
     setAllChannels(prevChannels => {
       const updatedChannels = [...new Set([...prevChannels, ...channels])];
       
@@ -224,54 +262,13 @@ function App() {
     });
   };
 
-  // ... остальные функции приложения
-
-  // Места где используется кнопка добавления канала в фильтр
-  // Например, внутри JSX:
-  // <button 
-  //   className="action-button"
-  //   onClick={() => {
-  //     if (channelName && !selectedChannels.includes(channelName)) {
-  //       const updatedSelected = [...selectedChannels, channelName];
-  //       setSelectedChannels(updatedSelected);
-  //       
-  //       // --- ИЗМЕНЕНО: Сохраняем через API вместо localStorage ---
-  //       if (userId) {
-  //         saveUserSettings({
-  //           channelName,
-  //           selectedChannels: updatedSelected,
-  //           allChannels
-  //         }).catch(err => {
-  //           console.error('[App] Ошибка при сохранении выбранных каналов:', err);
-  //         });
-  //       }
-  //     }
-  //   }}
-  // >
-  //   + Добавить текущий канал
-  // </button>
-  //
-  // И кнопка удаления канала из фильтра:
-  // <button 
-  //   className="remove-channel"
-  //   onClick={() => {
-  //     const updatedSelected = selectedChannels.filter(c => c !== channel);
-  //     setSelectedChannels(updatedSelected);
-  //     
-  //     // --- ИЗМЕНЕНО: Сохраняем через API вместо localStorage ---
-  //     if (userId) {
-  //       saveUserSettings({
-  //         channelName,
-  //         selectedChannels: updatedSelected,
-  //         allChannels
-  //       }).catch(err => {
-  //         console.error('[App] Ошибка при сохранении выбранных каналов:', err);
-  //       });
-  //     }
-  //   }}
-  // >
-  //   ✕
-  // </button>
-
-  // ... остальной код компонента App
+  // Заглушка для рендера компонента
+  return (
+    <div className="app">
+      {/* Содержимое компонента App */}
+    </div>
+  );
 }
+
+// Добавляем export default для компонента App
+export default App;
