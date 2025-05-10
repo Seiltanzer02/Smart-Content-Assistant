@@ -338,10 +338,10 @@ async def delete_post(post_id: str, request: Request):
         raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера при удалении поста: {str(e)}")
 
 async def generate_post_details(request: Request, req):
-    from backend.main import generate_image_keywords, search_unsplash_images, get_channel_analysis, IMAGE_RESULTS_COUNT, PostImage
+    import traceback
+    from backend.main import generate_image_keywords, search_unsplash_images, get_channel_analysis, IMAGE_RESULTS_COUNT, PostImage, OPENROUTER_API_KEY, logger
     from openai import AsyncOpenAI
     found_images = []
-    channel_name = req.channel_name if hasattr(req, 'channel_name') else ""
     api_error_message = None
     try:
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
@@ -354,10 +354,11 @@ async def generate_post_details(request: Request, req):
         if not telegram_user_id:
             logger.warning("Запрос генерации поста без идентификации пользователя Telegram")
             raise HTTPException(status_code=401, detail="Для генерации постов необходимо авторизоваться через Telegram")
-        topic_idea = req.topic_idea
-        format_style = req.format_style
-        post_samples = []
-        if channel_name:
+        topic_idea = req.get("topic_idea")
+        format_style = req.get("format_style")
+        channel_name = req.get("channel_name", "")
+        post_samples = req.get("post_samples") or []
+        if not post_samples and channel_name:
             try:
                 channel_data = await get_channel_analysis(request, channel_name)
                 if channel_data and "analyzed_posts_sample" in channel_data:
@@ -365,12 +366,11 @@ async def generate_post_details(request: Request, req):
                     logger.info(f"Получено {len(post_samples)} примеров постов для канала @{channel_name}")
             except Exception as e:
                 logger.warning(f"Не удалось получить примеры постов для канала @{channel_name}: {e}")
-        from backend.main import OPENROUTER_API_KEY
         if not OPENROUTER_API_KEY:
             logger.warning("Генерация деталей поста невозможна: отсутствует OPENROUTER_API_KEY")
             raise HTTPException(status_code=503, detail="API для генерации текста недоступен")
         system_prompt = """Ты - опытный контент-маркетолог для Telegram-каналов.\nТвоя задача - сгенерировать текст поста на основе идеи и формата, который будет готов к публикации.\n\nПост должен быть:\n1. Хорошо структурированным и легко читаемым\n2. Соответствовать указанной теме/идее\n3. Соответствовать указанному формату/стилю\n4. Иметь правильное форматирование для Telegram (если нужно - с эмодзи, абзацами, списками)\n\nНе используй хэштеги, если это не является частью формата.\nСделай пост уникальным и интересным, учитывая специфику Telegram-аудитории.\nИспользуй примеры постов канала, если они предоставлены, чтобы сохранить стиль."""
-        user_prompt = f"""Создай пост для Telegram-канала "@{channel_name}" на тему:\n"{topic_idea}"\n\nФормат поста: {format_style}\n\nНапиши полный текст поста, который будет готов к публикации.\n"""
+        user_prompt = f"""Создай пост для Telegram-канала \"@{channel_name}\" на тему:\n\"{topic_idea}\"\n\nФормат поста: {format_style}\n\nНапиши полный текст поста, который будет готов к публикации.\n"""
         if post_samples:
             sample_text = "\n\n".join(post_samples[:3])
             user_prompt += f"""\n\nВот несколько примеров постов из этого канала для сохранения стиля:\n\n{sample_text}\n"""
@@ -442,7 +442,7 @@ async def generate_post_details(request: Request, req):
             response_message = f"Ошибка генерации текста: {api_error_message}. Изображений найдено: {len(found_images[:IMAGE_RESULTS_COUNT])}"
         return {
             "generated_text": post_text,
-            "found_images": found_images[:IMAGE_RESULTS_COUNT],
+            "found_images": [img.dict() if hasattr(img, 'dict') else img for img in found_images[:IMAGE_RESULTS_COUNT]],
             "message": response_message,
             "channel_name": channel_name,
             "selected_image_data": {
@@ -454,8 +454,6 @@ async def generate_post_details(request: Request, req):
                 "author_url": found_images[0].author_url if found_images else ""
             } if found_images else None
         }
-    except HTTPException as http_err:
-        raise http_err
     except Exception as e:
         logger.error(f"Ошибка при генерации деталей поста: {e}")
         traceback.print_exc()
