@@ -21,6 +21,8 @@ from telethon.errors import (
     ChannelPrivateError, ChannelInvalidError, 
     AuthKeyError, FloodWaitError, ApiIdInvalidError
 )
+import httpx
+from bs4 import BeautifulSoup
 
 # --- ПЕРЕМЕЩАЕМ Логгирование В НАЧАЛО --- 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -191,4 +193,42 @@ def get_mock_telegram_posts(username: str) -> List[Dict[str, Any]]:
             "text": "Пример поста 3 с более длинным текстом. Здесь может быть полезная информация, ссылки и т.д. Это демонстрационные данные.",
             "date": "2023-01-03T18:45:00"
         }
-    ] 
+    ]
+
+# --- Функция для получения постов Telegram через HTTP парсинг ---
+async def get_telegram_posts_via_http(username: str) -> List[str]:
+    """Получение постов канала Telegram через HTTP парсинг."""
+    try:
+        url = f"https://t.me/s/{username}"
+        logger.info(f"Запрос HTTP парсинга для канала @{username}: {url}")
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url)
+            
+        if response.status_code != 200:
+            logger.warning(f"HTTP статус-код для @{username}: {response.status_code}")
+            return []
+            
+        # Используем BeautifulSoup для парсинга HTML
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Ищем блоки с сообщениями
+        message_blocks = soup.select('div.tgme_widget_message_bubble')
+        
+        if not message_blocks:
+            logger.warning(f"Не найдены блоки сообщений для @{username}")
+            return []
+            
+        # Извлекаем текст сообщений
+        posts = []
+        for block in message_blocks:
+            text_block = block.select_one('div.tgme_widget_message_text')
+            if text_block and text_block.text.strip():
+                posts.append(text_block.text.strip())
+        
+        logger.info(f"Найдено {len(posts)} постов через HTTP парсинг для @{username}")
+        return posts
+        
+    except Exception as e:
+        logger.error(f"Ошибка при HTTP парсинге канала @{username}: {e}")
+        raise 
