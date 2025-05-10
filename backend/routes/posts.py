@@ -54,8 +54,8 @@ async def update_post_router(post_id: str, request: Request, post_data: PostData
 async def delete_post_router(post_id: str, request: Request):
     return await delete_post(post_id, request)
 
-@router.post("/generate-post-details", response_model=PostDetailsResponse)
-async def generate_post_details_router(request: Request, req: GeneratePostDetailsRequest):
+@router.post("/generate-post-details", response_model=Dict[str, Any])
+async def generate_post_details_router(request: Request, req: Dict[str, Any]):
     return await generate_post_details(request, req)
 
 @router.post("/save-image", response_model=Dict[str, Any])
