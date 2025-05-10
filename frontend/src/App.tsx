@@ -1058,19 +1058,21 @@ function App() {
     // setLoading(false); // Управление loading теперь в useEffect [isAuthenticated, userId]
   };
 
-  // Функция для анализа канала
-  const analyzeChannel = async () => {
-    console.log("Клик по кнопке Анализировать");
+  // Функция для анализа канала теперь принимает имя канала как аргумент
+  const analyzeChannel = async (inputChannel?: string) => {
+    const channelToAnalyze = inputChannel !== undefined ? normalizeChannelName(inputChannel) : normalizeChannelName(channelInput);
+    console.log("Клик по кнопке Анализировать", channelToAnalyze);
     if (!userId) {
       console.error("userId не определён!");
       setError("Ошибка авторизации: не найден userId");
       return;
     }
-    if (!channelName) {
+    if (!channelToAnalyze) {
       console.error("channelName не заполнен!");
       setError("Введите имя канала");
       return;
     }
+    setChannelName(channelToAnalyze); // Обновляем выбранный канал
     setIsAnalyzing(true);
     setAnalysisLoadedFromDB(false);
     setError(null);
@@ -1090,8 +1092,8 @@ function App() {
         // Продолжаем выполнение, даже если инициализация не удалась
       }
       // Теперь выполняем анализ канала
-      console.log(`Отправляем запрос на анализ канала: ${channelName}, userId: ${userId}`);
-      const response = await axios.post('/analyze', { username: channelName }, {
+      console.log(`Отправляем запрос на анализ канала: ${channelToAnalyze}, userId: ${userId}`);
+      const response = await axios.post('/analyze', { username: channelToAnalyze }, {
         headers: { 'x-telegram-user-id': userId }
       });
       console.log('Получен ответ от сервера по анализу:', response.data);
@@ -1355,18 +1357,6 @@ function App() {
   }, [savedPosts]);
   // ... существующий код ...
 
-  // Добавляю функцию-обработчик для кнопки "Анализировать"
-  const handleAnalyzeClick = () => {
-    const normalized = normalizeChannelName(channelInput);
-    // Если канал не выбран или его нет в списке, просто выбираем канал (ищем)
-    if (!normalized || !allChannels.includes(normalized)) {
-      setChannelName(normalized);
-      return;
-    }
-    // Если канал уже выбран, запускаем анализ
-    analyzeChannel();
-  };
-
   useEffect(() => {
     let interval: number | null = null;
     if (isAnalyzing || isGeneratingPostDetails) {
@@ -1505,7 +1495,7 @@ function App() {
                   disabled={isAnalyzing}
                 />
                 <button 
-                  onClick={handleAnalyzeClick} 
+                  onClick={() => analyzeChannel(channelInput)} 
                   className="action-button"
                   disabled={isAnalyzing || !channelInput || analyzeLimitExceeded}
                 >
