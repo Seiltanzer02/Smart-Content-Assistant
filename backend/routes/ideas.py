@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 from services.supabase_subscription_service import SupabaseSubscriptionService
-from services.ideas_service import generate_content_plan, get_saved_ideas, save_suggested_idea, save_suggested_ideas_batch
+from backend.services.ideas_service import generate_content_plan, get_saved_ideas, save_suggested_idea, save_suggested_ideas_batch
 
 class PlanGenerationRequest(BaseModel):
     themes: List[str]

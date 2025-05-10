@@ -346,7 +346,7 @@ async def generate_post_details(request: Request, req):
     try:
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
         if telegram_user_id:
-            from services.supabase_subscription_service import SupabaseSubscriptionService
+            from backend.services.supabase_subscription_service import SupabaseSubscriptionService
             subscription_service = SupabaseSubscriptionService(supabase)
             can_generate = await subscription_service.can_generate_post(int(telegram_user_id))
             if not can_generate:
