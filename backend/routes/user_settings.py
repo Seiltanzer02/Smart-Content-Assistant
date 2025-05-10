@@ -7,15 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from supabase_py_async.lib.utils import APIError # Убедитесь, что этот импорт корректен
 
-# Попытка импортировать supabase и logger из родительского main.py
-# Это типично для такой структуры проекта.
-try:
-    from ..main import supabase, logger
-except ImportError:
-    # Резервный вариант, если ..main не работает (например, при запуске модуля напрямую)
-    # Это может потребовать корректировки в зависимости от того, как запускается приложение.
-    from main import supabase, logger
-
+# Импортируем supabase и logger из родительского main.py (backend/main.py)
+from ..main import supabase, logger
 
 router = APIRouter()
 
