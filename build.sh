@@ -102,8 +102,7 @@ python -m backend.move_temp_files
 
 # Запуск приложения
 echo "Запуск приложения..."
-# БЕЗ cd backend, запускаем из корневой директории проекта
-uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-10000}
+cd backend && uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000}
 EOF
 
 # Делаем скрипт исполняемым
