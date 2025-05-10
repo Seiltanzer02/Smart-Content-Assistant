@@ -55,7 +55,7 @@ class SupabaseSubscriptionService:
             usage = await self.get_user_usage(user_id)
             update_data = {
                 "analysis_count": usage.get("analysis_count", 0) + 1,
-                "updated_at": datetime.now().isoformat()
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }
             result = self.supabase.table("user_usage_stats").update(update_data).eq("user_id", user_id).execute()
             if result.data and len(result.data) > 0:
@@ -74,7 +74,7 @@ class SupabaseSubscriptionService:
             # Обновляем счетчик
             update_data = {
                 "post_generation_count": usage.get("post_generation_count", 0) + 1,
-                "updated_at": datetime.now().isoformat()
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }
             
             result = self.supabase.table("user_usage_stats").update(update_data).eq("user_id", user_id).execute()
@@ -115,7 +115,7 @@ class SupabaseSubscriptionService:
                         end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
                     else:
                         end_date = datetime.fromisoformat(end_date_str)
-                    # === ИСПРАВЛЕНИЕ: всегда сравниваем с datetime.now(timezone.utc) ===
+                    
                     now_utc = datetime.now(timezone.utc)
                     if end_date.tzinfo is None:
                         end_date = end_date.replace(tzinfo=timezone.utc)
@@ -136,7 +136,7 @@ class SupabaseSubscriptionService:
     async def create_subscription(self, user_id: int, payment_id: str = None) -> Dict[str, Any]:
         """Создает новую подписку."""
         try:
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             end_date = now + relativedelta(months=SUBSCRIPTION_DURATION_MONTHS)
             
             subscription_data = {
@@ -232,7 +232,7 @@ class SupabaseSubscriptionService:
                     reset_at = datetime.fromisoformat(reset_at_str)
                     
                 # Проверяем, нужно ли сбросить счетчики
-                if datetime.now() >= reset_at:
+                if datetime.now(timezone.utc) >= reset_at:
                     # Сбрасываем счетчики и устанавливаем новую дату сброса
                     return await self.reset_usage_counters(user_id)
             except Exception as date_error:
@@ -259,7 +259,7 @@ class SupabaseSubscriptionService:
             usage = await self.get_user_usage(user_id)
             update_data = {
                 "ideas_generation_count": usage.get("ideas_generation_count", 0) + 1,
-                "updated_at": datetime.now().isoformat()
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }
             result = self.supabase.table("user_usage_stats").update(update_data).eq("user_id", user_id).execute()
             if result.data and len(result.data) > 0:
