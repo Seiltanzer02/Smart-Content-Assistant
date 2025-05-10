@@ -208,7 +208,7 @@ app.add_middleware(
 )
 
 # --- Подключение роутеров ---
-from .routes import user_limits, analysis, ideas, posts, user_settings
+from backend.routes import user_limits, analysis, ideas, posts, user_settings
 
 app.include_router(user_limits.router)
 app.include_router(analysis.router)
