@@ -4322,3 +4322,15 @@ async def update_user_settings(
 # Например, до @app.get("/{rest_of_path:path}")
 # ... existing code ...
 
+from backend.routes import user_limits
+app.include_router(user_limits.router)
+
+from backend.routes import analysis
+app.include_router(analysis.router)
+
+from backend.routes import ideas
+app.include_router(ideas.router)
+
+from backend.routes import posts
+app.include_router(posts.router)
+
