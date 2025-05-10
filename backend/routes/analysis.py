@@ -4,7 +4,7 @@ from typing import Dict, Any
 from services.supabase_subscription_service import SupabaseSubscriptionService
 from backend.main import supabase, logger, OPENROUTER_API_KEY
 from backend.telegram_utils import get_telegram_posts, get_telegram_posts_via_http, get_sample_posts
-from backend.main import analyze_content_with_deepseek
+from backend.deepseek_utils import analyze_content_with_deepseek
 from datetime import datetime
 from pydantic import BaseModel
 from typing import List, Optional
