@@ -275,15 +275,18 @@ class SupabaseSubscriptionService:
             # Парсим дату сброса
             try:
                 reset_at = datetime.fromisoformat(reset_at_str)
+                # Проверяем наличие информации о часовом поясе
                 if reset_at.tzinfo is None:
-                    # Если после парсинга дата оказалась наивной (без часового пояса),
-                    # считаем, что это UTC, как и другие даты в системе.
+                    logger.info(f"Дата сброса не содержит информации о часовом поясе, добавляем UTC: {reset_at_str}")
                     reset_at = reset_at.replace(tzinfo=timezone.utc)
-                    
+                now = datetime.now(timezone.utc)
+                logger.info(f"Сравниваем даты: now={now.isoformat()}, reset_at={reset_at.isoformat()}")
                 # Проверяем, нужно ли сбросить счетчики
-                if datetime.now(timezone.utc) >= reset_at:
-                    # Сбрасываем счетчики и устанавливаем новую дату сброса
+                if now >= reset_at:
+                    logger.info(f"Срок сброса счетчиков наступил для пользователя {user_id}")
                     return await self.reset_usage_counters(user_id)
+                else:
+                    logger.info(f"Счетчики еще актуальны для пользователя {user_id}")
             except Exception as date_error:
                 logger.error(f"Ошибка при парсинге или сравнении даты сброса счетчиков '{reset_at_str}': {date_error}", exc_info=True)
                 # В случае ошибки парсинга, сбрасываем счетчики
