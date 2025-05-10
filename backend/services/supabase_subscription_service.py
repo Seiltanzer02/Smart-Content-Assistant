@@ -26,12 +26,23 @@ class SupabaseSubscriptionService:
                 usage_data = result.data[0]
                 reset_at_str = usage_data.get("reset_at")
                 if reset_at_str:
-                    reset_at = datetime.fromisoformat(reset_at_str)
-                    if reset_at.tzinfo is None:
-                        reset_at = reset_at.replace(tzinfo=timezone.utc)
-                    if now >= reset_at:
+                    try:
+                        # fromisoformat для строк в формате ISO 8601
+                        reset_at = datetime.fromisoformat(reset_at_str)
+                        # Убедимся, что у даты есть информация о часовом поясе
+                        if reset_at.tzinfo is None:
+                            reset_at = reset_at.replace(tzinfo=timezone.utc)
+                        
+                        # Теперь обе даты имеют часовой пояс и можно безопасно сравнивать
+                        if now >= reset_at:
+                            logger.info(f"Сбрасываем счетчики для пользователя {user_id}, т.к. now ({now.isoformat()}) >= reset_at ({reset_at.isoformat()})")
+                            return await self.reset_usage_counters(user_id)
+                    except Exception as date_error:
+                        logger.error(f"Ошибка при парсинге даты сброса счетчиков '{reset_at_str}': {date_error}", exc_info=True)
                         return await self.reset_usage_counters(user_id)
+                
                 return usage_data
+            
             # Если записи нет — создаём с reset_at через 14 дней
             next_reset = now + timedelta(days=RESET_PERIOD_DAYS)
             new_record = {
@@ -43,10 +54,11 @@ class SupabaseSubscriptionService:
                 "created_at": now.isoformat(),
                 "updated_at": now.isoformat()
             }
+            logger.info(f"Создаем новую запись лимитов для пользователя {user_id} с reset_at={next_reset.isoformat()}")
             self.supabase.table("user_usage_stats").insert(new_record).execute()
             return new_record
         except Exception as e:
-            logger.error(f"Ошибка при получении статистики использования: {e}")
+            logger.error(f"Ошибка при получении статистики использования для user_id {user_id}: {e}", exc_info=True)
             return {"user_id": user_id, "analysis_count": 0, "post_generation_count": 0}
     
     async def increment_analysis_usage(self, user_id: int) -> Dict[str, Any]:
@@ -110,27 +122,26 @@ class SupabaseSubscriptionService:
             # Проверяем дату окончания, если она указана
             if end_date_str:
                 try:
-                    # Парсим дату окончания
-                    if 'Z' in end_date_str:
-                        end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
-                    else:
-                        end_date = datetime.fromisoformat(end_date_str)
+                    # Парсим дату окончания используя datetime.fromisoformat
+                    end_date = datetime.fromisoformat(end_date_str)
                     
-                    now_utc = datetime.now(timezone.utc)
+                    # Убеждаемся, что дата имеет информацию о часовом поясе
                     if end_date.tzinfo is None:
                         end_date = end_date.replace(tzinfo=timezone.utc)
+                    
+                    now_utc = datetime.now(timezone.utc)
                     if end_date <= now_utc:
                         # Подписка истекла, деактивируем её
                         self.supabase.table("user_subscription").update({"is_active": False}).eq("id", subscription.get("id")).execute()
-                        logger.info(f"Деактивирована истекшая подписка пользователя {user_id}")
+                        logger.info(f"Деактивирована истекшая подписка пользователя {user_id}, end_date={end_date.isoformat()}, now={now_utc.isoformat()}")
                         return None
                 except Exception as date_error:
-                    logger.error(f"Ошибка при парсинге даты окончания подписки: {date_error}")
+                    logger.error(f"Ошибка при парсинге даты окончания подписки '{end_date_str}': {date_error}", exc_info=True)
             
             return subscription
             
         except Exception as e:
-            logger.error(f"Ошибка при получении подписки: {e}")
+            logger.error(f"Ошибка при получении подписки для user_id {user_id}: {e}", exc_info=True)
             return None
     
     async def create_subscription(self, user_id: int, payment_id: str = None) -> Dict[str, Any]:
