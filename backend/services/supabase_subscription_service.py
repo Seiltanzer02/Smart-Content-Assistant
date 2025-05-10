@@ -226,17 +226,18 @@ class SupabaseSubscriptionService:
             
             # Парсим дату сброса
             try:
-                if 'Z' in reset_at_str:
-                    reset_at = datetime.fromisoformat(reset_at_str.replace('Z', '+00:00'))
-                else:
-                    reset_at = datetime.fromisoformat(reset_at_str)
+                reset_at = datetime.fromisoformat(reset_at_str)
+                if reset_at.tzinfo is None:
+                    # Если после парсинга дата оказалась наивной (без часового пояса),
+                    # считаем, что это UTC, как и другие даты в системе.
+                    reset_at = reset_at.replace(tzinfo=timezone.utc)
                     
                 # Проверяем, нужно ли сбросить счетчики
                 if datetime.now(timezone.utc) >= reset_at:
                     # Сбрасываем счетчики и устанавливаем новую дату сброса
                     return await self.reset_usage_counters(user_id)
             except Exception as date_error:
-                logger.error(f"Ошибка при парсинге даты сброса счетчиков: {date_error}")
+                logger.error(f"Ошибка при парсинге или сравнении даты сброса счетчиков '{reset_at_str}': {date_error}", exc_info=True)
                 # В случае ошибки парсинга, сбрасываем счетчики
                 return await self.reset_usage_counters(user_id)
             
@@ -244,7 +245,7 @@ class SupabaseSubscriptionService:
             return usage
             
         except Exception as e:
-            logger.error(f"Ошибка при проверке сброса счетчиков использования: {e}")
+            logger.error(f"Ошибка при проверке сброса счетчиков использования для user_id {user_id}: {e}", exc_info=True)
             return {"user_id": user_id, "analysis_count": 0, "post_generation_count": 0}
     
     async def can_generate_idea(self, user_id: int) -> bool:
