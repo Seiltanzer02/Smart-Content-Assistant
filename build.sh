@@ -34,6 +34,10 @@ echo "Подготовка каталогов Python..."
 [ -d backend/migrations ] || mkdir -p backend/migrations
 [ -f backend/migrations/__init__.py ] || echo "# Python package" > backend/migrations/__init__.py
 
+# Создаем директорию routes и __init__.py если их нет
+[ -d backend/routes ] || mkdir -p backend/routes
+[ -f backend/routes/__init__.py ] || echo "# Python package" > backend/routes/__init__.py
+
 # Создаем директорию services и __init__.py если их нет
 [ -d backend/services ] || mkdir -p backend/services
 [ -f backend/services/__init__.py ] || echo '"""Services package for Smart Content Assistant"""' > backend/services/__init__.py
@@ -102,7 +106,7 @@ python -m backend.move_temp_files
 
 # Запуск приложения
 echo "Запуск приложения..."
-cd backend && uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000}
+uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-10000}
 EOF
 
 # Делаем скрипт исполняемым

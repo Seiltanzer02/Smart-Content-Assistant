@@ -23,4 +23,4 @@ python -m backend.move_temp_files
 
 # Запуск приложения
 echo "Запуск приложения..."
-cd backend && uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000} 
+uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-10000} 
