@@ -208,12 +208,13 @@ app.add_middleware(
 )
 
 # --- Подключение роутеров ---
-from routes import user_limits, analysis, ideas, posts
+from backend.routes import user_limits, analysis, ideas, posts, user_settings
 
 app.include_router(user_limits.router)
 app.include_router(analysis.router)
 app.include_router(ideas.router)
 app.include_router(posts.router)
+app.include_router(user_settings.router, prefix="/api/user", tags=["User Settings"])
 # --- Конец подключения роутеров ---
 
 # --- ВАЖНО: API-эндпоинты для проверки подписки ПЕРЕД SPA-маршрутами ---
