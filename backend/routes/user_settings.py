@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 # Импортируем supabase и logger из родительского main.py (backend/main.py)
 from ..main import supabase, logger
+from backend.main import get_user_settings as main_get_user_settings, update_user_settings as main_update_user_settings
 
 router = APIRouter()
 
@@ -46,84 +47,10 @@ async def get_telegram_user_id_from_request(request: Request) -> int:
 # === API ЭНДПОИНТЫ ДЛЯ USER_SETTINGS ===
 
 @router.get("/settings", response_model=Optional[UserSettingsResponse])
-async def get_user_settings(
-    request: Request,
-    user_id: int = Depends(get_telegram_user_id_from_request)
-):
-    """
-    Получение пользовательских настроек.
-    """
-    if not supabase:
-        logger.error("Supabase клиент не инициализирован при получении настроек пользователя")
-        raise HTTPException(status_code=503, detail="База данных недоступна")
-
-    try:
-        response = await asyncio.to_thread(
-            supabase.table("user_settings")
-            .select("*")
-            .eq("user_id", user_id)
-            .maybe_single()
-            .execute
-        )
-        if response and response.data:
-            return UserSettingsResponse(**response.data)
-        return None # Возвращаем None если настроек нет, фронтенд обработает
-    except Exception as e:
-        logger.error(f"Непредвиденная ошибка при получении настроек пользователя {user_id}: {e}")
-        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
+async def get_user_settings_router(request: Request):
+    return await main_get_user_settings(request)
 
 @router.put("/settings", response_model=UserSettingsResponse)
-async def update_user_settings(
-    settings_data: UserSettingsCreate,
-    request: Request,
-    user_id: int = Depends(get_telegram_user_id_from_request)
-):
-    """
-    Обновление или создание пользовательских настроек.
-    """
-    if not supabase:
-        logger.error("Supabase клиент не инициализирован при обновлении настроек пользователя")
-        raise HTTPException(status_code=503, detail="База данных недоступна")
-
-    now = datetime.now(timezone.utc)
-    
-    data_to_save = settings_data.model_dump() if hasattr(settings_data, 'model_dump') else settings_data.dict()
-    data_to_save["user_id"] = user_id
-    data_to_save["updated_at"] = now.isoformat() # Сохраняем в ISO формате
-
-    try:
-        existing_settings_response = await asyncio.to_thread(
-            supabase.table("user_settings")
-            .select("id") 
-            .eq("user_id", user_id)
-            .maybe_single()
-            .execute
-        )
-
-        if existing_settings_response and existing_settings_response.data:
-            response = await asyncio.to_thread(
-                supabase.table("user_settings")
-                .update(data_to_save)
-                .eq("user_id", user_id)
-                .execute
-            )
-        else:
-            data_to_save["created_at"] = now.isoformat() # Сохраняем в ISO формате
-            response = await asyncio.to_thread(
-                supabase.table("user_settings")
-                .insert(data_to_save)
-                .execute
-            )
-        
-        if response and response.data:
-            return UserSettingsResponse(**response.data[0])
-        else:
-            logger.error(f"Ошибка при сохранении настроек пользователя {user_id}: ответ Supabase не содержит данных. Response: {response}")
-            raise HTTPException(status_code=500, detail="Не удалось сохранить настройки пользователя")
-
-    except Exception as e:
-        logger.error(f"Непредвиденная ошибка при сохранении настроек пользователя {user_id}: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
+async def update_user_settings_router(settings_data: UserSettingsCreate, request: Request):
+    return await main_update_user_settings(settings_data, request)
 # === КОНЕЦ API ЭНДПОИНТОВ USER_SETTINGS === 

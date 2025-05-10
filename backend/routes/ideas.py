@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 from services.supabase_subscription_service import SupabaseSubscriptionService
-from backend.main import supabase, logger
+from backend.main import supabase, logger, generate_content_plan, get_saved_ideas, save_suggested_idea, save_suggested_ideas_batch
 
 class PlanGenerationRequest(BaseModel):
     themes: List[str]
@@ -31,21 +31,17 @@ class SaveIdeasRequest(BaseModel):
 router = APIRouter()
 
 @router.post("/generate-plan", response_model=PlanGenerationResponse)
-async def generate_content_plan(request: Request, req: PlanGenerationRequest):
-    # Заглушка для генерации плана
-    return PlanGenerationResponse(plan=[], message="План сгенерирован (заглушка)")
+async def generate_content_plan_router(request: Request, req: PlanGenerationRequest):
+    return await generate_content_plan(request, req)
 
 @router.get("/ideas", response_model=SuggestedIdeasResponse)
-async def get_saved_ideas(request: Request, channel_name: Optional[str] = None):
-    # Заглушка для получения идей
-    return SuggestedIdeasResponse(ideas=[], message="Идеи получены (заглушка)")
+async def get_saved_ideas_router(request: Request, channel_name: Optional[str] = None):
+    return await get_saved_ideas(request, channel_name)
 
 @router.post("/save-suggested-idea", response_model=Dict[str, Any])
-async def save_suggested_idea(idea_data: Dict[str, Any], request: Request):
-    # Заглушка для сохранения одной идеи
-    return {"success": True, "message": "Идея сохранена (заглушка)"}
+async def save_suggested_idea_router(idea_data: Dict[str, Any], request: Request):
+    return await save_suggested_idea(idea_data, request)
 
 @router.post("/save-suggested-ideas", response_model=Dict[str, Any])
-async def save_suggested_ideas_batch(payload: SaveIdeasRequest, request: Request):
-    # Заглушка для пакетного сохранения идей
-    return {"success": True, "message": "Идеи сохранены (заглушка)"} 
+async def save_suggested_ideas_batch_router(payload: SaveIdeasRequest, request: Request):
+    return await save_suggested_ideas_batch(payload, request) 

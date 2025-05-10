@@ -39,7 +39,7 @@ import requests
 from bs4 import BeautifulSoup
 import telethon
 import aiohttp
-from backend.telegram_utils import get_telegram_posts, get_mock_telegram_posts
+from backend.telegram_utils import get_telegram_posts_via_telethon, get_telegram_posts_via_http, get_sample_posts
 import backend.move_temp_files
 from datetime import datetime, timedelta
 import traceback
@@ -883,117 +883,7 @@ class SavedPostResponse(PostData):
     updated_at: str = Field(..., description="Время последнего обновления поста")
 
 # --- Функция для получения постов Telegram через HTTP парсинг ---
-async def get_telegram_posts_via_http(username: str) -> List[str]:
-    """Получение постов канала Telegram через HTTP парсинг."""
-    try:
-        url = f"https://t.me/s/{username}"
-        logger.info(f"Запрос HTTP парсинга для канала @{username}: {url}")
-        
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(url)
-            
-        if response.status_code != 200:
-            logger.warning(f"HTTP статус-код для @{username}: {response.status_code}")
-            return []
-            
-        # Используем BeautifulSoup для парсинга HTML
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Ищем блоки с сообщениями
-        message_blocks = soup.select('div.tgme_widget_message_bubble')
-        
-        if not message_blocks:
-            logger.warning(f"Не найдены блоки сообщений для @{username}")
-            return []
-            
-        # Извлекаем текст сообщений
-        posts = []
-        for block in message_blocks:
-            text_block = block.select_one('div.tgme_widget_message_text')
-            if text_block and text_block.text.strip():
-                posts.append(text_block.text.strip())
-        
-        logger.info(f"Найдено {len(posts)} постов через HTTP парсинг для @{username}")
-        return posts
-        
-    except Exception as e:
-        logger.error(f"Ошибка при HTTP парсинге канала @{username}: {e}")
-        raise
-
-# --- Функция для получения примеров постов ---
-def get_sample_posts(channel_name: str) -> List[str]:
-    """Возвращает пример постов для демонстрации в случае, если не удалось получить реальные посты."""
-    # Базовые примеры постов
-    generic_posts = [
-        "Добрый день, уважаемые подписчики! Сегодня мы обсудим важную тему, которая касается каждого.",
-        "Представляем вам новый обзор актуальных событий. Оставляйте свои комментарии и делитесь мнением.",
-        "Интересный факт: знаете ли вы, что статистика показывает, что 90% людей...",
-        "В этом посте мы разберем самые популярные вопросы от наших подписчиков.",
-        "Подводим итоги недели: что важного произошло и что нас ждет впереди."
-    ]
-    
-    # Можно добавить специфичные примеры для разных каналов
-    tech_posts = [
-        "Новый iPhone уже в продаже. Первые впечатления и обзор характеристик.",
-        "Обзор последних изменений в Android. Что нас ждет в новой версии?",
-        "ИИ и его влияние на современное программирование: полезные инструменты для разработчиков.",
-        "Какой язык программирования выбрать в 2024 году? Обзор популярных технологий.",
-        "Новые инструменты для веб-разработки, которые стоит попробовать каждому."
-    ]
-    
-    business_posts = [
-        "5 стратегий, которые помогут вашему бизнесу выйти на новый уровень.",
-        "Как правильно инвестировать в 2024 году? Советы экспертов.",
-        "Тайм-менеджмент для руководителя: как все успевать и не выгорать.",
-        "Анализ рынка: главные тренды и прогнозы на ближайшее будущее.",
-        "История успеха: как небольшой стартап превратился в миллионный бизнес."
-    ]
-    
-    # Выбираем подходящий набор примеров в зависимости от имени канала
-    channel_lower = channel_name.lower()
-    if any(keyword in channel_lower for keyword in ["tech", "code", "programming", "dev", "it"]):
-        return tech_posts
-    elif any(keyword in channel_lower for keyword in ["business", "finance", "money", "startup"]):
-        return business_posts
-    else:
-        return generic_posts
-
-# --- Функция для сохранения результатов анализа в базу данных ---
-async def save_suggested_idea(idea_data: Dict[str, Any]) -> str:
-    """Сохраняет предложенную идею в базу данных."""
-    try:
-        if not supabase:
-            logger.error("Клиент Supabase не инициализирован")
-            return "Ошибка: Клиент Supabase не инициализирован"
-        
-        # Подготавливаем данные в соответствии со структурой таблицы suggested_ideas
-        idea_to_save = {
-            "id": str(uuid.uuid4()),  # Генерируем UUID
-            "channel_name": idea_data.get("channel_name", ""),
-            "user_id": idea_data.get("user_id"),
-            "topic_idea": idea_data.get("topic_idea", ""),
-            "format_style": idea_data.get("format_style", ""),
-            "relative_day": idea_data.get("day", 0),
-            "is_detailed": False  # Изначально идея не детализирована
-        }
-        
-        # Сохранение в Supabase
-        result = supabase.table("suggested_ideas").insert(idea_to_save).execute()
-        
-        # Проверка результата
-        if hasattr(result, 'data') and len(result.data) > 0:
-            logger.info(f"Успешно сохранена идея для канала {idea_data.get('channel_name')}")
-            return "success"
-        else:
-            logger.error(f"Ошибка при сохранении идеи: {result}")
-            return "error"
-            
-    except Exception as e:
-        logger.error(f"Ошибка при сохранении идеи: {e}")
-        return f"Ошибка: {str(e)}"
-
-# --- Функция для анализа контента с помощью DeepSeek ---
-# (перенесена в backend/deepseek_utils.py)
+# (перенесена в backend/telegram_utils.py)
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_channel(request: Request, req: AnalyzeRequest):
@@ -1038,7 +928,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
     if not posts:
         try:
             logger.info(f"Пытаемся получить посты канала @{username} через Telethon")
-            telethon_posts, telethon_error = get_telegram_posts(username)
+            telethon_posts, telethon_error = await get_telegram_posts_via_telethon(username)
             
             if telethon_error:
                 logger.warning(f"Ошибка Telethon для канала @{username}: {telethon_error}")
