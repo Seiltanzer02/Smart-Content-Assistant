@@ -37,7 +37,7 @@ import requests
 from bs4 import BeautifulSoup
 import telethon
 import aiohttp
-from telegram_utils import get_telegram_posts, get_mock_telegram_posts
+from backend.telegram_utils import get_telegram_posts, get_mock_telegram_posts
 import move_temp_files
 from datetime import datetime, timedelta
 import traceback
