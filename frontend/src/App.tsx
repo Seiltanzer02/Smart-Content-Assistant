@@ -1060,8 +1060,14 @@ function App() {
 
   // Функция для анализа канала
   const analyzeChannel = async () => {
-    const normalized = normalizeChannelName(channelInput);
-    if (!normalized) {
+    console.log("Клик по кнопке Анализировать");
+    if (!userId) {
+      console.error("userId не определён!");
+      setError("Ошибка авторизации: не найден userId");
+      return;
+    }
+    if (!channelName) {
+      console.error("channelName не заполнен!");
       setError("Введите имя канала");
       return;
     }
@@ -1083,49 +1089,21 @@ function App() {
         console.warn('Не удалось инициализировать лимиты пользователя:', initError);
         // Продолжаем выполнение, даже если инициализация не удалась
       }
-      
       // Теперь выполняем анализ канала
-      console.log(`Отправляем запрос на анализ канала: ${normalized}`);
-      const response = await axios.post('/analyze', { username: normalized }, {
+      console.log(`Отправляем запрос на анализ канала: ${channelName}, userId: ${userId}`);
+      const response = await axios.post('/analyze', { username: channelName }, {
         headers: { 'x-telegram-user-id': userId }
       });
-      
       console.log('Получен ответ от сервера по анализу:', response.data);
-      
       if (!response.data || !response.data.themes || !response.data.styles) {
         console.error('Некорректный формат данных от сервера:', response.data);
         throw new Error('Сервер вернул некорректные данные анализа');
       }
-      
       setAnalysisResult(response.data);
       setSuccess('Анализ успешно завершен');
-      if (!allChannels.includes(normalized)) {
-        const updatedChannels = [...allChannels, normalized];
-        setAllChannels(updatedChannels);
-        saveUserSettings({ allChannels: updatedChannels });
-      }
-      setChannelName(normalized);
-      setAnalysisLoadedFromDB(true);
     } catch (err) {
+      setError(err.response?.data?.detail || err.message || 'Ошибка при анализе канала');
       console.error('Ошибка при анализе:', err);
-      // Полное логирование ошибки для диагностики
-      if (err.response) {
-        console.error('Данные ответа:', err.response.data);
-        console.error('Статус ответа:', err.response.status);
-        console.error('Заголовки ответа:', err.response.headers);
-      } else if (err.request) {
-        console.error('Запрос был отправлен, но ответ не получен', err.request);
-      } else {
-        console.error('Ошибка при настройке запроса:', err.message);
-      }
-      
-      // Проверяем, является ли ошибка связанной с превышением лимита
-      if (err.response && err.response.status === 403 && err.response.data?.error?.includes('лимит анализа')) {
-        setAnalyzeLimitExceeded(true);
-        toast.error(err.response.data.error);
-      } else {
-        setError(err.response?.data?.detail || err.response?.data?.error || err.message || 'Ошибка при анализе канала');
-      }
     } finally {
       setIsAnalyzing(false);
     }
