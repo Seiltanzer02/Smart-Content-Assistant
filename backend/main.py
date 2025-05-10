@@ -207,6 +207,15 @@ app.add_middleware(
     expose_headers=["X-Telegram-User-Id"]  # Позволяем читать этот заголовок
 )
 
+# --- Подключение роутеров ---
+from routes import user_limits, analysis, ideas, posts
+
+app.include_router(user_limits.router)
+app.include_router(analysis.router)
+app.include_router(ideas.router)
+app.include_router(posts.router)
+# --- Конец подключения роутеров ---
+
 # --- ВАЖНО: API-эндпоинты для проверки подписки ПЕРЕД SPA-маршрутами ---
 @app.get("/bot-style-premium-check/{user_id}", status_code=200)
 async def bot_style_premium_check(user_id: str, request: Request):
