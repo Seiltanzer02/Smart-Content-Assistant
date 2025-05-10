@@ -40,7 +40,7 @@ from bs4 import BeautifulSoup
 import telethon
 import aiohttp
 from backend.telegram_utils import get_telegram_posts, get_mock_telegram_posts
-import move_temp_files
+import backend.move_temp_files
 from datetime import datetime, timedelta
 import traceback
 
@@ -3106,7 +3106,7 @@ async def check_db_tables():
             return False
         # Автоматическое добавление недостающих столбцов
         try:
-            move_temp_files.add_missing_columns()
+            backend.move_temp_files.add_missing_columns()
             logger.info("Проверка и добавление недостающих столбцов выполнены.")
             
             # Явное добавление столбца updated_at в таблицу channel_analysis и обновление кэша схемы
