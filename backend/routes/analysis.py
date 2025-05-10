@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from typing import Dict, Any
 from services.supabase_subscription_service import SupabaseSubscriptionService
-from backend.main import supabase, logger, OPENROUTER_API_KEY, analyze_channel as main_analyze_channel
+from services.analysis_service import analyze_channel
 from backend.telegram_utils import get_telegram_posts, get_telegram_posts_via_http, get_sample_posts
 from backend.deepseek_utils import analyze_content_with_deepseek
 from datetime import datetime
@@ -25,4 +25,4 @@ router = APIRouter()
 
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_channel_router(request: Request, req: AnalyzeRequest):
-    return await main_analyze_channel(request, req) 
+    return await analyze_channel(request, req) 

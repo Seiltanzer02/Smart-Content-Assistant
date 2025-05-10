@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 # Импортируем supabase и logger из родительского main.py (backend/main.py)
 from ..main import supabase, logger
-from backend.main import get_user_settings as main_get_user_settings, update_user_settings as main_update_user_settings
+from services.user_settings_service import get_user_settings as main_get_user_settings, update_user_settings as main_update_user_settings
 
 router = APIRouter()
 

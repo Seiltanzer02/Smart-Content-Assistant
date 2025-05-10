@@ -3,7 +3,8 @@ from fastapi.responses import JSONResponse
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 from uuid import UUID
-from backend.main import get_posts, create_post, update_post, delete_post, generate_post_details, save_image, get_user_images, get_image_by_id, get_post_images, proxy_image
+from services.posts_service import get_posts, create_post, update_post, delete_post, generate_post_details
+from services.image_service import save_image, get_user_images, get_image_by_id, get_post_images, proxy_image
 
 class PostImage(BaseModel):
     url: str
