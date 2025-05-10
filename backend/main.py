@@ -1201,9 +1201,11 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                 
                 # Увеличиваем счетчик анализа для пользователя
                 try:
-                    logger.info(f"Увеличиваем счетчик анализа для пользователя {telegram_user_id}")
-                    await subscription_service.increment_analysis_usage(int(telegram_user_id))
-                    logger.info(f"Счетчик анализа успешно увеличен для пользователя {telegram_user_id}")
+                    has_subscription = await subscription_service.has_active_subscription(int(telegram_user_id))
+                    if not has_subscription:
+                        logger.info(f"Увеличиваем счетчик анализа для пользователя {telegram_user_id}")
+                        await subscription_service.increment_analysis_usage(int(telegram_user_id))
+                        logger.info(f"Счетчик анализа успешно увеличен для пользователя {telegram_user_id}")
                 except Exception as counter_error:
                     logger.error(f"Ошибка при увеличении счетчика анализа: {counter_error}")
                     # Продолжаем работу, даже если не удалось увеличить счетчик
