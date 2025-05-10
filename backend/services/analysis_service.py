@@ -95,6 +95,14 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                 supabase.table("channel_analysis").update(analysis_data).eq("user_id", telegram_user_id).eq("channel_name", username).execute()
             else:
                 supabase.table("channel_analysis").insert(analysis_data).execute()
+            # --- Обновляем allChannels в user_settings ---
+            user_settings_result = supabase.table("user_settings").select("allChannels").eq("user_id", telegram_user_id).maybe_single().execute()
+            all_channels = []
+            if hasattr(user_settings_result, 'data') and user_settings_result.data and user_settings_result.data.get("allChannels"):
+                all_channels = user_settings_result.data["allChannels"]
+            if username not in all_channels:
+                all_channels.append(username)
+                supabase.table("user_settings").update({"allChannels": all_channels, "updated_at": datetime.now().isoformat()}).eq("user_id", telegram_user_id).execute()
         except Exception as db_error:
             logger.error(f"Ошибка при сохранении результатов анализа в БД: {db_error}")
         # 6. Увеличиваем счетчик использования

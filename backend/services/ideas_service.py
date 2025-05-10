@@ -165,6 +165,8 @@ async def save_suggested_idea(idea_data: Dict[str, Any], request: Request):
         idea_to_save = idea_data.copy()
         idea_to_save["user_id"] = int(telegram_user_id)
         idea_to_save["id"] = str(uuid.uuid4())
+        if "day" in idea_to_save:
+            idea_to_save["relative_day"] = idea_to_save.pop("day")
         result = supabase.table("suggested_ideas").insert(idea_to_save).execute()
         if hasattr(result, 'data') and len(result.data) > 0:
             logger.info(f"Сохранена новая идея для пользователя {telegram_user_id}")
@@ -192,6 +194,8 @@ async def save_suggested_ideas_batch(payload, request: Request):
             idea_copy["id"] = str(uuid.uuid4())
             if payload.channel_name:
                 idea_copy["channel_name"] = payload.channel_name
+            if "day" in idea_copy:
+                idea_copy["relative_day"] = idea_copy.pop("day")
             ideas_to_save.append(idea_copy)
         result = supabase.table("suggested_ideas").insert(ideas_to_save).execute()
         if hasattr(result, 'data') and len(result.data) > 0:
