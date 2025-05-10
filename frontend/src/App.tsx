@@ -493,6 +493,16 @@ function App() {
   useEffect(() => {
     const loadData = async () => {
       if (isAuthenticated && userId) {
+        // === ДОБАВЛЕНО: инициализация лимитов пользователя ===
+        try {
+          await axios.post('/api/user/init-usage', {}, {
+            headers: { 'X-Telegram-User-Id': userId }
+          });
+        } catch (e) {
+          console.error('Ошибка инициализации лимитов пользователя:', e);
+          toast.error('Ошибка инициализации лимитов пользователя.');
+        }
+        // === КОНЕЦ ДОБАВЛЕНИЯ ===
         setLoading(true); // Используем общий loading или можно ввести loadingSettings
         setInitialSettingsLoaded(false);
         try {
