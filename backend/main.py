@@ -1199,6 +1199,15 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                 except Exception as schema_error:
                     logger.warning(f"Ошибка при исправлении схемы: {schema_error}")
                 
+                # Увеличиваем счетчик анализа для пользователя
+                try:
+                    logger.info(f"Увеличиваем счетчик анализа для пользователя {telegram_user_id}")
+                    await subscription_service.increment_analysis_usage(int(telegram_user_id))
+                    logger.info(f"Счетчик анализа успешно увеличен для пользователя {telegram_user_id}")
+                except Exception as counter_error:
+                    logger.error(f"Ошибка при увеличении счетчика анализа: {counter_error}")
+                    # Продолжаем работу, даже если не удалось увеличить счетчик
+                
                 # Проверяем, существует ли уже запись для этого пользователя и канала
                 analysis_check = supabase.table("channel_analysis").select("id").eq("user_id", telegram_user_id).eq("channel_name", username).execute()
                 

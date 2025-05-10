@@ -21,29 +21,49 @@ class SupabaseSubscriptionService:
         """Получает статистику использования бесплатных функций."""
         try:
             now = datetime.now(timezone.utc)
+            logger.info(f"Получение статистики для пользователя {user_id}. Текущая дата: {now.isoformat()}")
+            
             result = self.supabase.table("user_usage_stats").select("*").eq("user_id", user_id).execute()
+            
             if result.data and len(result.data) > 0:
                 usage_data = result.data[0]
+                logger.info(f"Найдены данные статистики для пользователя {user_id}: {usage_data}")
+                
                 reset_at_str = usage_data.get("reset_at")
+                logger.info(f"Дата сброса для пользователя {user_id}: {reset_at_str}")
+                
                 if reset_at_str:
                     try:
-                        # fromisoformat для строк в формате ISO 8601
+                        # Стандартизируем формат даты
+                        if 'Z' in reset_at_str:
+                            reset_at_str = reset_at_str.replace('Z', '+00:00')
+                        
+                        # Используем fromisoformat для парсинга ISO 8601 формата
                         reset_at = datetime.fromisoformat(reset_at_str)
-                        # Убедимся, что у даты есть информация о часовом поясе
+                        
+                        # Проверяем наличие информации о часовом поясе
                         if reset_at.tzinfo is None:
+                            logger.info(f"Дата сброса не содержит информации о часовом поясе, добавляем UTC: {reset_at_str}")
                             reset_at = reset_at.replace(tzinfo=timezone.utc)
                         
-                        # Теперь обе даты имеют часовой пояс и можно безопасно сравнивать
+                        logger.info(f"Сравниваем даты: now={now.isoformat()}, reset_at={reset_at.isoformat()}")
+                        
+                        # Проверяем, нужно ли сбросить счетчики
                         if now >= reset_at:
-                            logger.info(f"Сбрасываем счетчики для пользователя {user_id}, т.к. now ({now.isoformat()}) >= reset_at ({reset_at.isoformat()})")
+                            logger.info(f"Срок сброса счетчиков наступил для пользователя {user_id}")
                             return await self.reset_usage_counters(user_id)
+                        else:
+                            logger.info(f"Счетчики еще актуальны для пользователя {user_id}")
                     except Exception as date_error:
-                        logger.error(f"Ошибка при парсинге даты сброса счетчиков '{reset_at_str}': {date_error}", exc_info=True)
+                        logger.error(f"Ошибка при обработке даты '{reset_at_str}' для пользователя {user_id}: {date_error}", exc_info=True)
+                        # В случае ошибки парсинга даты сбрасываем счетчики
                         return await self.reset_usage_counters(user_id)
                 
+                # Если все проверки прошли, возвращаем данные использования
                 return usage_data
             
             # Если записи нет — создаём с reset_at через 14 дней
+            logger.info(f"Запись для пользователя {user_id} не найдена. Создаем новую.")
             next_reset = now + timedelta(days=RESET_PERIOD_DAYS)
             new_record = {
                 "user_id": user_id,
@@ -54,12 +74,29 @@ class SupabaseSubscriptionService:
                 "created_at": now.isoformat(),
                 "updated_at": now.isoformat()
             }
-            logger.info(f"Создаем новую запись лимитов для пользователя {user_id} с reset_at={next_reset.isoformat()}")
-            self.supabase.table("user_usage_stats").insert(new_record).execute()
-            return new_record
+            
+            logger.info(f"Создаем новую запись для пользователя {user_id}: {new_record}")
+            
+            try:
+                insert_result = self.supabase.table("user_usage_stats").insert(new_record).execute()
+                if insert_result.data and len(insert_result.data) > 0:
+                    logger.info(f"Запись успешно создана для пользователя {user_id}")
+                    return insert_result.data[0]
+                else:
+                    logger.warning(f"Странное поведение при создании записи для пользователя {user_id}. Возвращаем новую запись напрямую.")
+                    return new_record
+            except Exception as insert_error:
+                logger.error(f"Ошибка при создании записи для пользователя {user_id}: {insert_error}", exc_info=True)
+                return new_record
         except Exception as e:
-            logger.error(f"Ошибка при получении статистики использования для user_id {user_id}: {e}", exc_info=True)
-            return {"user_id": user_id, "analysis_count": 0, "post_generation_count": 0}
+            logger.error(f"Общая ошибка при получении статистики использования для user_id {user_id}: {e}", exc_info=True)
+            return {
+                "user_id": user_id, 
+                "analysis_count": 0, 
+                "post_generation_count": 0, 
+                "ideas_generation_count": 0,
+                "reset_at": (datetime.now(timezone.utc) + timedelta(days=RESET_PERIOD_DAYS)).isoformat()
+            }
     
     async def increment_analysis_usage(self, user_id: int) -> Dict[str, Any]:
         """Увеличивает счетчик использования анализа."""

@@ -1074,19 +1074,29 @@ function App() {
     try {
       // Сначала вызовем эндпоинт /api/user/init-usage для инициализации лимитов
       try {
-        await axios.post('/api/user/init-usage', {}, {
+        console.log("Инициализация лимитов пользователя...");
+        const initResponse = await axios.post('/api/user/init-usage', {}, {
           headers: { 'x-telegram-user-id': userId }
         });
-        console.log('Лимиты пользователя инициализированы успешно');
+        console.log('Лимиты пользователя инициализированы успешно:', initResponse.data);
       } catch (initError) {
         console.warn('Не удалось инициализировать лимиты пользователя:', initError);
         // Продолжаем выполнение, даже если инициализация не удалась
       }
       
       // Теперь выполняем анализ канала
+      console.log(`Отправляем запрос на анализ канала: ${normalized}`);
       const response = await axios.post('/analyze', { username: normalized }, {
         headers: { 'x-telegram-user-id': userId }
       });
+      
+      console.log('Получен ответ от сервера по анализу:', response.data);
+      
+      if (!response.data || !response.data.themes || !response.data.styles) {
+        console.error('Некорректный формат данных от сервера:', response.data);
+        throw new Error('Сервер вернул некорректные данные анализа');
+      }
+      
       setAnalysisResult(response.data);
       setSuccess('Анализ успешно завершен');
       if (!allChannels.includes(normalized)) {
@@ -1098,6 +1108,17 @@ function App() {
       setAnalysisLoadedFromDB(true);
     } catch (err) {
       console.error('Ошибка при анализе:', err);
+      // Полное логирование ошибки для диагностики
+      if (err.response) {
+        console.error('Данные ответа:', err.response.data);
+        console.error('Статус ответа:', err.response.status);
+        console.error('Заголовки ответа:', err.response.headers);
+      } else if (err.request) {
+        console.error('Запрос был отправлен, но ответ не получен', err.request);
+      } else {
+        console.error('Ошибка при настройке запроса:', err.message);
+      }
+      
       // Проверяем, является ли ошибка связанной с превышением лимита
       if (err.response && err.response.status === 403 && err.response.data?.error?.includes('лимит анализа')) {
         setAnalyzeLimitExceeded(true);
