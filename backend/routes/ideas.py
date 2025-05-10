@@ -2,8 +2,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
-from backend.services.supabase_subscription_service import SupabaseSubscriptionService
-from backend.main import supabase, logger
+from services.supabase_subscription_service import SupabaseSubscriptionService
+from main import supabase, logger
 
 class PlanGenerationRequest(BaseModel):
     themes: List[str]

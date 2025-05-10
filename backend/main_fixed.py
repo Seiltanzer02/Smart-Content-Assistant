@@ -52,6 +52,9 @@ from openai import AsyncOpenAI, OpenAIError
 # PostgreSQL
 import asyncpg
 
+# Imports for subscription service
+from services.supabase_subscription_service import SupabaseSubscriptionService
+
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ
 from unsplash import Api as UnsplashApi # <-- ИМПОРТИРУЕМ ИЗ ПРАВИЛЬНОГО МОДУЛЯ
@@ -1001,7 +1004,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         logger.info(f"Анализ для пользователя Telegram ID: {telegram_user_id}")
     
     # Проверка лимита анализа каналов
-    from backend.services.supabase_subscription_service import SupabaseSubscriptionService
+    # Удаленный импорт: from services.supabase_subscription_service import SupabaseSubscriptionService
     subscription_service = SupabaseSubscriptionService(supabase)
     can_analyze = await subscription_service.can_analyze_channel(int(telegram_user_id))
     if not can_analyze:
@@ -2302,7 +2305,7 @@ async def search_unsplash_images(query: str, count: int = 5, topic: str = "", fo
 @app.post("/generate-post-details", response_model=PostDetailsResponse)
 async def generate_post_details(request: Request, req: GeneratePostDetailsRequest):
     """Генерация детального поста на основе идеи, с текстом и релевантными изображениями."""
-    from backend.services.supabase_subscription_service import SupabaseSubscriptionService
+    # Удаленный импорт: from services.supabase_subscription_service import SupabaseSubscriptionService
     telegram_user_id = request.headers.get("X-Telegram-User-Id")
     subscription_service = SupabaseSubscriptionService(supabase)
     if not telegram_user_id or telegram_user_id == '123456789' or not telegram_user_id.isdigit():
@@ -2322,7 +2325,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
     logger.info(f"Анализ для пользователя Telegram ID: {telegram_user_id}")
 
     # Проверка лимита анализа каналов
-    from backend.services.supabase_subscription_service import SupabaseSubscriptionService
+    # Удаленный импорт: from services.supabase_subscription_service import SupabaseSubscriptionService
     subscription_service = SupabaseSubscriptionService(supabase)
     can_analyze = await subscription_service.can_analyze_channel(int(telegram_user_id))
     if not can_analyze:
@@ -4101,7 +4104,7 @@ async def init_user_usage(request: Request):
     if not telegram_user_id or telegram_user_id == '123456789' or not telegram_user_id.isdigit():
         logger.error(f"Некорректный или отсутствующий Telegram ID: {telegram_user_id}")
         return JSONResponse(status_code=401, content={"error": "Ошибка авторизации: не удалось получить корректный Telegram ID. Откройте приложение внутри Telegram."})
-    from backend.services.supabase_subscription_service import SupabaseSubscriptionService
+    # Удаленный импорт: from services.supabase_subscription_service import SupabaseSubscriptionService
     subscription_service = SupabaseSubscriptionService(supabase)
     usage = await subscription_service.get_user_usage(int(telegram_user_id))
     return usage
