@@ -65,7 +65,7 @@ async def get_user_settings(
             .maybe_single()
             .execute
         )
-        if response.data:
+        if response and response.data:
             return UserSettingsResponse(**response.data)
         return None # Возвращаем None если настроек нет, фронтенд обработает
     except Exception as e:
@@ -100,7 +100,7 @@ async def update_user_settings(
             .execute
         )
 
-        if existing_settings_response.data:
+        if existing_settings_response and existing_settings_response.data:
             response = await asyncio.to_thread(
                 supabase.table("user_settings")
                 .update(data_to_save)
@@ -115,7 +115,7 @@ async def update_user_settings(
                 .execute
             )
         
-        if response.data:
+        if response and response.data:
             return UserSettingsResponse(**response.data[0])
         else:
             logger.error(f"Ошибка при сохранении настроек пользователя {user_id}: ответ Supabase не содержит данных. Response: {response}")
