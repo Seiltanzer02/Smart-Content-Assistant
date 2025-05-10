@@ -20,13 +20,15 @@ class SupabaseSubscriptionService:
     async def get_user_usage(self, user_id: int) -> Dict[str, Any]:
         """Получает статистику использования бесплатных функций."""
         try:
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             result = self.supabase.table("user_usage_stats").select("*").eq("user_id", user_id).execute()
             if result.data and len(result.data) > 0:
                 usage_data = result.data[0]
                 reset_at_str = usage_data.get("reset_at")
                 if reset_at_str:
                     reset_at = datetime.fromisoformat(reset_at_str)
+                    if reset_at.tzinfo is None:
+                        reset_at = reset_at.replace(tzinfo=timezone.utc)
                     if now >= reset_at:
                         return await self.reset_usage_counters(user_id)
                 return usage_data
@@ -186,11 +188,12 @@ class SupabaseSubscriptionService:
     
     async def reset_usage_counters(self, user_id: int) -> Dict[str, Any]:
         """Сбрасывает счетчики использования и устанавливает новую дату сброса."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         next_reset = now + timedelta(days=RESET_PERIOD_DAYS)
         update_data = {
             "analysis_count": 0,
             "post_generation_count": 0,
+            "ideas_generation_count": 0,
             "reset_at": next_reset.isoformat(),
             "updated_at": now.isoformat()
         }
