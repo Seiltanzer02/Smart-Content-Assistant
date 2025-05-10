@@ -5,7 +5,6 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from supabase_py_async.lib.utils import APIError # Убедитесь, что этот импорт корректен
 
 # Импортируем supabase и logger из родительского main.py (backend/main.py)
 from ..main import supabase, logger
@@ -69,9 +68,6 @@ async def get_user_settings(
         if response.data:
             return UserSettingsResponse(**response.data)
         return None # Возвращаем None если настроек нет, фронтенд обработает
-    except APIError as e:
-        logger.error(f"Supabase APIError при получении настроек пользователя {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка базы данных: {e.message}")
     except Exception as e:
         logger.error(f"Непредвиденная ошибка при получении настроек пользователя {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
@@ -125,9 +121,6 @@ async def update_user_settings(
             logger.error(f"Ошибка при сохранении настроек пользователя {user_id}: ответ Supabase не содержит данных. Response: {response}")
             raise HTTPException(status_code=500, detail="Не удалось сохранить настройки пользователя")
 
-    except APIError as e:
-        logger.error(f"Supabase APIError при сохранении настроек пользователя {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка базы данных: {e.message}")
     except Exception as e:
         logger.error(f"Непредвиденная ошибка при сохранении настроек пользователя {user_id}: {e}")
         import traceback
