@@ -1033,9 +1033,9 @@ function App() {
 
   // Обработчик успешной авторизации
   const handleAuthSuccess = (authUserId: string) => {
-    // Валидация userId
-    if (!authUserId || authUserId === '123456789' || isNaN(Number(authUserId))) {
-      setError('Ошибка авторизации: не удалось получить корректный Telegram ID. Пожалуйста, откройте приложение внутри Telegram.');
+    if (!authUserId || authUserId === '123456789') {
+      console.error('Некорректный ID пользователя:', authUserId);
+      setError('Ошибка авторизации: некорректный ID пользователя');
       setIsAuthenticated(false);
       setUserId(null);
       return;
@@ -1045,6 +1045,16 @@ function App() {
     // Устанавливаем глобальный заголовок для всех запросов axios
     axios.defaults.headers.common['X-Telegram-User-Id'] = authUserId;
     setIsAuthenticated(true);
+    
+    // Инициализируем лимиты пользователя сразу после авторизации
+    axios.post('/api/user/init-usage', {}, {
+      headers: { 'x-telegram-user-id': authUserId }
+    }).then(() => {
+      console.log('Лимиты пользователя инициализированы при входе в приложение');
+    }).catch(initError => {
+      console.warn('Не удалось инициализировать лимиты пользователя при входе:', initError);
+    });
+    
     // setLoading(false); // Управление loading теперь в useEffect [isAuthenticated, userId]
   };
 
@@ -1062,6 +1072,18 @@ function App() {
     setAnalysisResult(null);
     setAnalyzeLimitExceeded(false);
     try {
+      // Сначала вызовем эндпоинт /api/user/init-usage для инициализации лимитов
+      try {
+        await axios.post('/api/user/init-usage', {}, {
+          headers: { 'x-telegram-user-id': userId }
+        });
+        console.log('Лимиты пользователя инициализированы успешно');
+      } catch (initError) {
+        console.warn('Не удалось инициализировать лимиты пользователя:', initError);
+        // Продолжаем выполнение, даже если инициализация не удалась
+      }
+      
+      // Теперь выполняем анализ канала
       const response = await axios.post('/analyze', { username: normalized }, {
         headers: { 'x-telegram-user-id': userId }
       });
@@ -1075,13 +1097,14 @@ function App() {
       setChannelName(normalized);
       setAnalysisLoadedFromDB(true);
     } catch (err) {
+      console.error('Ошибка при анализе:', err);
+      // Проверяем, является ли ошибка связанной с превышением лимита
       if (err.response && err.response.status === 403 && err.response.data?.error?.includes('лимит анализа')) {
         setAnalyzeLimitExceeded(true);
         toast.error(err.response.data.error);
       } else {
-        setError(err.response?.data?.detail || err.message || 'Ошибка при анализе канала');
+        setError(err.response?.data?.detail || err.response?.data?.error || err.message || 'Ошибка при анализе канала');
       }
-      console.error('Ошибка при анализе:', err);
     } finally {
       setIsAnalyzing(false);
     }
@@ -1105,6 +1128,18 @@ function App() {
         setIsGeneratingIdeas(false);
         return;
       }
+      
+      // Сначала вызовем эндпоинт /api/user/init-usage для инициализации лимитов
+      try {
+        await axios.post('/api/user/init-usage', {}, {
+          headers: { 'x-telegram-user-id': userId }
+        });
+        console.log('Лимиты пользователя инициализированы успешно перед генерацией идей');
+      } catch (initError) {
+        console.warn('Не удалось инициализировать лимиты пользователя перед генерацией идей:', initError);
+        // Продолжаем выполнение, даже если инициализация не удалась
+      }
+      
       const response = await axios.post(
         `${API_BASE_URL}/generate-plan`,
         {
@@ -1133,13 +1168,13 @@ function App() {
         saveIdeasToDatabase(formattedIdeas);
       }
     } catch (err) {
+      console.error('Ошибка при генерации идей:', err);
       if (err.response && err.response.status === 403 && err.response.data?.error?.includes('лимит генерации идей')) {
         setIdeasLimitExceeded(true);
         toast.error(err.response.data.error);
       } else {
-        setError(err.response?.data?.detail || err.message || 'Ошибка при генерации идей');
+        setError(err.response?.data?.detail || err.response?.data?.error || err.message || 'Ошибка при генерации идей');
       }
-      console.error('Ошибка при генерации идей:', err);
     } finally {
       setIsGeneratingIdeas(false);
       setCurrentView('suggestions');
