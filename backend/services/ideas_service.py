@@ -7,6 +7,7 @@ import random
 import re
 import uuid
 from openai import AsyncOpenAI
+from backend.services.supabase_subscription_service import SupabaseSubscriptionService
 
 # Импорт моделей PlanItem, PlanGenerationResponse, SuggestedIdeasResponse, SaveIdeasRequest из main.py или отдельного файла моделей
 # from backend.models import PlanItem, PlanGenerationResponse, SuggestedIdeasResponse, SaveIdeasRequest
@@ -71,6 +72,13 @@ async def generate_content_plan(request: Request, req):
         if not telegram_user_id:
             logger.warning("Запрос генерации плана без идентификации пользователя Telegram")
             return {"message": "Для генерации плана необходимо авторизоваться через Telegram", "plan": []}
+        # === Проверка лимита генерации идей ===
+        subscription_service = SupabaseSubscriptionService(supabase)
+        can_generate = await subscription_service.can_generate_idea(int(telegram_user_id))
+        if not can_generate:
+            logger.warning(f"Достигнут лимит генерации идей для пользователя {telegram_user_id}")
+            raise HTTPException(status_code=403, detail="Достигнут лимит генерации идей для бесплатной подписки. Оформите подписку для снятия ограничений.")
+        await subscription_service.increment_idea_usage(int(telegram_user_id))
         themes = req.themes
         styles = req.styles
         period_days = req.period_days
