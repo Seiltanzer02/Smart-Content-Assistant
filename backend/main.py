@@ -3872,8 +3872,27 @@ async def get_subscription_status(request: Request):
         logger.info(f'Результат запроса к user_subscription: {result.data}')
         if result.data:
             sub = result.data
-            now = datetime.utcnow()
-            is_active = sub.get("is_active", False) and sub.get("end_date") and datetime.fromisoformat(sub["end_date"].replace("Z", "+00:00")) > now
+            now = datetime.now(timezone.utc)
+            
+            # Правильно обрабатываем дату окончания подписки
+            end_date_str = sub.get("end_date")
+            if end_date_str and sub.get("is_active", False):
+                # Стандартизируем формат даты
+                if 'Z' in end_date_str:
+                    end_date_str = end_date_str.replace('Z', '+00:00')
+                
+                # Используем fromisoformat для парсинга ISO 8601 формата
+                end_date = datetime.fromisoformat(end_date_str)
+                
+                # Проверяем наличие информации о часовом поясе
+                if end_date.tzinfo is None:
+                    logger.info(f"Дата сброса не содержит информации о часовом поясе, добавляем UTC: {end_date_str}")
+                    end_date = end_date.replace(tzinfo=timezone.utc)
+                
+                is_active = sub.get("is_active", False) and end_date > now
+            else:
+                is_active = False
+                
             response_data = {
                 "has_subscription": is_active,
                 "is_active": is_active,
