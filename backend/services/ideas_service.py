@@ -8,6 +8,7 @@ import re
 import uuid
 from openai import AsyncOpenAI
 from backend.services.supabase_subscription_service import SupabaseSubscriptionService
+from datetime import datetime
 
 # Импорт моделей PlanItem, PlanGenerationResponse, SuggestedIdeasResponse, SaveIdeasRequest из main.py или отдельного файла моделей
 # from backend.models import PlanItem, PlanGenerationResponse, SuggestedIdeasResponse, SaveIdeasRequest
@@ -204,26 +205,91 @@ async def save_suggested_ideas_batch(payload, request: Request):
         if not supabase:
             logger.error("Клиент Supabase не инициализирован")
             raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
-        ideas_to_save = []
-        for idea in payload.ideas:
-            idea_copy = idea.copy()
-            idea_copy["user_id"] = int(telegram_user_id)
-            idea_copy["id"] = str(uuid.uuid4())
-            if payload.channel_name:
-                idea_copy["channel_name"] = payload.channel_name
-            if "day" in idea_copy:
-                idea_copy["relative_day"] = idea_copy.pop("day")
-            # Удаляем поле isNew, если оно есть
-            if "isNew" in idea_copy:
-                del idea_copy["isNew"]
-            ideas_to_save.append(idea_copy)
-        result = supabase.table("suggested_ideas").insert(ideas_to_save).execute()
-        if hasattr(result, 'data') and len(result.data) > 0:
-            logger.info(f"Пакетно сохранено {len(result.data)} идей для пользователя {telegram_user_id}")
-            return {"success": True, "count": len(result.data)}
-        else:
-            logger.error(f"Ошибка при пакетном сохранении идей: {result}")
-            raise HTTPException(status_code=500, detail="Ошибка при пакетном сохранении идей")
+        try:
+            telegram_user_id = int(telegram_user_id)
+        except (ValueError, TypeError):
+            logger.error(f"Некорректный ID пользователя в заголовке: {telegram_user_id}")
+            raise HTTPException(status_code=400, detail="Некорректный формат ID пользователя")
+        ideas_to_save = payload.ideas
+        channel_name = payload.channel_name
+        logger.info(f"Получен запрос на сохранение {len(ideas_to_save)} идей для канала {channel_name}")
+        errors = []
+        saved_ids = []
+        # Удаляем старые идеи для этого канала
+        if channel_name:
+            try:
+                delete_result = supabase.table("suggested_ideas")\
+                    .delete()\
+                    .eq("user_id", telegram_user_id)\
+                    .eq("channel_name", channel_name)\
+                    .execute()
+                logger.info(f"Удалено {len(delete_result.data) if hasattr(delete_result, 'data') else 0} старых идей для канала {channel_name}")
+            except Exception as del_err:
+                logger.error(f"Ошибка при удалении старых идей для канала {channel_name}: {del_err}")
+                errors.append(f"Ошибка удаления старых идей: {str(del_err)}")
+        records_to_insert = []
+        for idea_data in ideas_to_save:
+            try:
+                topic_idea = clean_text_formatting(idea_data.get("topic_idea", ""))
+                format_style = clean_text_formatting(idea_data.get("format_style", ""))
+                if not topic_idea:
+                    continue
+                idea_id = str(uuid.uuid4())
+                record = {
+                    "id": idea_id,
+                    "user_id": telegram_user_id,
+                    "channel_name": idea_data.get("channel_name") or channel_name,
+                    "topic_idea": topic_idea,
+                    "format_style": format_style,
+                    "relative_day": idea_data.get("day") or idea_data.get("relative_day"),
+                    "created_at": datetime.now().isoformat(),
+                    "is_detailed": idea_data.get("is_detailed", False),
+                }
+                records_to_insert.append(record)
+                saved_ids.append(idea_id)
+            except Exception as e:
+                errors.append(f"Ошибка подготовки идеи {idea_data.get('topic_idea')}: {str(e)}")
+                logger.error(f"Ошибка подготовки идеи {idea_data.get('topic_idea')}: {str(e)}")
+        if not records_to_insert:
+            logger.warning("Нет идей для сохранения после обработки.")
+            raise HTTPException(status_code=400, detail="Нет корректных идей для сохранения.")
+        try:
+            result = supabase.table("suggested_ideas").insert(records_to_insert).execute()
+            if hasattr(result, 'data') and result.data:
+                saved_count = len(result.data)
+                logger.info(f"Успешно сохранено {saved_count} идей батчем.")
+                return {"message": f"Успешно сохранено {saved_count} идей.", "saved_count": saved_count, "saved_ids": saved_ids, "errors": errors}
+            else:
+                error_detail = getattr(result, 'error', 'Unknown error')
+                logger.error(f"Ошибка при батч-сохранении идей: {error_detail}")
+                errors.append(f"Ошибка при батч-сохранении: {error_detail}")
+                # Пытаемся сохранить по одной, если батч не удался
+                logger.warning("Попытка сохранить идеи по одной...")
+                saved_count_single = 0
+                saved_ids_single = []
+                for record in records_to_insert:
+                    try:
+                        single_result = supabase.table("suggested_ideas").insert(record).execute()
+                        if hasattr(single_result, 'data') and single_result.data:
+                            saved_count_single += 1
+                            saved_ids_single.append(record['id'])
+                        else:
+                            single_error = getattr(single_result, 'error', 'Unknown error')
+                            errors.append(f"Ошибка сохранения идеи {record.get('topic_idea')}: {single_error}")
+                            logger.error(f"Ошибка сохранения идеи {record.get('topic_idea')}: {single_error}")
+                    except Exception as single_e:
+                        errors.append(f"Исключение при сохранении идеи {record.get('topic_idea')}: {str(single_e)}")
+                        logger.error(f"Исключение при сохранении идеи {record.get('topic_idea')}: {str(single_e)}")
+                logger.info(f"Сохранено {saved_count_single} идей по одной.")
+                return {
+                    "message": f"Сохранено {saved_count_single} идей (остальные с ошибкой).",
+                    "saved_count": saved_count_single,
+                    "saved_ids": saved_ids_single,
+                    "errors": errors
+                }
+        except Exception as e:
+            logger.error(f"Исключение при батч-сохранении идей: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Исключение при батч-сохранении: {str(e)}")
     except Exception as e:
         logger.error(f"Ошибка при пакетном сохранении идей: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка при пакетном сохранении идей: {str(e)}") 
