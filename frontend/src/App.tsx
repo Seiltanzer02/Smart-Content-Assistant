@@ -1926,30 +1926,54 @@ function App() {
                       <ImageUploader onImageUploaded={handleCustomImageUpload} userId={userId} />
                       
                       {selectedImage && (
-                          <div className="selected-image-preview" style={{ marginTop: '15px', padding: '10px', border: '1px solid #eee', borderRadius: '8px', backgroundColor: '#f9f9f9' }}>
-                              <h5 style={{ marginTop: '0', marginBottom: '10px' }}>Выбранное изображение:</h5>
-                              <div className="preview-container" style={{ textAlign: 'center' }}>
-                                 <div className="image-preview-container" style={{ background: 'none', maxWidth: '100%', margin: 0, padding: 0 }}>
-                                   {selectedImage && (
-                                     <img
-                                       src={selectedImage.preview_url || selectedImage.url}
-                                       alt={selectedImage.alt || 'Изображение'}
-                                       style={{ display: 'block', maxWidth: '100%', height: 'auto', maxHeight: '60vh', margin: '0 auto', background: 'none', borderRadius: '8px' }}
-                                     />
-                                   )}
-                                 </div>
-                                 <button 
-                                      className="action-button delete-button small remove-image-btn"
-                                      onClick={() => {
-                                        setSelectedImage(null);
-                                        // toast.info("Выбор изображения отменен");
-                                      }}
-                                      title="Удалить выбранное изображение"
-                                  >
-                                      <span>🗑️ Отменить выбор</span>
-                                  </button>
-                    </div>
-                  </div>
+                          <div className="selected-image-preview" style={{ marginTop: '15px', padding: '10px', border: 'none', borderRadius: '8px', backgroundColor: 'transparent' }}>
+                            <h5 style={{ marginTop: '0', marginBottom: '10px' }}>Выбранное изображение:</h5>
+                            <div className="preview-container" style={{ textAlign: 'center' }}>
+                              <div className="image-preview-container" style={{ background: 'none', maxWidth: '100%', margin: 0, padding: 0 }}>
+                                {selectedImage && (
+                                  <img
+                                    src={selectedImage.preview_url || selectedImage.url}
+                                    alt={selectedImage.alt || 'Изображение'}
+                                    style={{ display: 'block', maxWidth: '100%', height: 'auto', maxHeight: '60vh', margin: '0 auto', background: 'none', borderRadius: '8px' }}
+                                  />
+                                )}
+                              </div>
+                              <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '10px' }}>
+                                <button 
+                                  className="action-button delete-button small remove-image-btn"
+                                  onClick={() => {
+                                    setSelectedImage(null);
+                                  }}
+                                  title="Удалить выбранное изображение"
+                                >
+                                  <span>🗑️ Отменить выбор</span>
+                                </button>
+                                <button
+                                  className="action-button download-button small"
+                                  onClick={() => {
+                                    const link = document.createElement('a');
+                                    link.href = selectedImage.url;
+                                    link.download = selectedImage.alt || 'image.jpg';
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                  }}
+                                  title="Скачать изображение"
+                                >
+                                  ⬇️ Скачать
+                                </button>
+                                <button
+                                  className="action-button small"
+                                  onClick={() => {
+                                    window.open(selectedImage.url, '_blank', 'noopener,noreferrer');
+                                  }}
+                                  title="Открыть в полном размере"
+                                >
+                                  🔍 Приблизить
+                                </button>
+                              </div>
+                            </div>
+                          </div>
                       )}
                 </div>
               </div>
