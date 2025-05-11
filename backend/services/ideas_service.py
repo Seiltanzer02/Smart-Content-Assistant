@@ -210,7 +210,7 @@ async def save_suggested_idea(idea_data: Dict[str, Any], request: Request):
         raise HTTPException(status_code=500, detail=f"Ошибка при сохранении идеи: {str(e)}")
 
 async def save_suggested_ideas_batch(payload, request: Request):
-    telegram_user_id = request.headers.get("x-telegram-user-id")
+    telegram_user_id = request.headers.get("X-Telegram-User-Id")
     if not telegram_user_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
     # Преобразуем ID пользователя в целое число
@@ -260,18 +260,21 @@ async def save_suggested_ideas_batch(payload, request: Request):
         try:
             topic_idea = clean_text_formatting(idea_data.get("topic_idea", ""))
             format_style = clean_text_formatting(idea_data.get("format_style", ""))
-            if not topic_idea:
+            if not topic_idea or not format_style:
                 continue
             idea_id = str(uuid.uuid4())
+            # Корректно переносим day -> relative_day
+            relative_day = idea_data.get("relative_day") or idea_data.get("day")
+            # Заполняем все нужные поля
             record = {
                 "id": idea_id,
                 "user_id": int(telegram_user_id),
                 "channel_name": idea_data.get("channel_name") or channel_name,
                 "topic_idea": topic_idea,
                 "format_style": format_style,
-                "relative_day": idea_data.get("day"),
+                "relative_day": relative_day,
                 "created_at": datetime.now().isoformat(),
-                "is_detailed": idea_data.get("is_detailed", False),
+                "is_detailed": bool(idea_data.get("is_detailed", False)),
             }
             records_to_insert.append(record)
             saved_ids.append(idea_id)
