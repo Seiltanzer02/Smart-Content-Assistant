@@ -73,13 +73,11 @@ async def generate_content_plan(request: Request, req):
         if not telegram_user_id:
             logger.warning("Запрос генерации плана без идентификации пользователя Telegram")
             return {"message": "Для генерации плана необходимо авторизоваться через Telegram", "plan": []}
-        
         # Проверка лимита генерации идей
         subscription_service = SupabaseSubscriptionService(supabase)
         can_generate = await subscription_service.can_generate_idea(int(telegram_user_id))
         if not can_generate:
             return {"message": "Достигнут лимит генерации идей для бесплатной подписки. Оформите подписку для снятия ограничений.", "plan": []}
-            
         themes = req.themes
         styles = req.styles
         period_days = req.period_days
@@ -130,9 +128,8 @@ async def generate_content_plan(request: Request, req):
                 logger.error(f"Полный ответ API (или его представление): {raw_response_content}")
             except Exception as log_err:
                 logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
-            return {"plan": [], "message": "Ошибка: API не вернул ожидаемый результат для генерации плана."}
         plan_items = []
-        lines = plan_text.split('\n')
+        lines = plan_text.split('\n') if plan_text else []
         expected_style_set = set(s.lower() for s in styles)
         for line in lines:
             line = line.strip()
@@ -147,22 +144,38 @@ async def generate_content_plan(request: Request, req):
                     format_style = clean_text_formatting(parts[2].strip())
                     if format_style.lower() not in expected_style_set:
                         logger.warning(f"Стиль '{format_style}' не найден в списке допустимых стилей: {styles}")
-                        continue
-                    plan_items.append({
-                        "day": day,
-                        "topic_idea": topic_idea,
-                        "format_style": format_style
-                    })
+                        format_style = random.choice(styles) if styles else format_style
+                    if topic_idea:
+                        plan_items.append({
+                            "day": day,
+                            "topic_idea": topic_idea,
+                            "format_style": format_style
+                        })
+                    else:
+                        logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
                 except Exception as parse_err:
                     logger.error(f"Ошибка при парсинге строки плана: {line} — {parse_err}")
                     continue
-        logger.info(f"Сгенерировано {len(plan_items)} пунктов плана")
-        
+            else:
+                logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
+        # Если не удалось извлечь идеи — генерируем базовый план вручную
+        if not plan_items:
+            logger.warning("Не удалось извлечь идеи из ответа LLM или все строки были некорректными, генерируем базовый план.")
+            for day in range(1, period_days + 1):
+                random_theme = random.choice(themes) if themes else "Общая тема"
+                random_style = random.choice(styles) if styles else "Общий стиль"
+                plan_items.append({
+                    "day": day,
+                    "topic_idea": f"Пост о {random_theme}",
+                    "format_style": random_style
+                })
+        # Сортируем по дням и обрезаем до нужного количества
+        plan_items.sort(key=lambda x: x["day"])
+        plan_items = plan_items[:period_days]
         # После успешной генерации идей увеличиваем счетчик использования
         has_subscription = await subscription_service.has_active_subscription(int(telegram_user_id))
         if not has_subscription:
             await subscription_service.increment_idea_usage(int(telegram_user_id))
-            
         return {"plan": plan_items}
     except Exception as e:
         logger.error(f"Ошибка при генерации плана: {e}")
