@@ -1926,54 +1926,98 @@ function App() {
                       <ImageUploader onImageUploaded={handleCustomImageUpload} userId={userId} />
                       
                       {selectedImage && (
-                          <div className="selected-image-preview" style={{ marginTop: '15px', padding: '10px', border: 'none', borderRadius: '8px', backgroundColor: 'transparent' }}>
-                            <h5 style={{ marginTop: '0', marginBottom: '10px' }}>Выбранное изображение:</h5>
-                            <div className="preview-container" style={{ textAlign: 'center' }}>
-                              <div className="image-preview-container" style={{ background: 'none', maxWidth: '100%', margin: 0, padding: 0 }}>
-                                {selectedImage && (
+                          <div className="selected-image-preview" style={{ marginTop: '15px', padding: '10px', border: '1px solid #eee', borderRadius: '8px', background: 'none' }}>
+                              <h5 style={{ marginTop: '0', marginBottom: '10px' }}>Выбранное изображение:</h5>
+                              <div className="preview-container" style={{ textAlign: 'center', position: 'relative' }}>
+                                <div className="image-preview-container" style={{ background: 'none', maxWidth: '100%', margin: 0, padding: 0, display: 'inline-block', position: 'relative' }}>
+                                  {/* КНОПКИ НАД ИЗОБРАЖЕНИЕМ, но вне картинки */}
+                                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginBottom: '8px' }}>
+                                    <button 
+                                      className="action-button delete-button small remove-image-btn"
+                                      onClick={() => { setSelectedImage(null); }}
+                                      title="Удалить выбранное изображение"
+                                    >
+                                      <span>🗑️ Отменить выбор</span>
+                                    </button>
+                                    <button
+                                      className="action-button download-button small"
+                                      onClick={() => {
+                                        const link = document.createElement('a');
+                                        link.href = selectedImage.url;
+                                        link.download = selectedImage.alt || 'image.jpg';
+                                        document.body.appendChild(link);
+                                        link.click();
+                                        document.body.removeChild(link);
+                                      }}
+                                      title="Скачать изображение"
+                                    >
+                                      ⬇️ Скачать
+                                    </button>
+                                    <button
+                                      className="action-button small"
+                                      onClick={() => setIsImageModalOpen(true)}
+                                      title="Приблизить изображение"
+                                    >
+                                      🔍 Приблизить
+                                    </button>
+                                  </div>
                                   <img
                                     src={selectedImage.preview_url || selectedImage.url}
                                     alt={selectedImage.alt || 'Изображение'}
                                     style={{ display: 'block', maxWidth: '100%', height: 'auto', maxHeight: '60vh', margin: '0 auto', background: 'none', borderRadius: '8px' }}
                                   />
-                                )}
+                                </div>
                               </div>
-                              <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '10px' }}>
-                                <button 
-                                  className="action-button delete-button small remove-image-btn"
-                                  onClick={() => {
-                                    setSelectedImage(null);
-                                  }}
-                                  title="Удалить выбранное изображение"
+                              {/* Модальное окно для предпросмотра изображения в полном размере */}
+                              {isImageModalOpen && (
+                                <div style={{
+                                  position: 'fixed',
+                                  top: 0,
+                                  left: 0,
+                                  width: '100vw',
+                                  height: '100vh',
+                                  background: 'rgba(0,0,0,0.85)',
+                                  zIndex: 1000,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                                  onClick={() => setIsImageModalOpen(false)}
                                 >
-                                  <span>🗑️ Отменить выбор</span>
-                                </button>
-                                <button
-                                  className="action-button download-button small"
-                                  onClick={() => {
-                                    const link = document.createElement('a');
-                                    link.href = selectedImage.url;
-                                    link.download = selectedImage.alt || 'image.jpg';
-                                    document.body.appendChild(link);
-                                    link.click();
-                                    document.body.removeChild(link);
-                                  }}
-                                  title="Скачать изображение"
-                                >
-                                  ⬇️ Скачать
-                                </button>
-                                <button
-                                  className="action-button small"
-                                  onClick={() => {
-                                    window.open(selectedImage.url, '_blank', 'noopener,noreferrer');
-                                  }}
-                                  title="Открыть в полном размере"
-                                >
-                                  🔍 Приблизить
-                                </button>
-                              </div>
+                                  <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }} onClick={e => e.stopPropagation()}>
+                                    <button
+                                      onClick={() => setIsImageModalOpen(false)}
+                                      style={{
+                                        position: 'absolute',
+                                        top: 10,
+                                        right: 10,
+                                        zIndex: 1001,
+                                        background: '#fff',
+                                        border: 'none',
+                                        borderRadius: '50%',
+                                        width: 36,
+                                        height: 36,
+                                        fontSize: 22,
+                                        cursor: 'pointer',
+                                        boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+                                      }}
+                                      title="Закрыть"
+                                    >✖</button>
+                                    <img
+                                      src={selectedImage.url}
+                                      alt={selectedImage.alt || 'Изображение'}
+                                      style={{
+                                        display: 'block',
+                                        maxWidth: '90vw',
+                                        maxHeight: '80vh',
+                                        borderRadius: '10px',
+                                        boxShadow: '0 4px 24px rgba(0,0,0,0.5)'
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                          </div>
                       )}
                 </div>
               </div>
