@@ -482,7 +482,21 @@ function App() {
       return updated;
     });
   };
-
+  // Функция для отправки изображения в чат через backend
+  const handleSendImageToChat = async () => {
+    if (!selectedImage || !userId) return;
+    try {
+      await axios.post('/api/send-image-to-chat', {
+        imageUrl: selectedImage.url,
+        alt: selectedImage.alt || '',
+      }, {
+        headers: { 'x-telegram-user-id': userId }
+      });
+      toast.success('Изображение отправлено вам в чат!');
+    } catch (err) {
+      toast.error('Не удалось отправить изображение в чат.');
+    }
+  };
   // === ДОБАВЛЕНО: ФУНКЦИИ ДЛЯ РАБОТЫ С API НАСТРОЕК ===
   const fetchUserSettings = async (): Promise<ApiUserSettings | null> => {
     if (!userId) return null;
@@ -2071,20 +2085,6 @@ function cleanPostText(text: string) {
   return text.replace(/[\*\_\#\-]+/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
-// Функция для отправки изображения в чат через backend
-const handleSendImageToChat = async () => {
-  if (!selectedImage || !userId) return;
-  try {
-    await axios.post('/api/send-image-to-chat', {
-      imageUrl: selectedImage.url,
-      alt: selectedImage.alt || '',
-    }, {
-      headers: { 'x-telegram-user-id': userId }
-    });
-    toast.success('Изображение отправлено вам в чат!');
-  } catch (err) {
-    toast.error('Не удалось отправить изображение в чат.');
-  }
-};
+
 
 export default App;
