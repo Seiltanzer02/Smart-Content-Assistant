@@ -515,31 +515,31 @@ function App() {
   // === КОНЕЦ ФУНКЦИЙ API ===
 
   // === ОБЪЕДИНЕНИЕ КАНАЛОВ ИЗ ПОСТОВ И НАСТРОЕК ===
-  useEffect(() => {
-    if (savedPosts.length > 0 || (userSettings && userSettings.allChannels)) {
-      // Получаем каналы из текущих постов
-      const channelsFromPosts = savedPosts.map(post => normalizeChannelName(post.channel_name || '')).filter(Boolean);
-      
-      // Получаем каналы из настроек пользователя
-      const channelsFromSettings = (userSettings?.allChannels || []).map(normalizeChannelName).filter(Boolean);
-      
-      // Объединяем каналы из текущих постов и из настроек
-      const uniqueChannels = [...new Set([...channelsFromPosts, ...channelsFromSettings])];
-      
-      // ВАЖНО: Сохраняем предыдущие каналы, чтобы они не исчезали при фильтрации
-      setAllChannels(prevChannels => {
-        // Объединяем с предыдущими каналами, чтобы не терять их при фильтрации
-        const mergedChannels = [...new Set([...prevChannels, ...uniqueChannels])];
-        
-        // Сохраняем на сервере только если список действительно изменился
-        if (userSettings && JSON.stringify(mergedChannels) !== JSON.stringify(userSettings.allChannels)) {
-          saveUserSettings({ allChannels: mergedChannels });
-        }
-        
-        return mergedChannels;
-      });
-    }
-  }, [savedPosts, userSettings]);
+  // useEffect(() => {
+  //   if (savedPosts.length > 0 || (userSettings && userSettings.allChannels)) {
+  //     // Получаем каналы из текущих постов
+  //     const channelsFromPosts = savedPosts.map(post => normalizeChannelName(post.channel_name || '')).filter(Boolean);
+  //     
+  //     // Получаем каналы из настроек пользователя
+  //     const channelsFromSettings = (userSettings?.allChannels || []).map(normalizeChannelName).filter(Boolean);
+  //     
+  //     // Объединяем каналы из текущих постов и из настроек
+  //     const uniqueChannels = [...new Set([...channelsFromPosts, ...channelsFromSettings])];
+  //     
+  //     // ВАЖНО: Сохраняем предыдущие каналы, чтобы они не исчезали при фильтрации
+  //     setAllChannels(prevChannels => {
+  //       // Объединяем с предыдущими каналами, чтобы не терять их при фильтрации
+  //       const mergedChannels = [...new Set([...prevChannels, ...uniqueChannels])];
+  //       
+  //       // Сохраняем на сервере только если список действительно изменился
+  //       if (userSettings && JSON.stringify(mergedChannels) !== JSON.stringify(userSettings.allChannels)) {
+  //         saveUserSettings({ allChannels: mergedChannels });
+  //       }
+  //       
+  //       return mergedChannels;
+  //     });
+  //   }
+  // }, [savedPosts, userSettings]);
 
   // --- ИЗМЕНЕНИЕ: Загрузка состояния ИЗ API ПОСЛЕ аутентификации ---
   useEffect(() => {
@@ -1399,16 +1399,16 @@ function App() {
   };
 
   // === ИСПРАВЛЕНИЕ: Формирование allChannels из постов ===
-  useEffect(() => {
-    if (savedPosts.length > 0) {
-      const uniqueChannels = [
-        ...new Set(savedPosts.map(post => post.channel_name).filter((c): c is string => typeof c === 'string' && c.length > 0))
-      ];
-      setAllChannels(uniqueChannels);
-      // Можно также обновить настройки пользователя на сервере, если нужно
-      // saveUserSettings({ allChannels: uniqueChannels });
-    }
-  }, [savedPosts]);
+  // useEffect(() => {
+  //   if (savedPosts.length > 0) {
+  //     const uniqueChannels = [
+  //       ...new Set(savedPosts.map(post => post.channel_name).filter((c): c is string => typeof c === 'string' && c.length > 0))
+  //     ];
+  //     setAllChannels(uniqueChannels);
+  //     // Можно также обновить настройки пользователя на сервере, если нужно
+  //     // saveUserSettings({ allChannels: uniqueChannels });
+  //   }
+  // }, [savedPosts]);
   // ... существующий код ...
 
   useEffect(() => {
