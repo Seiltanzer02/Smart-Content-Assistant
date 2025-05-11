@@ -28,7 +28,9 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         subscription_service = SupabaseSubscriptionService(supabase)
         can_analyze = await subscription_service.can_analyze_channel(int(telegram_user_id))
         if not can_analyze:
-            raise HTTPException(status_code=403, detail="Достигнут лимит анализа каналов для бесплатной подписки. Оформите подписку для снятия ограничений.")
+            usage = await subscription_service.get_user_usage(int(telegram_user_id))
+            reset_at = usage.get("reset_at")
+            raise HTTPException(status_code=403, detail=f"Достигнут лимит анализа каналов для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Оформите подписку для снятия ограничений.")
         username = req.username.replace("@", "").strip()
         posts = []
         errors_list = []

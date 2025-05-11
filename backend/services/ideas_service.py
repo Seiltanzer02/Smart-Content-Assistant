@@ -77,7 +77,9 @@ async def generate_content_plan(request: Request, req):
         subscription_service = SupabaseSubscriptionService(supabase)
         can_generate = await subscription_service.can_generate_idea(int(telegram_user_id))
         if not can_generate:
-            return {"message": "Достигнут лимит генерации идей для бесплатной подписки. Оформите подписку для снятия ограничений.", "plan": []}
+            usage = await subscription_service.get_user_usage(int(telegram_user_id))
+            reset_at = usage.get("reset_at")
+            return {"message": f"Достигнут лимит генерации идей для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Оформите подписку для снятия ограничений.", "plan": []}
         themes = req.themes
         styles = req.styles
         period_days = req.period_days

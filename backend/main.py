@@ -2257,7 +2257,9 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
             subscription_service = SupabaseSubscriptionService(supabase)
             can_generate = await subscription_service.can_generate_post(int(telegram_user_id))
             if not can_generate:
-                raise HTTPException(status_code=403, detail="Достигнут лимит генерации идей для бесплатной подписки. Оформите подписку для снятия ограничений.")
+                usage = await subscription_service.get_user_usage(int(telegram_user_id))
+                reset_at = usage.get("reset_at")
+                raise HTTPException(status_code=403, detail=f"Достигнут лимит генерации идей для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Оформите подписку для снятия ограничений.")
         if not telegram_user_id:
             logger.warning("Запрос генерации поста без идентификации пользователя Telegram")
             # Используем HTTPException для корректного ответа
