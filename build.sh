@@ -52,13 +52,12 @@ if [ ! -f backend/telegram_utils.py ]; then
 fi
 
 # Копируем файл сервиса подписок, если он есть
-if [ -f services/supabase_subscription_service.py ]; then
-    echo "Копирование файла сервиса подписок..."
-    cp services/supabase_subscription_service.py backend/services/
-else
-    echo "ВНИМАНИЕ: Файл supabase_subscription_service.py отсутствует в директории services!"
-    # Файл будет создан автоматически в backend/services
-fi
+# if [ -f services/supabase_subscription_service.py ]; then
+#     echo "Копируем supabase_subscription_service.py..."
+#     cp services/supabase_subscription_service.py backend/services/
+# else
+#     echo "ВНИМАНИЕ: Файл supabase_subscription_service.py отсутствует в директории services!"
+# fi
 
 # Устанавливаем зависимости npm для фронтенда
 echo "Установка зависимостей npm..."
