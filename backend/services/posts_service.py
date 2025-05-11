@@ -440,6 +440,13 @@ async def generate_post_details(request: Request, req):
         response_message = f"Сгенерирован пост с {len(found_images[:IMAGE_RESULTS_COUNT])} предложенными изображениями"
         if api_error_message:
             response_message = f"Ошибка генерации текста: {api_error_message}. Изображений найдено: {len(found_images[:IMAGE_RESULTS_COUNT])}"
+            
+        # После успешной генерации поста увеличиваем счетчик использования
+        if telegram_user_id:
+            has_subscription = await subscription_service.has_active_subscription(int(telegram_user_id))
+            if not has_subscription:
+                await subscription_service.increment_post_usage(int(telegram_user_id))
+                
         return {
             "generated_text": post_text,
             "found_images": [img.dict() if hasattr(img, 'dict') else img for img in found_images[:IMAGE_RESULTS_COUNT]],

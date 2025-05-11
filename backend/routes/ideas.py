@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 from services.supabase_subscription_service import SupabaseSubscriptionService
 from backend.services.ideas_service import generate_content_plan, get_saved_ideas, save_suggested_idea, save_suggested_ideas_batch
+from backend.main import logger, supabase
 
 class PlanGenerationRequest(BaseModel):
     themes: List[str]
@@ -44,4 +45,16 @@ async def save_suggested_idea_router(idea_data: Dict[str, Any], request: Request
 
 @router.post("/save-suggested-ideas", response_model=Dict[str, Any])
 async def save_suggested_ideas_batch_router(payload: SaveIdeasRequest, request: Request):
+    # Проверяем лимиты только если сохраняется набор идей от генерации плана
+    telegram_user_id = request.headers.get("X-Telegram-User-Id")
+    if telegram_user_id and len(payload.ideas) > 3:  # Если больше 3 идей, скорее всего это результат генерации плана
+        subscription_service = SupabaseSubscriptionService(supabase)
+        can_generate = await subscription_service.can_generate_idea(int(telegram_user_id))
+        if not can_generate:
+            logger.warning(f"Попытка сохранения идей при превышенном лимите пользователем {telegram_user_id}")
+            return JSONResponse(
+                status_code=403, 
+                content={"error": "Достигнут лимит генерации идей для бесплатной подписки. Оформите подписку для снятия ограничений."}
+            )
+    
     return await save_suggested_ideas_batch(payload, request) 
