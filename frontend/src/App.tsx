@@ -434,6 +434,27 @@ function App() {
   const [analyzeLimitExceeded, setAnalyzeLimitExceeded] = useState(false);
   const [ideasLimitExceeded, setIdeasLimitExceeded] = useState(false);
   const [postLimitExceeded, setPostLimitExceeded] = useState(false);
+  // === ДОБАВЛЯЮ: Функция для добавления канала в allChannels ===
+  const addChannelToAllChannels = (channel: string) => {
+    const normalized = normalizeChannelName(channel);
+    if (!normalized) return;
+    setAllChannels(prev => {
+      if (prev.includes(normalized)) return prev;
+      const updated = [...prev, normalized];
+      saveUserSettings({ allChannels: updated });
+      return updated;
+    });
+  };
+  // === ДОБАВЛЯЮ: Кастомный выпадающий список каналов ===
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const handleRemoveChannel = (channel: string) => {
+    setAllChannels(prev => {
+      const updated = prev.filter(c => c !== channel);
+      saveUserSettings({ allChannels: updated });
+      if (channelName === channel) setChannelName('');
+      return updated;
+    });
+  };
 
   // === ДОБАВЛЕНО: ФУНКЦИИ ДЛЯ РАБОТЫ С API НАСТРОЕК ===
   const fetchUserSettings = async (): Promise<ApiUserSettings | null> => {
@@ -1073,6 +1094,7 @@ function App() {
       return;
     }
     setChannelName(channelToAnalyze); // Обновляем выбранный канал
+    addChannelToAllChannels(channelToAnalyze);
     setIsAnalyzing(true);
     setAnalysisLoadedFromDB(false);
     setError(null);
@@ -1179,6 +1201,7 @@ function App() {
     } finally {
       setIsGeneratingIdeas(false);
       setCurrentView('suggestions');
+      addChannelToAllChannels(channelName);
     }
   };
 
@@ -1472,16 +1495,28 @@ function App() {
         {/* Выбор канала */}
         <div className="channel-selector">
           <label>Каналы: </label>
-          <select 
-            value={channelName} 
-            onChange={e => setChannelName(normalizeChannelName(e.target.value))}
-            className="channel-select"
-          >
-            <option value="">Выберите канал</option>
-            {allChannels.map(channel => (
-              <option key={channel} value={channel}>{channel}</option>
-            ))}
-          </select>
+          <div className="custom-dropdown" style={{ position: 'relative', display: 'inline-block', minWidth: 220 }}>
+            <div className="selected" onClick={() => setDropdownOpen(v => !v)} style={{ border: '1px solid #ccc', borderRadius: 6, padding: '7px 12px', background: '#fff', cursor: 'pointer', minWidth: 180 }}>
+              {channelName || 'Выберите канал'}
+              <span style={{ float: 'right', fontSize: 14, color: '#888' }}>{dropdownOpen ? '▲' : '▼'}</span>
+            </div>
+            {dropdownOpen && (
+              <ul className="dropdown-list" style={{ position: 'absolute', zIndex: 10, background: '#fff', border: '1px solid #ccc', borderRadius: 6, margin: 0, padding: 0, listStyle: 'none', width: '100%' }}>
+                {allChannels.length === 0 && <li style={{ padding: '8px 12px', color: '#888' }}>Нет каналов</li>}
+                {allChannels.map(channel => (
+                  <li key={channel} className="dropdown-item" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #eee', cursor: 'pointer' }}>
+                    <span style={{ flex: 1 }} onClick={() => { setChannelName(channel); setDropdownOpen(false); }}>{channel}</span>
+                    <button
+                      className="remove-btn"
+                      onClick={e => { e.stopPropagation(); handleRemoveChannel(channel); }}
+                      style={{ marginLeft: 8, color: 'red', cursor: 'pointer', border: 'none', background: 'none', fontSize: 18 }}
+                      title="Удалить канал"
+                    >×</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
         {/* Контент */}
