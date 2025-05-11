@@ -73,6 +73,7 @@ dotenv_loaded = load_dotenv(override=True)
 
 # Переменные из Render имеют приоритет над .env файлом
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_API_KEY2 = os.getenv("OPENROUTER_API_KEY2")  # Новый резервный ключ
 TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID")
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
@@ -968,7 +969,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         texts = [post.get("text", "") for post in posts if post.get("text")]
         
         # Анализ через deepseek
-        analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
+        analysis_result = await analyze_content_with_deepseek_fallback(texts)
         
         # Извлекаем результаты из возвращаемого словаря
         themes = analysis_result.get("themes", [])
@@ -1351,20 +1352,7 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
         
         # Запрос к API
         logger.info(f"Отправка запроса на генерацию плана контента для канала @{channel_name} с уточненным промптом")
-        response = await client.chat.completions.create(
-            model="deepseek/deepseek-chat-v3-0324:free", # <--- ИЗМЕНЕНО НА НОВУЮ БЕСПЛАТНУЮ МОДЕЛЬ
-            messages=[
-                # {"role": "system", "content": system_prompt}, # Системный промпт может конфликтовать с некоторыми моделями, тестируем без него или с ним
-                {"role": "user", "content": user_prompt} # Помещаем все инструкции в user_prompt
-            ],
-            temperature=0.7, # Немного снижаем температуру для строгости формата
-            max_tokens=150 * period_days, # Примерно 150 токенов на идею
-            timeout=120,
-            extra_headers={
-                "HTTP-Referer": "https://content-manager.onrender.com",
-                "X-Title": "Smart Content Assistant"
-            }
-        )
+        response = await generate_plan_llm(user_prompt, period_days, styles, channel_name)
         
         # === НАЧАЛО ИЗМЕНЕНИЯ: Проверка ответа API ===
         plan_text = ""
@@ -2103,20 +2091,7 @@ async def generate_image_keywords(text: str, topic: str, format_style: str) -> L
 Выдай 2-3 лучших ключевых слова на английском языке для поиска подходящих изображений. Только ключевые слова, без объяснений."""
         
         # Запрос к API
-        response = await client.chat.completions.create(
-            model="deepseek/deepseek-chat-v3-0324:free", # <--- ИЗМЕНЕНО НА НОВУЮ БЕСПЛАТНУЮ МОДЕЛЬ
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.7,
-            max_tokens=100,
-            timeout=15,
-            extra_headers={
-                "HTTP-Referer": "https://content-manager.onrender.com",
-                "X-Title": "Smart Content Assistant"
-            }
-        )
+        response = await generate_keywords_llm(system_prompt, user_prompt)
         
         # Получаем и обрабатываем ответ
         keywords_text = response.choices[0].message.content.strip()
@@ -2339,20 +2314,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
         try:
             # Запрос к API
             logger.info(f"Отправка запроса на генерацию поста по идее: {topic_idea}")
-            response = await client.chat.completions.create(
-                model="deepseek/deepseek-chat-v3-0324:free", # <--- ИЗМЕНЕНО НА НОВУЮ БЕСПЛАТНУЮ МОДЕЛЬ
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.7,
-                max_tokens=850, # === ИЗМЕНЕНО: Уменьшен лимит токенов с 1000 до 850 ===
-                timeout=60,
-                extra_headers={
-                    "HTTP-Referer": "https://content-manager.onrender.com",
-                    "X-Title": "Smart Content Assistant"
-                }
-            )
+            response = await generate_post_llm(system_prompt, user_prompt)
             
             # Проверка ответа и извлечение текста
             if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
@@ -4179,4 +4141,90 @@ async def send_image_to_chat(request: Request):
             return JSONResponse({'success': False, 'error': resp.text}, status_code=500)
     except Exception as e:
         return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
+
+# --- Fallback-обёртка для запросов к OpenRouter ---
+from openai import AsyncOpenAI, OpenAIError
+
+async def openrouter_with_fallback(request_func, *args, **kwargs):
+    """Выполняет запрос к OpenRouter с fallback на второй ключ при ошибке."""
+    errors = []
+    for api_key in [OPENROUTER_API_KEY, OPENROUTER_API_KEY2]:
+        if not api_key:
+            continue
+        try:
+            client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+            return await request_func(client, *args, **kwargs)
+        except Exception as e:
+            errors.append(str(e))
+            # Если ошибка авторизации или лимита, пробуем второй ключ
+            if hasattr(e, 'status_code') and e.status_code in [401, 403, 429, 500, 502, 503, 504]:
+                continue
+            if 'rate limit' in str(e).lower() or 'quota' in str(e).lower():
+                continue
+            # Для других ошибок не пробуем второй ключ
+            break
+    raise Exception(f"Ошибка OpenRouter API (оба ключа): {' | '.join(errors)}")
+
+# --- Модифицирую вызовы LLM ---
+# 1. Анализ канала (analyze_content_with_deepseek)
+from backend.deepseek_utils import analyze_content_with_deepseek as orig_analyze_content_with_deepseek
+async def analyze_content_with_deepseek_fallback(texts, api_key=None):
+    for key in [OPENROUTER_API_KEY, OPENROUTER_API_KEY2]:
+        if not key:
+            continue
+        try:
+            return await orig_analyze_content_with_deepseek(texts, key)
+        except Exception as e:
+            logger.warning(f"Ошибка анализа через DeepSeek с ключом {key[:6]}...: {e}")
+            continue
+    logger.error("Ошибка анализа через DeepSeek: оба ключа не сработали")
+    return {"themes": [], "styles": []}
+
+# 2. Генерация плана (generate_content_plan)
+async def generate_plan_llm(user_prompt, period_days, styles, channel_name):
+    async def do_request(client):
+        return await client.chat.completions.create(
+            model="deepseek/deepseek-chat-v3-0324:free",
+            messages=[{"role": "user", "content": user_prompt}],
+            temperature=0.7,
+            max_tokens=150 * period_days,
+            timeout=120,
+            extra_headers={
+                "HTTP-Referer": "https://content-manager.onrender.com",
+                "X-Title": "Smart Content Assistant"
+            }
+        )
+    return await openrouter_with_fallback(do_request)
+
+# 3. Генерация деталей поста (generate_post_details)
+async def generate_post_llm(system_prompt, user_prompt):
+    async def do_request(client):
+        return await client.chat.completions.create(
+            model="deepseek/deepseek-chat-v3-0324:free",
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+            temperature=0.7,
+            max_tokens=850,
+            timeout=60,
+            extra_headers={
+                "HTTP-Referer": "https://content-manager.onrender.com",
+                "X-Title": "Smart Content Assistant"
+            }
+        )
+    return await openrouter_with_fallback(do_request)
+
+# 4. Генерация ключевых слов для изображений (generate_image_keywords)
+async def generate_keywords_llm(system_prompt, user_prompt):
+    async def do_request(client):
+        return await client.chat.completions.create(
+            model="deepseek/deepseek-chat-v3-0324:free",
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+            temperature=0.7,
+            max_tokens=100,
+            timeout=15,
+            extra_headers={
+                "HTTP-Referer": "https://content-manager.onrender.com",
+                "X-Title": "Smart Content Assistant"
+            }
+        )
+    return await openrouter_with_fallback(do_request)
 
