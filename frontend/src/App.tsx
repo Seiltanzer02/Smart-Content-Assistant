@@ -1603,6 +1603,12 @@ function App() {
                   >
                     {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать новые идеи'}
               </button>
+              {isGeneratingIdeas && (
+                <div style={{ margin: '20px 0' }}>
+                  <ProgressBar progress={progress} />
+                  <p>Генерируем идеи...</p>
+                </div>
+              )}
               {ideasLimitExceeded && (
                 <div className="error-message small">Достигнут лимит генерации идей для бесплатной подписки. Оформите подписку для снятия ограничений.</div>
               )}
