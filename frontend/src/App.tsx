@@ -486,13 +486,17 @@ function App() {
   const handleSendImageToChat = async () => {
     if (!selectedImage || !userId) return;
     try {
-      await axios.post('/api/send-image-to-chat', {
+      const response = await axios.post('/api/send-image-to-chat', {
         imageUrl: selectedImage.url,
         alt: selectedImage.alt || '',
       }, {
         headers: { 'x-telegram-user-id': userId }
       });
-      toast.success('Изображение отправлено вам в чат!');
+      if (response.data && response.data.success) {
+        toast.success('Изображение отправлено вам в чат!');
+      } else {
+        toast.error('Не удалось отправить изображение в чат.');
+      }
     } catch (err) {
       toast.error('Не удалось отправить изображение в чат.');
     }
@@ -2075,6 +2079,7 @@ function App() {
           </div>
         </div>
       )}
+      <Toaster position="top-center" reverseOrder={false} />
     </div>
   );
 }
