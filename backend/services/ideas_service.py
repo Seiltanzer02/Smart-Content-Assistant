@@ -72,13 +72,13 @@ async def generate_content_plan(request: Request, req):
         if not telegram_user_id:
             logger.warning("Запрос генерации плана без идентификации пользователя Telegram")
             return {"message": "Для генерации плана необходимо авторизоваться через Telegram", "plan": []}
-        # === Проверка лимита генерации идей ===
+        
+        # Проверка лимита генерации идей
         subscription_service = SupabaseSubscriptionService(supabase)
         can_generate = await subscription_service.can_generate_idea(int(telegram_user_id))
         if not can_generate:
-            logger.warning(f"Достигнут лимит генерации идей для пользователя {telegram_user_id}")
-            raise HTTPException(status_code=403, detail="Достигнут лимит генерации идей для бесплатной подписки. Оформите подписку для снятия ограничений.")
-        await subscription_service.increment_idea_usage(int(telegram_user_id))
+            return {"message": "Достигнут лимит генерации идей для бесплатной подписки. Оформите подписку для снятия ограничений.", "plan": []}
+            
         themes = req.themes
         styles = req.styles
         period_days = req.period_days
@@ -156,6 +156,12 @@ async def generate_content_plan(request: Request, req):
                     logger.error(f"Ошибка при парсинге строки плана: {line} — {parse_err}")
                     continue
         logger.info(f"Сгенерировано {len(plan_items)} пунктов плана")
+        
+        # После успешной генерации идей увеличиваем счетчик использования
+        has_subscription = await subscription_service.has_active_subscription(int(telegram_user_id))
+        if not has_subscription:
+            await subscription_service.increment_idea_usage(int(telegram_user_id))
+            
         return {"plan": plan_items}
     except Exception as e:
         logger.error(f"Ошибка при генерации плана: {e}")
