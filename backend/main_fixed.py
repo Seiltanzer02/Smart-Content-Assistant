@@ -53,7 +53,7 @@ from openai import AsyncOpenAI, OpenAIError
 import asyncpg
 
 # Imports for subscription service
-from services.supabase_subscription_service import SupabaseSubscriptionService
+from backend.services.supabase_subscription_service import SupabaseSubscriptionService
 
 # --- ДОБАВЛЯЕМ ИМПОРТЫ для Unsplash --- 
 # from pyunsplash import PyUnsplash # <-- УДАЛЯЕМ НЕПРАВИЛЬНЫЙ ИМПОРТ

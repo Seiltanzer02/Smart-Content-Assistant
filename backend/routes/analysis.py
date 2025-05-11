@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from typing import Dict, Any
-from services.supabase_subscription_service import SupabaseSubscriptionService
+from backend.services.supabase_subscription_service import SupabaseSubscriptionService
 from backend.services.analysis_service import analyze_channel
 from backend.telegram_utils import get_telegram_posts, get_telegram_posts_via_http, get_sample_posts
 from backend.deepseek_utils import analyze_content_with_deepseek

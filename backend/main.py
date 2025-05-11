@@ -893,7 +893,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
     if telegram_user_id:
         logger.info(f"Анализ для пользователя Telegram ID: {telegram_user_id}")
         # Проверка лимита анализа каналов
-        from services.supabase_subscription_service import SupabaseSubscriptionService
+        from backend.services.supabase_subscription_service import SupabaseSubscriptionService
         subscription_service = SupabaseSubscriptionService(supabase)
         can_analyze = await subscription_service.can_analyze_channel(int(telegram_user_id))
         if not can_analyze:
@@ -2253,7 +2253,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
         if telegram_user_id:
             # Проверка лимита генерации идей
-            from services.supabase_subscription_service import SupabaseSubscriptionService
+            from backend.services.supabase_subscription_service import SupabaseSubscriptionService
             subscription_service = SupabaseSubscriptionService(supabase)
             can_generate = await subscription_service.can_generate_post(int(telegram_user_id))
             if not can_generate:

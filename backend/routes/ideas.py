@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
-from services.supabase_subscription_service import SupabaseSubscriptionService
+from backend.services.supabase_subscription_service import SupabaseSubscriptionService
 from backend.services.ideas_service import generate_content_plan, get_saved_ideas, save_suggested_idea, save_suggested_ideas_batch
 from backend.main import logger, supabase
 
