@@ -75,7 +75,7 @@ async def generate_content_plan(request: Request, req):
             return {"message": "Для генерации плана необходимо авторизоваться через Telegram", "plan": []}
         # Проверка лимита генерации идей
         subscription_service = SupabaseSubscriptionService(supabase)
-        can_generate = await subscription_service.can_generate_ideas(int(telegram_user_id))
+        can_generate = await subscription_service.can_generate_idea(int(telegram_user_id))
         if not can_generate:
             return {"message": "Достигнут лимит генерации идей для бесплатной подписки. Оформите подписку для снятия ограничений.", "plan": []}
         themes = req.themes
