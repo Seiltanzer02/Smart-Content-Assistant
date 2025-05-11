@@ -30,12 +30,41 @@ const Loading = ({ message }: { message: string }) => (
   </div>
 );
 
-const ErrorMessage = ({ message, onClose }: { message: string | null, onClose: () => void }) => (
-  <div className="error-message">
-    <p>{message}</p>
-    <button className="action-button small" onClick={onClose}>Закрыть</button>
-  </div>
-);
+// Функция для форматирования даты сброса лимита в человекочитаемый вид
+function formatResetAtDate(isoString: string | null | undefined): string {
+  if (!isoString) return '';
+  try {
+    const date = new Date(isoString);
+    // Формат: 11.05.2025 18:15 МСК
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${day}.${month}.${year} ${hours}:${minutes} МСК`;
+  } catch {
+    return isoString;
+  }
+}
+
+// Модифицированный ErrorMessage для форматирования reset_at
+const ErrorMessage = ({ message, onClose }: { message: string | null, onClose: () => void }) => {
+  // Заменяем reset_at в тексте на человекочитаемый вид
+  let formatted = message;
+  if (message && message.includes('reset_at')) {
+    formatted = message.replace(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+\d{2}:\d{2}))/g, (match) => formatResetAtDate(match));
+  }
+  // Также обрабатываем стандартные тексты лимитов
+  if (message && message.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
+    formatted = message.replace(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+\d{2}:\d{2})?)/g, (match) => formatResetAtDate(match));
+  }
+  return (
+    <div className="error-message">
+      <p>{formatted}</p>
+      <button className="action-button small" onClick={onClose}>Закрыть</button>
+    </div>
+  );
+};
 
 const SuccessMessage = ({ message, onClose }: { message: string | null, onClose: () => void }) => (
   <div className="success-message">
@@ -439,8 +468,9 @@ function App() {
     const normalized = normalizeChannelName(channel);
     if (!normalized) return;
     setAllChannels(prev => {
-      if (prev.includes(normalized)) return prev;
-      const updated = [...prev, normalized];
+      // Берём актуальный массив, добавляем новый канал, если его нет
+      const updated = prev.includes(normalized) ? prev : [...prev, normalized];
+      // Сохраняем весь массив, а не только новый канал
       saveUserSettings({ allChannels: updated });
       return updated;
     });
@@ -450,6 +480,7 @@ function App() {
   const handleRemoveChannel = (channel: string) => {
     setAllChannels(prev => {
       const updated = prev.filter(c => c !== channel);
+      // Сохраняем весь массив, а не только изменённый канал
       saveUserSettings({ allChannels: updated });
       if (channelName === channel) setChannelName('');
       return updated;
@@ -1504,8 +1535,8 @@ function App() {
               <ul className="dropdown-list" style={{ position: 'absolute', zIndex: 10, background: '#fff', border: '1px solid #ccc', borderRadius: 6, margin: 0, padding: 0, listStyle: 'none', width: '100%' }}>
                 {allChannels.length === 0 && <li style={{ padding: '8px 12px', color: '#888' }}>Нет каналов</li>}
                 {allChannels.map(channel => (
-                  <li key={channel} className="dropdown-item" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #eee', cursor: 'pointer' }}>
-                    <span style={{ flex: 1 }} onClick={() => { setChannelName(channel); setDropdownOpen(false); }}>{channel}</span>
+                  <li key={channel} className="dropdown-item" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #eee', cursor: 'pointer', color: '#222' }}>
+                    <span style={{ flex: 1, color: '#222' }} onClick={() => { setChannelName(channel); setDropdownOpen(false); }}>{channel}</span>
                     <button
                       className="remove-btn"
                       onClick={e => { e.stopPropagation(); handleRemoveChannel(channel); }}
