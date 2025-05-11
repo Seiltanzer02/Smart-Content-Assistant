@@ -1535,8 +1535,8 @@ function App() {
               <ul className="dropdown-list" style={{ position: 'absolute', zIndex: 10, background: '#fff', border: '1px solid #ccc', borderRadius: 6, margin: 0, padding: 0, listStyle: 'none', width: '100%' }}>
                 {allChannels.length === 0 && <li style={{ padding: '8px 12px', color: '#888' }}>Нет каналов</li>}
                 {allChannels.map(channel => (
-                  <li key={channel} className="dropdown-item" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #eee', cursor: 'pointer' }}>
-                    <span style={{ flex: 1 }} onClick={() => { setChannelName(channel); setDropdownOpen(false); }}>{channel}</span>
+                  <li key={channel} className="dropdown-item" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #eee', cursor: 'pointer', color: '#222' }}>
+                    <span style={{ flex: 1, color: '#222' }} onClick={() => { setChannelName(channel); setDropdownOpen(false); }}>{channel}</span>
                     <button
                       className="remove-btn"
                       onClick={e => { e.stopPropagation(); handleRemoveChannel(channel); }}
