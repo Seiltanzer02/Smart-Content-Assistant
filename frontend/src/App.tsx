@@ -1952,14 +1952,7 @@ function App() {
                                   </button>
                                   <button
                                     className="action-button download-button small"
-                                    onClick={() => {
-                                      const link = document.createElement('a');
-                                      link.href = selectedImage.url;
-                                      link.download = selectedImage.alt || 'image.jpg';
-                                      document.body.appendChild(link);
-                                      link.click();
-                                      document.body.removeChild(link);
-                                    }}
+                                    onClick={handleSendImageToChat}
                                     title="Скачать изображение"
                                   >
                                     ⬇️ Скачать
@@ -2037,18 +2030,18 @@ function App() {
           alignItems: 'center',
           justifyContent: 'center',
         }}>
-          <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }}>
+          <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh', padding: '16px' }}>
             <img
               src={selectedImage.url}
               alt={selectedImage.alt || 'Изображение'}
-              style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: '10px', boxShadow: '0 2px 16px #0008' }}
+              style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: '10px', boxShadow: '0 2px 16px #0008', display: 'block' }}
             />
             <button
               onClick={() => setIsImageModalOpen(false)}
               style={{
                 position: 'absolute',
-                top: 10,
-                right: 10,
+                top: 16,
+                right: 16,
                 background: '#fff',
                 color: '#222',
                 border: 'none',
@@ -2059,6 +2052,9 @@ function App() {
                 fontWeight: 'bold',
                 cursor: 'pointer',
                 boxShadow: '0 2px 8px #0004',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
               title="Закрыть"
             >✖</button>
@@ -2074,5 +2070,21 @@ function cleanPostText(text: string) {
   // Удаляем звездочки, markdown-символы, лишние пробелы
   return text.replace(/[\*\_\#\-]+/g, '').replace(/\s{2,}/g, ' ').trim();
 }
+
+// Функция для отправки изображения в чат через backend
+const handleSendImageToChat = async () => {
+  if (!selectedImage || !userId) return;
+  try {
+    await axios.post('/api/send-image-to-chat', {
+      imageUrl: selectedImage.url,
+      alt: selectedImage.alt || '',
+    }, {
+      headers: { 'x-telegram-user-id': userId }
+    });
+    toast.success('Изображение отправлено вам в чат!');
+  } catch (err) {
+    toast.error('Не удалось отправить изображение в чат.');
+  }
+};
 
 export default App;
