@@ -51,10 +51,13 @@ async def save_suggested_ideas_batch_router(payload: SaveIdeasRequest, request: 
         subscription_service = SupabaseSubscriptionService(supabase)
         can_generate = await subscription_service.can_generate_idea(int(telegram_user_id))
         if not can_generate:
-            logger.warning(f"Попытка сохранения идей при превышенном лимите пользователем {telegram_user_id}")
+            usage = await subscription_service.get_user_usage(int(telegram_user_id))
+            reset_at = usage.get("reset_at")
             return JSONResponse(
-                status_code=403, 
-                content={"error": "Достигнут лимит генерации идей для бесплатной подписки. Оформите подписку для снятия ограничений."}
+                status_code=403,
+                content={
+                    "error": f"Достигнут лимит генерации идей для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Оформите подписку для снятия ограничений."
+                }
             )
     
     return await save_suggested_ideas_batch(payload, request) 

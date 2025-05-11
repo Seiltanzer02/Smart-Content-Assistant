@@ -1364,7 +1364,12 @@ function App() {
       interval = window.setInterval(() => {
         setProgress(prev => (prev < 98 ? prev + Math.random() * 3 : prev));
       }, 100);
-    } else if (!isAnalyzing && !isGeneratingPostDetails) {
+    } else if (isGeneratingIdeas) {
+      setProgress(0);
+      interval = window.setInterval(() => {
+        setProgress(prev => (prev < 98 ? prev + Math.random() * 1.5 : prev)); // медленнее
+      }, 200); // медленнее
+    } else if (!isAnalyzing && !isGeneratingPostDetails && !isGeneratingIdeas) {
       setProgress(100);
       setTimeout(() => setProgress(0), 500);
     }
