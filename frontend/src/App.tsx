@@ -380,12 +380,6 @@ const CalendarDay = ({
         <div className="day-posts">
           {posts.map((post) => (
             <div key={post.id} className="post-item">
-              <div className="post-title" title={post.topic_idea}>
-                {post.topic_idea.length > 25 
-                  ? post.topic_idea.substring(0, 22) + '...'
-                  : post.topic_idea
-                }
-              </div>
               <div className="post-actions">
                 <button 
                   className="action-button edit-button" 
@@ -1332,7 +1326,7 @@ function App() {
           }
         }
         );
-        setCurrentPostText(response.data.generated_text);
+        setCurrentPostText(cleanPostText(response.data.generated_text));
         
         // Улучшенное формирование объектов PostImage из found_images
         if (response.data.found_images && Array.isArray(response.data.found_images)) {
@@ -1430,7 +1424,7 @@ function App() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isAnalyzing, isGeneratingPostDetails]);
+  }, [isAnalyzing, isGeneratingPostDetails, isGeneratingIdeas]);
 
   // Компонент загрузки
   if (loading) {
@@ -1527,7 +1521,7 @@ function App() {
         <div className="channel-selector">
           <label>Каналы: </label>
           <div className="custom-dropdown" style={{ position: 'relative', display: 'inline-block', minWidth: 220 }}>
-            <div className="selected" onClick={() => setDropdownOpen(v => !v)} style={{ border: '1px solid #ccc', borderRadius: 6, padding: '7px 12px', background: '#fff', cursor: 'pointer', minWidth: 180 }}>
+            <div className="selected" onClick={() => setDropdownOpen(v => !v)} style={{ border: '1px solid #ccc', borderRadius: 6, padding: '7px 12px', background: '#fff', cursor: 'pointer', minWidth: 180, color: '#222', fontWeight: 500 }}>
               {channelName || 'Выберите канал'}
               <span style={{ float: 'right', fontSize: 14, color: '#888' }}>{dropdownOpen ? '▲' : '▼'}</span>
             </div>
@@ -2000,6 +1994,12 @@ function App() {
       </footer>
     </div>
   );
+}
+
+// === ДОБАВЛЯЮ: Функция для очистки текста поста от лишних символов ===
+function cleanPostText(text: string) {
+  // Удаляем звездочки, markdown-символы, лишние пробелы
+  return text.replace(/[\*\_\#\-]+/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
 export default App;
