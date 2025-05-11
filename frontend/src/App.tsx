@@ -1927,26 +1927,26 @@ function App() {
                       
                       {selectedImage && (
                           <div className="selected-image-preview" style={{ marginTop: '15px', padding: '10px', border: 'none', borderRadius: '8px', background: 'none' }}>
-                            <h5 style={{ marginTop: '0', marginBottom: '10px' }}>Выбранное изображение:</h5>
-                            <div className="preview-container" style={{ textAlign: 'center', background: 'none', maxWidth: '100%', margin: 0, padding: 0 }}>
-                              <div className="image-preview-container" style={{ background: 'none', maxWidth: '100%', margin: 0, padding: 0, position: 'relative', display: 'inline-block' }}>
-                                {selectedImage && (
-                                  <img
-                                    src={selectedImage.preview_url || selectedImage.url}
-                                    alt={selectedImage.alt || 'Изображение'}
-                                    style={{ display: 'block', maxWidth: '220px', height: 'auto', maxHeight: '160px', margin: '0 auto', background: 'none', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}
-                                  />
-                                )}
-                                <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '10px' }}>
-                                  <button
+                              <h5 style={{ marginTop: '0', marginBottom: '10px' }}>Выбранное изображение:</h5>
+                              <div className="preview-container" style={{ textAlign: 'center' }}>
+                                <div className="image-preview-container" style={{ background: 'none', maxWidth: '100%', margin: 0, padding: 0, display: 'inline-block', position: 'relative' }}>
+                                  {selectedImage && (
+                                    <img
+                                      src={selectedImage.preview_url || selectedImage.url}
+                                      alt={selectedImage.alt || 'Изображение'}
+                                      style={{ display: 'block', maxWidth: '100%', height: 'auto', maxHeight: '60vh', margin: '0 auto', background: 'none', borderRadius: '8px' }}
+                                    />
+                                  )}
+                                </div>
+                                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '10px' }}>
+                                  <button 
                                     className="action-button delete-button small remove-image-btn"
                                     onClick={() => {
                                       setSelectedImage(null);
                                     }}
-                                    title="Отменить выбор"
-                                    style={{ background: '#d32f2f', color: 'white' }}
+                                    title="Удалить выбранное изображение"
                                   >
-                                    <span role="img" aria-label="Удалить">🗑️</span> Отменить выбор
+                                    <span>🗑️ Отменить выбор</span>
                                   </button>
                                   <button
                                     className="action-button download-button small"
@@ -1959,21 +1959,18 @@ function App() {
                                       document.body.removeChild(link);
                                     }}
                                     title="Скачать изображение"
-                                    style={{ background: '#1976d2', color: 'white' }}
                                   >
-                                    <span role="img" aria-label="Скачать">⬇️</span> Скачать
+                                    ⬇️ Скачать
                                   </button>
                                   <button
-                                    className="action-button zoom-button small"
+                                    className="action-button small"
                                     onClick={() => setIsImageModalOpen(true)}
                                     title="Приблизить изображение"
-                                    style={{ background: '#388e3c', color: 'white' }}
                                   >
-                                    <span role="img" aria-label="Приблизить">🔍</span> Приблизить
+                                    🔍 Приблизить
                                   </button>
                                 </div>
                               </div>
-                            </div>
                           </div>
                       )}
                 </div>
@@ -2033,59 +2030,7 @@ function cleanPostText(text: string) {
   return text.replace(/[\*\_\#\-]+/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
-// ... существующий код ...
-{selectedImage && (
-  <div className="selected-image-preview" style={{ marginTop: '15px', padding: '10px', border: 'none', borderRadius: '8px', background: 'none' }}>
-    <h5 style={{ marginTop: '0', marginBottom: '10px' }}>Выбранное изображение:</h5>
-    <div className="preview-container" style={{ textAlign: 'center', background: 'none', maxWidth: '100%', margin: 0, padding: 0 }}>
-      <div className="image-preview-container" style={{ background: 'none', maxWidth: '100%', margin: 0, padding: 0, position: 'relative', display: 'inline-block' }}>
-        {selectedImage && (
-          <img
-            src={selectedImage.preview_url || selectedImage.url}
-            alt={selectedImage.alt || 'Изображение'}
-            style={{ display: 'block', maxWidth: '220px', height: 'auto', maxHeight: '160px', margin: '0 auto', background: 'none', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}
-          />
-        )}
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '10px' }}>
-          <button
-            className="action-button delete-button small remove-image-btn"
-            onClick={() => {
-              setSelectedImage(null);
-            }}
-            title="Отменить выбор"
-            style={{ background: '#d32f2f', color: 'white' }}
-          >
-            <span role="img" aria-label="Удалить">🗑️</span> Отменить выбор
-          </button>
-          <button
-            className="action-button download-button small"
-            onClick={() => {
-              const link = document.createElement('a');
-              link.href = selectedImage.url;
-              link.download = selectedImage.alt || 'image.jpg';
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
-            }}
-            title="Скачать изображение"
-            style={{ background: '#1976d2', color: 'white' }}
-          >
-            <span role="img" aria-label="Скачать">⬇️</span> Скачать
-          </button>
-          <button
-            className="action-button zoom-button small"
-            onClick={() => setIsImageModalOpen(true)}
-            title="Приблизить изображение"
-            style={{ background: '#388e3c', color: 'white' }}
-          >
-            <span role="img" aria-label="Приблизить">🔍</span> Приблизить
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-)}
-{/* --- Модальное окно для увеличенного просмотра изображения --- */}
+// --- Модальное окно для предпросмотра изображения ---
 {isImageModalOpen && selectedImage && (
   <div style={{
     position: 'fixed',
@@ -2093,17 +2038,17 @@ function cleanPostText(text: string) {
     left: 0,
     width: '100vw',
     height: '100vh',
-    background: 'rgba(0,0,0,0.7)',
+    background: 'rgba(0,0,0,0.85)',
     zIndex: 1000,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
   }}>
-    <div style={{ position: 'relative', background: '#222', borderRadius: '12px', padding: '24px', boxShadow: '0 4px 24px rgba(0,0,0,0.3)' }}>
+    <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }}>
       <img
         src={selectedImage.url}
         alt={selectedImage.alt || 'Изображение'}
-        style={{ maxWidth: '80vw', maxHeight: '70vh', borderRadius: '8px', background: 'none', display: 'block' }}
+        style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: '10px', boxShadow: '0 2px 16px #0008' }}
       />
       <button
         onClick={() => setIsImageModalOpen(false)}
@@ -2111,21 +2056,21 @@ function cleanPostText(text: string) {
           position: 'absolute',
           top: 10,
           right: 10,
-          background: '#d32f2f',
-          color: 'white',
+          background: '#fff',
+          color: '#222',
           border: 'none',
           borderRadius: '50%',
           width: 36,
           height: 36,
           fontSize: 22,
+          fontWeight: 'bold',
           cursor: 'pointer',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.18)'
+          boxShadow: '0 2px 8px #0004',
         }}
         title="Закрыть"
       >✖</button>
     </div>
   </div>
 )}
-// ... существующий код ...
 
 export default App;
