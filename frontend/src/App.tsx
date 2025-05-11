@@ -457,6 +457,8 @@ function App() {
   const [analyzeLimitExceeded, setAnalyzeLimitExceeded] = useState(false);
   const [ideasLimitExceeded, setIdeasLimitExceeded] = useState(false);
   const [postLimitExceeded, setPostLimitExceeded] = useState(false);
+  // === ДОБАВЛЯЮ: Состояние для модального окна предпросмотра ===
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   // === ДОБАВЛЯЮ: Функция для добавления канала в allChannels ===
   const addChannelToAllChannels = (channel: string) => {
     const normalized = normalizeChannelName(channel);
@@ -2020,6 +2022,49 @@ function App() {
       <footer className="app-footer">
         <p>© 2024 Smart Content Assistant</p>
       </footer>
+
+      {/* Модальное окно предпросмотра изображения */}
+      {isImageModalOpen && selectedImage && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0,0,0,0.85)',
+          zIndex: 1000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }}>
+            <img
+              src={selectedImage.url}
+              alt={selectedImage.alt || 'Изображение'}
+              style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: '10px', boxShadow: '0 2px 16px #0008' }}
+            />
+            <button
+              onClick={() => setIsImageModalOpen(false)}
+              style={{
+                position: 'absolute',
+                top: 10,
+                right: 10,
+                background: '#fff',
+                color: '#222',
+                border: 'none',
+                borderRadius: '50%',
+                width: 36,
+                height: 36,
+                fontSize: 22,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px #0004',
+              }}
+              title="Закрыть"
+            >✖</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2029,48 +2074,5 @@ function cleanPostText(text: string) {
   // Удаляем звездочки, markdown-символы, лишние пробелы
   return text.replace(/[\*\_\#\-]+/g, '').replace(/\s{2,}/g, ' ').trim();
 }
-
-// --- Модальное окно для предпросмотра изображения ---
-{isImageModalOpen && selectedImage && (
-  <div style={{
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    width: '100vw',
-    height: '100vh',
-    background: 'rgba(0,0,0,0.85)',
-    zIndex: 1000,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  }}>
-    <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }}>
-      <img
-        src={selectedImage.url}
-        alt={selectedImage.alt || 'Изображение'}
-        style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: '10px', boxShadow: '0 2px 16px #0008' }}
-      />
-      <button
-        onClick={() => setIsImageModalOpen(false)}
-        style={{
-          position: 'absolute',
-          top: 10,
-          right: 10,
-          background: '#fff',
-          color: '#222',
-          border: 'none',
-          borderRadius: '50%',
-          width: 36,
-          height: 36,
-          fontSize: 22,
-          fontWeight: 'bold',
-          cursor: 'pointer',
-          boxShadow: '0 2px 8px #0004',
-        }}
-        title="Закрыть"
-      >✖</button>
-    </div>
-  </div>
-)}
 
 export default App;
