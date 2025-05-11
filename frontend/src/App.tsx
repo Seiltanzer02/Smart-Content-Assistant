@@ -1410,13 +1410,13 @@ function App() {
     if (isAnalyzing || isGeneratingPostDetails) {
       setProgress(0);
       interval = window.setInterval(() => {
-        setProgress(prev => (prev < 98 ? prev + Math.random() * 3 : prev));
+        setProgress(prev => (prev < 98 ? prev + Math.random() * 1.5 : prev)); // Было *3, стало *1.5 (в 2 раза медленнее)
       }, 100);
     } else if (isGeneratingIdeas) {
       setProgress(0);
       interval = window.setInterval(() => {
-        setProgress(prev => (prev < 98 ? prev + Math.random() * 1.5 : prev)); // медленнее
-      }, 200); // медленнее
+        setProgress(prev => (prev < 98 ? prev + Math.random() * 2.5 : prev)); // Для идей чуть быстрее, чем для поста, но медленнее, чем было
+      }, 150); // Можно подстроить скорость
     } else if (!isAnalyzing && !isGeneratingPostDetails && !isGeneratingIdeas) {
       setProgress(100);
       setTimeout(() => setProgress(0), 500);
@@ -1624,10 +1624,10 @@ function App() {
               <h2>Идеи контента для @{channelName}</h2>
               
               {isGeneratingIdeas && (
-                <div className="loading-indicator">
-                  <div className="loading-spinner"></div>
-                  <p>Загрузка идей...</p>
-              </div>
+                <div style={{ margin: '20px 0' }}>
+                  <ProgressBar progress={progress} />
+                  <p>Генерируем идеи...</p>
+                </div>
               )}
 
               {suggestedIdeas.length > 0 ? (
