@@ -8,7 +8,9 @@ FREE_ANALYSIS_LIMIT = 5
 FREE_POST_LIMIT = 3
 FREE_IDEAS_LIMIT = 2
 SUBSCRIPTION_DURATION_MONTHS = 1
-RESET_PERIOD_DAYS = 14
+# ПЕРИОД СБРОСА ЛИМИТОВ (для тестирования установлен на 7 минут, вернуть на 14 дней после теста)
+RESET_PERIOD_DAYS = None  # Отключено, используем минуты ниже
+RESET_PERIOD_MINUTES = 7  # Для тестирования
 
 logger = logging.getLogger("subscription_service")
 
@@ -64,7 +66,7 @@ class SupabaseSubscriptionService:
             
             # Если записи нет — создаём с reset_at через 14 дней
             logger.info(f"Запись для пользователя {user_id} не найдена. Создаем новую.")
-            next_reset = now + timedelta(days=RESET_PERIOD_DAYS)
+            next_reset = now + timedelta(minutes=RESET_PERIOD_MINUTES)  # Тест: сброс через 7 минут
             new_record = {
                 "user_id": user_id,
                 "analysis_count": 0,
@@ -237,7 +239,7 @@ class SupabaseSubscriptionService:
     async def reset_usage_counters(self, user_id: int) -> Dict[str, Any]:
         """Сбрасывает счетчики использования и устанавливает новую дату сброса."""
         now = datetime.now(timezone.utc)
-        next_reset = now + timedelta(days=RESET_PERIOD_DAYS)
+        next_reset = now + timedelta(minutes=RESET_PERIOD_MINUTES)  # Тест: сброс через 7 минут
         update_data = {
             "analysis_count": 0,
             "post_generation_count": 0,
