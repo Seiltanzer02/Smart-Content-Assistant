@@ -27,8 +27,10 @@ async def openrouter_with_fallback(request_func, *args, mode=None, **kwargs):
         try:
             client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
             logger.info(f"Попытка вызова OpenRouter API с ключом {api_key[:6]}...")
-            # Если OpenRouter успешно отвечает — возвращаем результат и НЕ идём к GPT-3.5-turbo
             result = await request_func(client, *args, **kwargs)
+            if hasattr(result, "error") and result.error:
+                logger.warning(f"OpenRouter API вернул ошибку с ключом {api_key[:6]}...: {result.error}")
+                raise Exception(f"OpenRouter API error: {result.error}")
             logger.info(f"OpenRouter успешно вернул результат с ключом {api_key[:6]}... — fallback не требуется.")
             return result
         except Exception as e:
