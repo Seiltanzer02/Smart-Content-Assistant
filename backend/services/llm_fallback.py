@@ -232,7 +232,7 @@ async def openrouter_with_fallback(request_func, *args, **kwargs):
 # --- Анализ контента (fallback) ---
 async def analyze_content_with_deepseek_fallback(texts, api_key=None):
     from backend.deepseek_utils import analyze_content_with_deepseek as orig_analyze_content_with_deepseek
-    async def do_request(client):
+    async def do_request(client, texts, api_key):
         return await orig_analyze_content_with_deepseek(texts, api_key)
     try:
         return await openrouter_with_fallback(do_request, texts, api_key)
@@ -312,7 +312,7 @@ async def analyze_content_with_deepseek_fallback(texts, api_key=None):
 
 # --- Генерация плана ---
 async def generate_plan_llm(user_prompt, period_days, styles, channel_name):
-    async def do_request(client):
+    async def do_request(client, user_prompt, period_days, styles, channel_name):
         response = await client.chat.completions.create(
             model="deepseek/deepseek-chat-v3-0324:free",
             messages=[{"role": "user", "content": user_prompt}],
@@ -406,7 +406,7 @@ async def generate_plan_llm(user_prompt, period_days, styles, channel_name):
 
 # --- Генерация поста ---
 async def generate_post_llm(system_prompt, user_prompt):
-    async def do_request(client):
+    async def do_request(client, system_prompt, user_prompt):
         response = await client.chat.completions.create(
             model="deepseek/deepseek-chat-v3-0324:free",
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
@@ -421,14 +421,14 @@ async def generate_post_llm(system_prompt, user_prompt):
         if hasattr(response, "error") and response.error:
             raise Exception(f"OpenRouter API error: {response.error}")
         return response
-    response = await openrouter_with_fallback(do_request)
+    response = await openrouter_with_fallback(do_request, system_prompt, user_prompt)
     if hasattr(response, "error") and response.error:
         raise Exception(f"OpenRouter API error (post-fallback): {response.error}")
     return response
 
 # --- Генерация ключевых слов (LLM) ---
 async def generate_keywords_llm(system_prompt, user_prompt):
-    async def do_request(client):
+    async def do_request(client, system_prompt, user_prompt):
         response = await client.chat.completions.create(
             model="deepseek/deepseek-chat-v3-0324:free",
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
@@ -443,7 +443,7 @@ async def generate_keywords_llm(system_prompt, user_prompt):
         if hasattr(response, "error") and response.error:
             raise Exception(f"OpenRouter API error: {response.error}")
         return response
-    response = await openrouter_with_fallback(do_request)
+    response = await openrouter_with_fallback(do_request, system_prompt, user_prompt)
     if hasattr(response, "error") and response.error:
         raise Exception(f"OpenRouter API error (post-fallback): {response.error}")
     return response

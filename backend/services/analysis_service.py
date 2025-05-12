@@ -1,7 +1,7 @@
 from fastapi import Request, HTTPException
 from typing import List, Dict, Any, Optional
 from backend.telegram_utils import get_telegram_posts_via_http, get_telegram_posts_via_telethon, get_sample_posts
-from backend.deepseek_utils import analyze_content_with_deepseek
+from backend.services.llm_fallback import analyze_content_with_deepseek_fallback
 from backend.main import supabase, logger, OPENROUTER_API_KEY
 from backend.services.supabase_subscription_service import SupabaseSubscriptionService
 from datetime import datetime
@@ -76,7 +76,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         posts = posts[:20]
         logger.info(f"Анализируем {len(posts)} постов")
         texts = [post.get("text", "") for post in posts if post.get("text")]
-        analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
+        analysis_result = await analyze_content_with_deepseek_fallback(texts)
         themes = analysis_result.get("themes", [])
         styles = analysis_result.get("styles", [])
         # 5. Сохраняем результат анализа в БД
