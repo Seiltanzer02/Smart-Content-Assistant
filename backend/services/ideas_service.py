@@ -1,7 +1,7 @@
 # Сервис для работы с идеями и генерацией плана
 from fastapi import Request, HTTPException
 from typing import Dict, Any, List, Optional
-from backend.main import supabase, logger, OPENROUTER_API_KEY, openrouter_with_fallback, generate_plan_llm
+from backend.main import supabase, logger, OPENROUTER_API_KEY
 from pydantic import BaseModel
 import random
 import re
@@ -9,6 +9,7 @@ import uuid
 from openai import AsyncOpenAI
 from backend.services.supabase_subscription_service import SupabaseSubscriptionService
 from datetime import datetime
+from backend.services.llm_fallback import openrouter_with_fallback, generate_plan_llm, generate_post_llm, generate_keywords_llm, generate_image_keywords, analyze_content_with_deepseek_fallback
 
 # Импорт моделей PlanItem, PlanGenerationResponse, SuggestedIdeasResponse, SaveIdeasRequest из main.py или отдельного файла моделей
 # from backend.models import PlanItem, PlanGenerationResponse, SuggestedIdeasResponse, SaveIdeasRequest
