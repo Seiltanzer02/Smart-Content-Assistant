@@ -1,6 +1,8 @@
 import os
 import logging
 from openai import AsyncOpenAI, OpenAIError
+import json
+import re
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_API_KEY2 = os.getenv("OPENROUTER_API_KEY2")
@@ -81,9 +83,29 @@ async def generate_plan_llm(user_prompt, period_days, styles, channel_name):
                 "X-Title": "Smart Content Assistant"
             }
         )
-        if hasattr(response, "error") and response.error:
-            raise Exception(f"OpenRouter API error: {response.error}")
-        return response
+        if response and hasattr(response, 'choices') and response.choices:
+            first_choice = response.choices[0]
+            if hasattr(first_choice, 'message') and first_choice.message and hasattr(first_choice.message, 'content'):
+                content = first_choice.message.content.strip()
+                logger.info(f"Ответ OpenRouter (план): {content[:100]}...")
+                try:
+                    json_match = re.search(r'(\{.*\})', content, re.DOTALL)
+                    if json_match:
+                        content_json = json.loads(json_match.group(1))
+                        logger.info(f"OpenRouter (план): JSON-ответ: {content_json}")
+                        return content_json
+                    else:
+                        return content
+                except Exception as e:
+                    logger.error(f"Ошибка парсинга JSON из ответа OpenRouter (план): {e}, content: {content}")
+                    return content
+            else:
+                logger.error(f"Ответ OpenRouter не содержит message.content: {first_choice}")
+                logger.error(f"Полный ответ: {response}")
+                raise Exception(f"OpenRouter: отсутствует message.content в ответе: {first_choice}")
+        else:
+            logger.error(f"Ответ OpenRouter не содержит choices: {response}")
+            raise Exception(f"OpenRouter: отсутствует choices в ответе: {response}")
     response = await openrouter_with_fallback(do_request)
     if hasattr(response, "error") and response.error:
         raise Exception(f"OpenRouter API error (post-fallback): {response.error}")
@@ -102,9 +124,29 @@ async def generate_post_llm(system_prompt, user_prompt):
                 "X-Title": "Smart Content Assistant"
             }
         )
-        if hasattr(response, "error") and response.error:
-            raise Exception(f"OpenRouter API error: {response.error}")
-        return response
+        if response and hasattr(response, 'choices') and response.choices:
+            first_choice = response.choices[0]
+            if hasattr(first_choice, 'message') and first_choice.message and hasattr(first_choice.message, 'content'):
+                content = first_choice.message.content.strip()
+                logger.info(f"Ответ OpenRouter (пост): {content[:100]}...")
+                try:
+                    json_match = re.search(r'(\{.*\})', content, re.DOTALL)
+                    if json_match:
+                        content_json = json.loads(json_match.group(1))
+                        logger.info(f"OpenRouter (пост): JSON-ответ: {content_json}")
+                        return content_json
+                    else:
+                        return content
+                except Exception as e:
+                    logger.error(f"Ошибка парсинга JSON из ответа OpenRouter (пост): {e}, content: {content}")
+                    return content
+            else:
+                logger.error(f"Ответ OpenRouter не содержит message.content: {first_choice}")
+                logger.error(f"Полный ответ: {response}")
+                raise Exception(f"OpenRouter: отсутствует message.content в ответе: {first_choice}")
+        else:
+            logger.error(f"Ответ OpenRouter не содержит choices: {response}")
+            raise Exception(f"OpenRouter: отсутствует choices в ответе: {response}")
     response = await openrouter_with_fallback(do_request)
     if hasattr(response, "error") and response.error:
         raise Exception(f"OpenRouter API error (post-fallback): {response.error}")
@@ -123,9 +165,18 @@ async def generate_keywords_llm(system_prompt, user_prompt):
                 "X-Title": "Smart Content Assistant"
             }
         )
-        if hasattr(response, "error") and response.error:
-            raise Exception(f"OpenRouter API error: {response.error}")
-        return response
+        if response and hasattr(response, 'choices') and response.choices:
+            first_choice = response.choices[0]
+            if hasattr(first_choice, 'message') and first_choice.message and hasattr(first_choice.message, 'content'):
+                logger.info(f"Ответ OpenRouter (keywords): {first_choice.message.content[:100]}...")
+                return response
+            else:
+                logger.error(f"Ответ OpenRouter не содержит message.content: {first_choice}")
+                logger.error(f"Полный ответ: {response}")
+                raise Exception(f"OpenRouter: отсутствует message.content в ответе: {first_choice}")
+        else:
+            logger.error(f"Ответ OpenRouter не содержит choices: {response}")
+            raise Exception(f"OpenRouter: отсутствует choices в ответе: {response}")
     response = await openrouter_with_fallback(do_request)
     if hasattr(response, "error") and response.error:
         raise Exception(f"OpenRouter API error (post-fallback): {response.error}")
