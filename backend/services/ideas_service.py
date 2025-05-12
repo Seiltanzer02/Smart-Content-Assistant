@@ -1,7 +1,7 @@
 # Сервис для работы с идеями и генерацией плана
 from fastapi import Request, HTTPException
 from typing import Dict, Any, List, Optional
-from backend.main import supabase, logger, OPENROUTER_API_KEY
+from backend.main import supabase, logger, OPENROUTER_API_KEY, openrouter_with_fallback, generate_plan_llm
 from pydantic import BaseModel
 import random
 import re
@@ -9,7 +9,6 @@ import uuid
 from openai import AsyncOpenAI
 from backend.services.supabase_subscription_service import SupabaseSubscriptionService
 from datetime import datetime
-from backend.services.llm_fallback import openrouter_with_fallback, generate_plan_llm, generate_post_llm, generate_keywords_llm, generate_image_keywords, analyze_content_with_deepseek_fallback
 
 # Импорт моделей PlanItem, PlanGenerationResponse, SuggestedIdeasResponse, SaveIdeasRequest из main.py или отдельного файла моделей
 # from backend.models import PlanItem, PlanGenerationResponse, SuggestedIdeasResponse, SaveIdeasRequest
@@ -79,19 +78,23 @@ async def generate_content_plan(request: Request, req):
             logger.warning(f"Запрос с пустыми темами или стилями: themes={themes}, styles={styles}")
             return {"plan": [], "message": "Необходимо указать темы и стили для генерации плана"}
         user_prompt = f"""Сгенерируй план контента для Telegram-канала \"{channel_name}\" на {period_days} дней.\nТемы: {', '.join(themes)}\nСтили (используй ТОЛЬКО их): {', '.join(styles)}\n\nВыдай ровно {period_days} строк СТРОГО в формате:\nДень <номер_дня>:: <Идея поста>:: <Стиль из списка>\n\nНе включай ничего, кроме этих строк."""
-        response = await generate_plan_llm(user_prompt, period_days, styles, channel_name)
+        # --- Новый вызов с fallback ---
+        try:
+            response = await generate_plan_llm(user_prompt, period_days, styles, channel_name)
+        except Exception as e:
+            logger.error(f"Ошибка при генерации плана через OpenRouter с fallback: {e}")
+            return {"plan": [], "message": f"Ошибка при генерации плана: {str(e)}"}
         plan_text = ""
-        # Универсальный парсер результата
-        if isinstance(response, str):
-            plan_text = response.strip()
-        elif hasattr(response, 'choices') and response.choices and hasattr(response.choices[0], 'message') and response.choices[0].message and response.choices[0].message.content:
+        if response and hasattr(response, 'choices') and response.choices and response.choices[0].message and response.choices[0].message.content:
             plan_text = response.choices[0].message.content.strip()
-        elif isinstance(response, list) and response and isinstance(response[0], str):
-            plan_text = response[0].strip()
+            logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
         else:
-            logger.error(f"Некорректный или пустой ответ от LLM при генерации плана. Ответ: {response}")
-            plan_text = ""
-        logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
+            logger.error(f"Некорректный или пустой ответ от OpenRouter API при генерации плана. Status: {getattr(response, 'response', None)}")
+            try:
+                raw_response_content = str(response)
+                logger.error(f"Полный ответ API (или его представление): {raw_response_content}")
+            except Exception as log_err:
+                logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
         plan_items = []
         lines = plan_text.split('\n') if plan_text else []
         expected_style_set = set(s.lower() for s in styles)
