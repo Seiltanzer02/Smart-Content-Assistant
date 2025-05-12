@@ -4148,22 +4148,111 @@ from openai import AsyncOpenAI, OpenAIError
 async def openrouter_with_fallback(request_func, *args, **kwargs):
     """Выполняет запрос к OpenRouter с fallback на второй ключ при ошибке."""
     errors = []
+    # Добавляем импорт специфичных ошибок и логгер
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        # Пытаемся импортировать специфичные ошибки OpenAI
+        from openai import RateLimitError, APIStatusError, APIError
+        openai_errors_imported = True
+    except ImportError:
+        openai_errors_imported = False
+        logger.warning("Не удалось импортировать специфичные ошибки openai. Будет использована базовая проверка статуса/текста.")
+
     for api_key in [OPENROUTER_API_KEY, OPENROUTER_API_KEY2]:
         if not api_key:
+            logger.warning("Пропуск попытки: API ключ отсутствует.")
             continue
         try:
             client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
-            return await request_func(client, *args, **kwargs)
+            logger.info(f"Попытка вызова OpenRouter API с ключом {api_key[:6]}...")
+            response = await request_func(client, *args, **kwargs)
+
+            # === НАЧАЛО ИЗМЕНЕНИЯ: Проверка ответа на наличие ошибки ===
+            # Проверяем, вернулся ли объект с полем 'error' (как в ChatCompletion)
+            # и является ли ошибка retryable (например, 429 Rate Limit)
+            if hasattr(response, 'error') and response.error is not None:
+                error_details = response.error
+                # Пытаемся получить код ошибки. Структура может отличаться.
+                error_code = None
+                if isinstance(error_details, dict):
+                    error_code = error_details.get('code')
+                # или, если error это объект, пробуем getattr
+                elif hasattr(error_details, 'code'):
+                     error_code = getattr(error_details, 'code', None)
+                
+                # Преобразуем текстовые коды ошибок в int, если возможно
+                if isinstance(error_code, str) and error_code.isdigit():
+                    error_code = int(error_code)
+
+                if error_code == 429:
+                    logger.warning(f"Ответ API (не исключение) содержит ошибку 429 Rate Limit для ключа {api_key[:6]}... Попытка следующего ключа.")
+                    # Сохраняем ошибку и переходим к следующему ключу
+                    errors.append(f"Key {api_key[:6]}...: Response Error Code 429 - {str(error_details)}")
+                    continue # Пробуем следующий ключ
+                else:
+                    # Если ошибка в ответе не 429, считаем ее фатальной для этой попытки
+                    logger.error(f"Ответ API (не исключение) содержит не-retryable ошибку ({error_code}) для ключа {api_key[:6]}...: {str(error_details)}. Прерывание попыток.")
+                    errors.append(f"Key {api_key[:6]}...: Response Error Code {error_code} - {str(error_details)}")
+                    break # Прерываем цикл
+
+            # Если ошибки в ответе нет, возвращаем успешный результат
+            logger.info(f"Успешный ответ от OpenRouter API с ключом {api_key[:6]}...")
+            return response
+            # === КОНЕЦ ИЗМЕНЕНИЯ ===
+
         except Exception as e:
-            errors.append(str(e))
-            # Если ошибка авторизации или лимита, пробуем второй ключ
-            if hasattr(e, 'status_code') and e.status_code in [401, 403, 429, 500, 502, 503, 504]:
-                continue
-            if 'rate limit' in str(e).lower() or 'quota' in str(e).lower():
-                continue
-            # Для других ошибок не пробуем второй ключ
-            break
-    raise Exception(f"Ошибка OpenRouter API (оба ключа): {' | '.join(errors)}")
+            error_message = str(e)
+            errors.append(f"Key {api_key[:6]}...: {error_message}")
+            logger.warning(f"Ошибка при вызове OpenRouter API с ключом {api_key[:6]}...: {e}")
+
+            should_retry = False
+            if openai_errors_imported:
+                # Новая логика с проверкой типов исключений
+                if isinstance(e, RateLimitError):
+                    logger.warning(f"Поймана ошибка RateLimitError с ключом {api_key[:6]}... Попытка следующего ключа.")
+                    should_retry = True
+                elif isinstance(e, APIStatusError):
+                     if e.status_code == 429:
+                         logger.warning(f"Поймана ошибка APIStatusError 429 (Rate Limit) с ключом {api_key[:6]}... Попытка следующего ключа.")
+                         should_retry = True
+                     elif e.status_code in [401, 403]: # Authentication/Permission errors
+                         logger.warning(f"Поймана ошибка APIStatusError {e.status_code} (Auth/Permission) с ключом {api_key[:6]}... Попытка следующего ключа.")
+                         should_retry = True
+                     elif e.status_code in [500, 502, 503, 504]: # Server errors
+                         logger.warning(f"Поймана ошибка APIStatusError {e.status_code} (Server Error) с ключом {api_key[:6]}... Попытка следующего ключа.")
+                         should_retry = True
+                     else:
+                          logger.error(f"Поймана непредусмотренная ошибка APIStatusError {e.status_code} с ключом {api_key[:6]}... Прерывание попыток.")
+                          # Не делаем retry для других статус-кодов (напр., 400 Bad Request)
+                elif isinstance(e, APIError): # Общая ошибка API (если не поймали специфичные)
+                    logger.warning(f"Поймана общая ошибка APIError с ключом {api_key[:6]}...: {e}. Попытка следующего ключа (на всякий случай).")
+                    should_retry = True # Можно решить не ретраить на все APIError
+                else:
+                    # Не ошибка OpenAI API - не ретраим
+                    logger.error(f"Поймана неожиданная ошибка (не APIError) с ключом {api_key[:6]}...: {e}. Прерывание попыток.")
+            else:
+                # Старая логика, если импорт не удался
+                if hasattr(e, 'status_code') and e.status_code in [401, 403, 429, 500, 502, 503, 504]:
+                     logger.warning(f"(Fallback logic) Ошибка со статус кодом {e.status_code} для ключа {api_key[:6]}... Попытка следующего.")
+                     should_retry = True
+                elif 'rate limit' in error_message.lower() or 'quota' in error_message.lower():
+                     logger.warning(f"(Fallback logic) Ошибка содержит 'rate limit' или 'quota' для ключа {api_key[:6]}... Попытка следующего.")
+                     should_retry = True
+                else:
+                    logger.error(f"(Fallback logic) Непредусмотренная ошибка для ключа {api_key[:6]}...: {e}. Прерывание попыток.")
+
+            if should_retry:
+                continue # Пробуем следующий ключ
+            else:
+                break # Прерываем цикл для неретраиваемых ошибок
+
+    # Если цикл завершился без успешного return, выбрасываем исключение
+    logger.error(f"Ошибка OpenRouter API после попытки с обоими ключами. Собранные ошибки: {errors}")
+    # Можно перевыбросить последнее пойманное исключение `e`, если оно было и цикл прервался
+    # Или выбросить новое общее исключение
+    raise Exception(f"Ошибка OpenRouter API (оба ключа не сработали). Последние ошибки: {' | '.join(errors)}")
+
 
 # --- Модифицирую вызовы LLM ---
 # 1. Анализ канала (analyze_content_with_deepseek)
