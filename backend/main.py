@@ -4166,41 +4166,7 @@ async def openrouter_with_fallback(request_func, *args, **kwargs):
         try:
             client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
             logger.info(f"Попытка вызова OpenRouter API с ключом {api_key[:6]}...")
-            response = await request_func(client, *args, **kwargs)
-
-            # === НАЧАЛО ИЗМЕНЕНИЯ: Проверка ответа на наличие ошибки ===
-            # Проверяем, вернулся ли объект с полем 'error' (как в ChatCompletion)
-            # и является ли ошибка retryable (например, 429 Rate Limit)
-            if hasattr(response, 'error') and response.error is not None:
-                error_details = response.error
-                # Пытаемся получить код ошибки. Структура может отличаться.
-                error_code = None
-                if isinstance(error_details, dict):
-                    error_code = error_details.get('code')
-                # или, если error это объект, пробуем getattr
-                elif hasattr(error_details, 'code'):
-                     error_code = getattr(error_details, 'code', None)
-                
-                # Преобразуем текстовые коды ошибок в int, если возможно
-                if isinstance(error_code, str) and error_code.isdigit():
-                    error_code = int(error_code)
-
-                if error_code == 429:
-                    logger.warning(f"Ответ API (не исключение) содержит ошибку 429 Rate Limit для ключа {api_key[:6]}... Попытка следующего ключа.")
-                    # Сохраняем ошибку и переходим к следующему ключу
-                    errors.append(f"Key {api_key[:6]}...: Response Error Code 429 - {str(error_details)}")
-                    continue # Пробуем следующий ключ
-                else:
-                    # Если ошибка в ответе не 429, считаем ее фатальной для этой попытки
-                    logger.error(f"Ответ API (не исключение) содержит не-retryable ошибку ({error_code}) для ключа {api_key[:6]}...: {str(error_details)}. Прерывание попыток.")
-                    errors.append(f"Key {api_key[:6]}...: Response Error Code {error_code} - {str(error_details)}")
-                    break # Прерываем цикл
-
-            # Если ошибки в ответе нет, возвращаем успешный результат
-            logger.info(f"Успешный ответ от OpenRouter API с ключом {api_key[:6]}...")
-            return response
-            # === КОНЕЦ ИЗМЕНЕНИЯ ===
-
+            return await request_func(client, *args, **kwargs)
         except Exception as e:
             error_message = str(e)
             errors.append(f"Key {api_key[:6]}...: {error_message}")
@@ -4272,7 +4238,7 @@ async def analyze_content_with_deepseek_fallback(texts, api_key=None):
 # 2. Генерация плана (generate_content_plan)
 async def generate_plan_llm(user_prompt, period_days, styles, channel_name):
     async def do_request(client):
-        return await client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="deepseek/deepseek-chat-v3-0324:free",
             messages=[{"role": "user", "content": user_prompt}],
             temperature=0.7,
@@ -4283,12 +4249,20 @@ async def generate_plan_llm(user_prompt, period_days, styles, channel_name):
                 "X-Title": "Smart Content Assistant"
             }
         )
-    return await openrouter_with_fallback(do_request)
+        # --- Проверка на ошибку API ---
+        if hasattr(response, "error") and response.error:
+            raise Exception(f"OpenRouter API error: {response.error}")
+        return response
+    response = await openrouter_with_fallback(do_request)
+    # --- Дополнительная проверка после получения ответа ---
+    if hasattr(response, "error") and response.error:
+        raise Exception(f"OpenRouter API error (post-fallback): {response.error}")
+    return response
 
 # 3. Генерация деталей поста (generate_post_details)
 async def generate_post_llm(system_prompt, user_prompt):
     async def do_request(client):
-        return await client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="deepseek/deepseek-chat-v3-0324:free",
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
             temperature=0.7,
@@ -4299,12 +4273,18 @@ async def generate_post_llm(system_prompt, user_prompt):
                 "X-Title": "Smart Content Assistant"
             }
         )
-    return await openrouter_with_fallback(do_request)
+        if hasattr(response, "error") and response.error:
+            raise Exception(f"OpenRouter API error: {response.error}")
+        return response
+    response = await openrouter_with_fallback(do_request)
+    if hasattr(response, "error") and response.error:
+        raise Exception(f"OpenRouter API error (post-fallback): {response.error}")
+    return response
 
 # 4. Генерация ключевых слов для изображений (generate_image_keywords)
 async def generate_keywords_llm(system_prompt, user_prompt):
     async def do_request(client):
-        return await client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="deepseek/deepseek-chat-v3-0324:free",
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
             temperature=0.7,
@@ -4315,5 +4295,11 @@ async def generate_keywords_llm(system_prompt, user_prompt):
                 "X-Title": "Smart Content Assistant"
             }
         )
-    return await openrouter_with_fallback(do_request)
+        if hasattr(response, "error") and response.error:
+            raise Exception(f"OpenRouter API error: {response.error}")
+        return response
+    response = await openrouter_with_fallback(do_request)
+    if hasattr(response, "error") and response.error:
+        raise Exception(f"OpenRouter API error (post-fallback): {response.error}")
+    return response
 
