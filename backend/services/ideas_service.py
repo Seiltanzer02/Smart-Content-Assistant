@@ -88,16 +88,16 @@ async def generate_content_plan(request: Request, req):
             logger.error(f"Ошибка при генерации плана через OpenRouter с fallback: {e}")
             return {"plan": [], "message": f"Ошибка при генерации плана: {str(e)}"}
         plan_text = ""
-        if response and hasattr(response, 'choices') and response.choices and response.choices[0].message and response.choices[0].message.content:
-            plan_text = response.choices[0].message.content.strip()
-            logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
+        if response and hasattr(response, 'choices') and response.choices:
+            first_choice = response.choices[0]
+            if hasattr(first_choice, 'message') and first_choice.message and hasattr(first_choice.message, 'content'):
+                plan_text = first_choice.message.content.strip()
+                logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
+            else:
+                logger.error(f"Ответ OpenRouter не содержит message.content: {first_choice}")
+                logger.error(f"Полный ответ: {response}")
         else:
-            logger.error(f"Некорректный или пустой ответ от OpenRouter API при генерации плана. Status: {getattr(response, 'response', None)}")
-            try:
-                raw_response_content = str(response)
-                logger.error(f"Полный ответ API (или его представление): {raw_response_content}")
-            except Exception as log_err:
-                logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
+            logger.error(f"Ответ OpenRouter не содержит choices: {response}")
         plan_items = []
         lines = plan_text.split('\n') if plan_text else []
         expected_style_set = set(s.lower() for s in styles)
