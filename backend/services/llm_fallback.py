@@ -28,9 +28,24 @@ async def openrouter_with_fallback(request_func, *args, mode=None, **kwargs):
             client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
             logger.info(f"Попытка вызова OpenRouter API с ключом {api_key[:6]}...")
             result = await request_func(client, *args, **kwargs)
-            if hasattr(result, "error") and result.error:
-                logger.warning(f"OpenRouter API вернул ошибку с ключом {api_key[:6]}...: {result.error}")
-                raise Exception(f"OpenRouter API error: {result.error}")
+            # --- Новая универсальная проверка результата ---
+            def is_llm_error_content(content: str) -> bool:
+                error_keywords = [
+                    "rate limit", "quota", "error", "overloaded", "not available",
+                    "exceeded", "invalid", "unavailable", "limit"
+                ]
+                content_lower = content.lower()
+                return any(keyword in content_lower for keyword in error_keywords)
+            content = None
+            if hasattr(result, "choices") and result.choices and hasattr(result.choices[0], "message") and result.choices[0].message and result.choices[0].message.content:
+                content = result.choices[0].message.content.strip()
+            elif isinstance(result, str):
+                content = result.strip()
+            elif isinstance(result, dict) and result.get("content"):
+                content = str(result["content"]).strip()
+            if content is None or not content or is_llm_error_content(content):
+                logger.warning(f"OpenRouter API вернул невалидный/ошибочный текст: {content}")
+                raise Exception(f"OpenRouter API error: {content}")
             logger.info(f"OpenRouter успешно вернул результат с ключом {api_key[:6]}... — fallback не требуется.")
             return result
         except Exception as e:
@@ -145,7 +160,8 @@ async def openrouter_with_fallback(request_func, *args, mode=None, **kwargs):
             # --- Генерация поста ---
             elif _mode == "post":
                 system_prompt, user_prompt = args[0], args[1]
-                gpt_prompt = f"""Сгенерируй пост для Telegram-канала.\nТребования:\n- Используй стиль: {system_prompt}\n- Тема: {user_prompt}\n- Длина: 100-400 слов.\n- Без приветствий, только сам пост.\n- Без пояснений и заголовков!"""
+                gpt_prompt = f"""Сгенерируй пост для Telegram-канала. Требования: - Используй стиль: {system_prompt} - Тема: {user_prompt} - Длина: 100-400 слов. - Без приветствий, только сам пост. - Без пояснений и заголовков!
+Ты — опытный контент-маркетолог для Telegram-каналов. Твоя задача — сгенерировать текст поста на основе идеи и формата, который будет готов к публикации. Пост должен быть: 1. Хорошо структурированным и легко читаемым 2. Соответствовать указанной теме/идее 3. Соответствовать указанному формату/стилю 4. Иметь правильное форматирование для Telegram (если нужно — с эмодзи, абзацами, списками) 5. НЕ использовать никаких шаблонов, placeholder-ов ([Название], [Ссылка], [Начать сейчас], "...", "[текст]" и т.д.) — текст должен быть полностью готов к публикации, без мест для ручного заполнения. 6. Максимально копируй стиль, подачу и структуру канала на основе примеров постов, если они предоставлены. Не используй хэштеги, если это не является частью формата. Сделай пост уникальным и интересным, учитывая специфику Telegram-аудитории. Используй примеры постов канала, если они предоставлены, чтобы сохранить стиль."""
                 response = await client.chat.completions.create(
                     model="gpt-3.5-turbo",
                     messages=[{"role": "user", "content": gpt_prompt}],
