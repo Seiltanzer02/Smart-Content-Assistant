@@ -12,7 +12,7 @@ OPENROUTER_API_KEY2 = os.getenv("OPENROUTER_API_KEY2")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # --- Fallback-обёртка для запросов к OpenRouter ---
-async def openrouter_with_fallback(request_func, *args, **kwargs):
+async def openrouter_with_fallback(request_func, *args, mode=None, **kwargs):
     errors = []
     try:
         from openai import RateLimitError, APIStatusError, APIError
@@ -72,13 +72,14 @@ async def openrouter_with_fallback(request_func, *args, **kwargs):
             logger.info("Попытка вызова OpenAI GPT-3.5 turbo с запасным ключом...")
             client = AsyncOpenAI(api_key=OPENAI_API_KEY)
             func_name = getattr(request_func, '__name__', '')
+            # --- Явное определение типа запроса через mode ---
+            _mode = mode or func_name
             # --- Генерация плана (идей) ---
-            if func_name == "do_request" and len(args) >= 1 and isinstance(args[0], str) and 'plan' in (kwargs.get('mode', '') or func_name):
+            if _mode == "plan":
                 user_prompt = args[0]
                 period_days = args[1] if len(args) > 1 and isinstance(args[1], int) else 7
                 styles = args[2] if len(args) > 2 and isinstance(args[2], list) else []
                 channel_name = args[3] if len(args) > 3 and isinstance(args[3], str) else ""
-                # Строгий промпт для генерации плана
                 gpt_prompt = f"""Сгенерируй план контента для Telegram-канала \"{channel_name}\" на {period_days} дней.\nТемы: (укажи в каждой идее)\nСтили (используй ТОЛЬКО из списка): {', '.join(styles)}\n\nВыдай ровно {period_days} строк СТРОГО в формате:\nДень <номер_дня>:: <Идея поста>:: <Стиль из списка>\n\nТолько список, без пояснений и заголовков!"""
                 response = await client.chat.completions.create(
                     model="gpt-3.5-turbo",
@@ -88,7 +89,6 @@ async def openrouter_with_fallback(request_func, *args, **kwargs):
                     timeout=120
                 )
                 plan_text = response.choices[0].message.content.strip()
-                # Парсим результат регуляркой
                 plan_items = []
                 pattern = re.compile(r"День\s*(\d+)::\s*(.+?)::\s*(.+)")
                 for match in pattern.finditer(plan_text):
@@ -104,7 +104,6 @@ async def openrouter_with_fallback(request_func, *args, **kwargs):
                     except Exception as e:
                         logger.warning(f"Ошибка парсинга строки плана: {e}")
                 if not plan_items:
-                    # fallback: старый парсер
                     lines = plan_text.split('\n') if plan_text else []
                     expected_style_set = set(s.lower() for s in styles)
                     for line in lines:
@@ -139,7 +138,7 @@ async def openrouter_with_fallback(request_func, *args, **kwargs):
                 plan_items.sort(key=lambda x: x["day"])
                 return plan_items[:period_days]
             # --- Генерация поста ---
-            elif func_name == "do_request" and len(args) >= 2 and all(isinstance(a, str) for a in args[:2]) and 'post' in (kwargs.get('mode', '') or func_name):
+            elif _mode == "post":
                 system_prompt, user_prompt = args[0], args[1]
                 gpt_prompt = f"""Сгенерируй пост для Telegram-канала.\nТребования:\n- Используй стиль: {system_prompt}\n- Тема: {user_prompt}\n- Длина: 100-400 слов.\n- Без приветствий, только сам пост.\n- Без пояснений и заголовков!"""
                 response = await client.chat.completions.create(
@@ -155,7 +154,7 @@ async def openrouter_with_fallback(request_func, *args, **kwargs):
                     post_text = "[Текст не сгенерирован из-за ошибки API]"
                 return post_text
             # --- Генерация ключевых слов ---
-            elif func_name == "do_request" and len(args) >= 2 and all(isinstance(a, str) for a in args[:2]) and 'keyword' in (kwargs.get('mode', '') or func_name):
+            elif _mode == "keywords":
                 system_prompt, user_prompt = args[0], args[1]
                 gpt_prompt = f"""Твоя задача - сгенерировать 2-3 эффективных ключевых слова для поиска изображений.\nКлючевые слова должны точно отражать тематику текста и быть универсальными для поиска стоковых изображений.\nВыбирай короткие конкретные существительные на английском языке, даже если текст на русском.\nФормат ответа: список ключевых слов через запятую.\nТекст поста: {user_prompt}"""
                 response = await client.chat.completions.create(
@@ -173,7 +172,7 @@ async def openrouter_with_fallback(request_func, *args, **kwargs):
                     keywords = ["concept", "idea"]
                 return keywords
             # --- Анализ ---
-            elif func_name == "do_request" and len(args) >= 1 and isinstance(args[0], list) and 'analyz' in (kwargs.get('mode', '') or func_name):
+            elif _mode == "analyze":
                 texts = args[0]
                 user_prompt = (
                     "Проанализируй следующие посты Telegram-канала и выдели основные темы (3-5), стили оформления (2-3), "
@@ -219,7 +218,7 @@ async def openrouter_with_fallback(request_func, *args, **kwargs):
                     "error": "GPT-3.5-turbo не вернул корректный JSON"
                 }
             else:
-                raise Exception(f"GPT-3.5 fallback: не удалось определить тип запроса или аргументы некорректны: func_name={func_name}, args={args}")
+                raise Exception(f"GPT-3.5 fallback: не удалось определить тип запроса или аргументы некорректны: func_name={func_name}, args={args}, mode={_mode}")
         except Exception as e:
             error_message = str(e)
             errors.append(f"Key OPENAI_API_KEY: {error_message}")
@@ -235,7 +234,7 @@ async def analyze_content_with_deepseek_fallback(texts, api_key=None):
     async def do_request(client, texts, api_key):
         return await orig_analyze_content_with_deepseek(texts, api_key)
     try:
-        return await openrouter_with_fallback(do_request, texts, api_key)
+        return await openrouter_with_fallback(do_request, texts, api_key, mode="analyze")
     except Exception as e:
         logger.error(f"Ошибка анализа через DeepSeek/OpenRouter: {e}. Пробуем fallback на GPT-3.5-turbo...")
         # --- Fallback на GPT-3.5-turbo ---
@@ -328,7 +327,7 @@ async def generate_plan_llm(user_prompt, period_days, styles, channel_name):
             raise Exception(f"OpenRouter API error: {response.error}")
         return response
     try:
-        response = await openrouter_with_fallback(do_request, user_prompt, period_days, styles, channel_name)
+        response = await openrouter_with_fallback(do_request, user_prompt, period_days, styles, channel_name, mode="plan")
     except Exception as e:
         logger.error(f"Ошибка при генерации плана через OpenRouter с fallback: {e}")
         # Возвращаем базовый план, если всё сломалось
@@ -421,7 +420,7 @@ async def generate_post_llm(system_prompt, user_prompt):
         if hasattr(response, "error") and response.error:
             raise Exception(f"OpenRouter API error: {response.error}")
         return response
-    response = await openrouter_with_fallback(do_request, system_prompt, user_prompt)
+    response = await openrouter_with_fallback(do_request, system_prompt, user_prompt, mode="post")
     if hasattr(response, "error") and response.error:
         raise Exception(f"OpenRouter API error (post-fallback): {response.error}")
     return response
@@ -443,7 +442,7 @@ async def generate_keywords_llm(system_prompt, user_prompt):
         if hasattr(response, "error") and response.error:
             raise Exception(f"OpenRouter API error: {response.error}")
         return response
-    response = await openrouter_with_fallback(do_request, system_prompt, user_prompt)
+    response = await openrouter_with_fallback(do_request, system_prompt, user_prompt, mode="keywords")
     if hasattr(response, "error") and response.error:
         raise Exception(f"OpenRouter API error (post-fallback): {response.error}")
     return response
