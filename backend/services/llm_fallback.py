@@ -71,62 +71,153 @@ async def openrouter_with_fallback(request_func, *args, **kwargs):
         try:
             logger.info("Попытка вызова OpenAI GPT-3.5 turbo с запасным ключом...")
             client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-            # --- Определяем тип запроса по request_func и аргументам ---
             func_name = getattr(request_func, '__name__', '')
-            # Для генерации плана (generate_plan_llm)
-            if func_name == "do_request" and len(args) >= 1 and isinstance(args[0], str):
+            # --- Генерация плана (идей) ---
+            if func_name == "do_request" and len(args) >= 1 and isinstance(args[0], str) and 'plan' in (kwargs.get('mode', '') or func_name):
                 user_prompt = args[0]
                 period_days = args[1] if len(args) > 1 and isinstance(args[1], int) else 7
-                if not user_prompt or not isinstance(user_prompt, str):
-                    raise Exception("GPT-3.5: user_prompt отсутствует или не строка!")
-                return await client.chat.completions.create(
+                styles = args[2] if len(args) > 2 and isinstance(args[2], list) else []
+                channel_name = args[3] if len(args) > 3 and isinstance(args[3], str) else ""
+                # Строгий промпт для генерации плана
+                gpt_prompt = f"""Сгенерируй план контента для Telegram-канала \"{channel_name}\" на {period_days} дней.\nТемы: (укажи в каждой идее)\nСтили (используй ТОЛЬКО из списка): {', '.join(styles)}\n\nВыдай ровно {period_days} строк СТРОГО в формате:\nДень <номер_дня>:: <Идея поста>:: <Стиль из списка>\n\nТолько список, без пояснений и заголовков!"""
+                response = await client.chat.completions.create(
                     model="gpt-3.5-turbo",
-                    messages=[{"role": "user", "content": user_prompt}],
+                    messages=[{"role": "user", "content": gpt_prompt}],
                     temperature=0.7,
                     max_tokens=150 * period_days,
                     timeout=120
                 )
-            # Для генерации поста (generate_post_llm)
-            elif func_name == "do_request" and len(args) >= 2 and all(isinstance(a, str) for a in args[:2]):
+                plan_text = response.choices[0].message.content.strip()
+                # Парсим результат регуляркой
+                plan_items = []
+                pattern = re.compile(r"День\s*(\d+)::\s*(.+?)::\s*(.+)")
+                for match in pattern.finditer(plan_text):
+                    try:
+                        day = int(match.group(1))
+                        topic_idea = match.group(2).strip()
+                        format_style = match.group(3).strip()
+                        plan_items.append({
+                            "day": day,
+                            "topic_idea": topic_idea,
+                            "format_style": format_style
+                        })
+                    except Exception as e:
+                        logger.warning(f"Ошибка парсинга строки плана: {e}")
+                if not plan_items:
+                    # fallback: старый парсер
+                    lines = plan_text.split('\n') if plan_text else []
+                    expected_style_set = set(s.lower() for s in styles)
+                    for line in lines:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        parts = line.split('::')
+                        if len(parts) == 3:
+                            try:
+                                day_part = parts[0].lower().replace('день', '').strip()
+                                day = int(day_part)
+                                topic_idea = parts[1].strip()
+                                format_style = parts[2].strip()
+                                if format_style.lower() not in expected_style_set:
+                                    format_style = styles[0] if styles else "Без указания стиля"
+                                if topic_idea:
+                                    plan_items.append({
+                                        "day": day,
+                                        "topic_idea": topic_idea,
+                                        "format_style": format_style
+                                    })
+                            except Exception as parse_err:
+                                logger.warning(f"Ошибка парсинга строки плана '{line}': {parse_err}")
+                if not plan_items:
+                    logger.warning("GPT-3.5-turbo не сгенерировал корректный план, возвращаем базовый.")
+                    for day in range(1, period_days + 1):
+                        plan_items.append({
+                            "day": day,
+                            "topic_idea": f"Пост о {styles[0] if styles else 'Общая тема'}",
+                            "format_style": styles[0] if styles else "Общий стиль"
+                        })
+                plan_items.sort(key=lambda x: x["day"])
+                return plan_items[:period_days]
+            # --- Генерация поста ---
+            elif func_name == "do_request" and len(args) >= 2 and all(isinstance(a, str) for a in args[:2]) and 'post' in (kwargs.get('mode', '') or func_name):
                 system_prompt, user_prompt = args[0], args[1]
-                if not system_prompt or not isinstance(system_prompt, str):
-                    raise Exception("GPT-3.5: system_prompt отсутствует или не строка!")
-                if not user_prompt or not isinstance(user_prompt, str):
-                    raise Exception("GPT-3.5: user_prompt отсутствует или не строка!")
-                return await client.chat.completions.create(
+                gpt_prompt = f"""Сгенерируй пост для Telegram-канала.\nТребования:\n- Используй стиль: {system_prompt}\n- Тема: {user_prompt}\n- Длина: 100-400 слов.\n- Без приветствий, только сам пост.\n- Без пояснений и заголовков!"""
+                response = await client.chat.completions.create(
                     model="gpt-3.5-turbo",
-                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                    messages=[{"role": "user", "content": gpt_prompt}],
                     temperature=0.7,
                     max_tokens=850,
                     timeout=60
                 )
-            # Для генерации ключевых слов (generate_keywords_llm)
-            elif func_name == "do_request" and len(args) >= 2 and all(isinstance(a, str) for a in args[:2]):
+                post_text = response.choices[0].message.content.strip()
+                if not post_text or len(post_text) < 20:
+                    logger.warning("GPT-3.5-turbo не сгенерировал текст поста, возвращаем заглушку.")
+                    post_text = "[Текст не сгенерирован из-за ошибки API]"
+                return post_text
+            # --- Генерация ключевых слов ---
+            elif func_name == "do_request" and len(args) >= 2 and all(isinstance(a, str) for a in args[:2]) and 'keyword' in (kwargs.get('mode', '') or func_name):
                 system_prompt, user_prompt = args[0], args[1]
-                if not system_prompt or not isinstance(system_prompt, str):
-                    raise Exception("GPT-3.5: system_prompt отсутствует или не строка!")
-                if not user_prompt or not isinstance(user_prompt, str):
-                    raise Exception("GPT-3.5: user_prompt отсутствует или не строка!")
-                return await client.chat.completions.create(
+                gpt_prompt = f"""Твоя задача - сгенерировать 2-3 эффективных ключевых слова для поиска изображений.\nКлючевые слова должны точно отражать тематику текста и быть универсальными для поиска стоковых изображений.\nВыбирай короткие конкретные существительные на английском языке, даже если текст на русском.\nФормат ответа: список ключевых слов через запятую.\nТекст поста: {user_prompt}"""
+                response = await client.chat.completions.create(
                     model="gpt-3.5-turbo",
-                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                    messages=[{"role": "user", "content": gpt_prompt}],
                     temperature=0.7,
                     max_tokens=100,
                     timeout=15
                 )
-            # Для анализа (analyze_content_with_deepseek_fallback)
-            elif func_name == "do_request" and len(args) >= 1 and isinstance(args[0], list):
+                keywords_text = response.choices[0].message.content.strip()
+                keywords_list = re.split(r'[,;\n]', keywords_text)
+                keywords = [k.strip() for k in keywords_list if k.strip()]
+                if not keywords:
+                    logger.warning("GPT-3.5-turbo не сгенерировал ключевые слова, возвращаем базовые.")
+                    keywords = ["concept", "idea"]
+                return keywords
+            # --- Анализ ---
+            elif func_name == "do_request" and len(args) >= 1 and isinstance(args[0], list) and 'analyz' in (kwargs.get('mode', '') or func_name):
                 texts = args[0]
-                if not texts or not isinstance(texts, list) or not all(isinstance(t, str) for t in texts):
-                    raise Exception("GPT-3.5: texts отсутствует или не список строк!")
-                user_prompt = "\n\n".join(texts)
-                return await client.chat.completions.create(
+                user_prompt = (
+                    "Проанализируй следующие посты Telegram-канала и выдели основные темы (3-5), стили оформления (2-3), "
+                    "приведи 2-3 примера постов (коротко), и укажи лучшее время публикации (например, '18:00' или 'утро'). "
+                    "Ответ строго в формате JSON: {\"themes\": [...], \"styles\": [...], \"analyzed_posts_sample\": [...], \"best_posting_time\": \"...\"}. "
+                    "Посты для анализа:\n\n"
+                    + "\n---\n".join(texts[:5])
+                )
+                response = await client.chat.completions.create(
                     model="gpt-3.5-turbo",
                     messages=[{"role": "user", "content": user_prompt}],
-                    temperature=0.7,
+                    temperature=0.3,
                     max_tokens=512,
                     timeout=60
                 )
+                content = response.choices[0].message.content.strip()
+                import json
+                json_start = content.find('{')
+                json_end = content.rfind('}') + 1
+                if json_start != -1 and json_end > json_start:
+                    json_str = content[json_start:json_end]
+                    try:
+                        data = json.loads(json_str)
+                        return {
+                            "themes": data.get("themes", []),
+                            "styles": data.get("styles", []),
+                            "analyzed_posts_sample": data.get("analyzed_posts_sample", []),
+                            "best_posting_time": data.get("best_posting_time", ""),
+                            "analyzed_posts_count": len(texts),
+                            "message": "Анализ выполнен через GPT-3.5-turbo",
+                            "error": None
+                        }
+                    except Exception as json_err:
+                        logger.error(f"Ошибка парсинга JSON из ответа GPT-3.5-turbo: {json_err}")
+                logger.warning("GPT-3.5-turbo не вернул корректный JSON, возвращаем базовый анализ.")
+                return {
+                    "themes": [],
+                    "styles": [],
+                    "analyzed_posts_sample": texts[:3],
+                    "best_posting_time": "",
+                    "analyzed_posts_count": len(texts),
+                    "message": "LLM анализ недоступен (ошибка формата)",
+                    "error": "GPT-3.5-turbo не вернул корректный JSON"
+                }
             else:
                 raise Exception(f"GPT-3.5 fallback: не удалось определить тип запроса или аргументы некорректны: func_name={func_name}, args={args}")
         except Exception as e:
