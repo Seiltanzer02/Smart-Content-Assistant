@@ -4335,12 +4335,20 @@ async def generate_image_keywords(text: str, topic: str, format_style: str) -> l
         system_prompt = """Твоя задача - сгенерировать 2-3 эффективных ключевых слова для поиска изображений.\nКлючевые слова должны точно отражать тематику текста и быть универсальными для поиска стоковых изображений.\nВыбирай короткие конкретные существительные на английском языке, даже если текст на русском.\nФормат ответа: список ключевых слов через запятую."""
         user_prompt = f"""Текст поста: {text[:300]}...\n\nТематика поста: {topic}\nФормат поста: {format_style}\n\nВыдай 2-3 лучших ключевых слова на английском языке для поиска подходящих изображений. Только ключевые слова, без объяснений."""
         response = await generate_keywords_llm(system_prompt, user_prompt)
-        keywords_text = response.choices[0].message.content.strip()
-        keywords_list = re.split(r'[,;\n]', keywords_text)
-        keywords = [k.strip() for k in keywords_list if k.strip()]
-        if not keywords:
-            logger.warning("Не удалось получить ключевые слова от API, используем запасной вариант")
-            return [topic, format_style] + random.sample(["business", "abstract", "professional"], 2)
+        # Универсальный парсер результата
+        if isinstance(response, str):
+            keywords_text = response.strip()
+            keywords_list = re.split(r'[,;\n]', keywords_text)
+            keywords = [k.strip() for k in keywords_list if k.strip()]
+        elif hasattr(response, 'choices') and response.choices and hasattr(response.choices[0], 'message') and response.choices[0].message and response.choices[0].message.content:
+            keywords_text = response.choices[0].message.content.strip()
+            keywords_list = re.split(r'[,;\n]', keywords_text)
+            keywords = [k.strip() for k in keywords_list if k.strip()]
+        elif isinstance(response, list):
+            keywords = [str(k).strip() for k in response if k]
+        else:
+            logger.error(f"Некорректный или пустой ответ от LLM при генерации ключевых слов. Ответ: {response}")
+            keywords = []
         logger.info(f"Сгенерированы ключевые слова для поиска изображений: {keywords}")
         return keywords
     except Exception as e:

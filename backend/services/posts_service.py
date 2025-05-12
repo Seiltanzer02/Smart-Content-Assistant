@@ -8,6 +8,7 @@ import asyncio
 from datetime import datetime
 import traceback
 from backend.services.llm_fallback import generate_post_llm, generate_image_keywords
+import re
 
 # Импорт моделей PostImage, PostData, SavedPostResponse, PostDetailsResponse из main.py или отдельного файла моделей
 # from backend.models import PostImage, PostData, SavedPostResponse, PostDetailsResponse
@@ -373,14 +374,31 @@ async def generate_post_details(request: Request, req):
             user_prompt += f"""\n\nВот несколько примеров постов из этого канала для сохранения стиля:\n\n{sample_text}\n"""
         # Генерация поста через fallback-LLM
         response = await generate_post_llm(system_prompt, user_prompt)
-        if hasattr(response, 'choices') and response.choices and response.choices[0].message and response.choices[0].message.content:
+        post_text = None
+        # Универсальный парсер результата
+        if isinstance(response, str):
+            post_text = response.strip()
+        elif hasattr(response, 'choices') and response.choices and hasattr(response.choices[0], 'message') and response.choices[0].message and response.choices[0].message.content:
             post_text = response.choices[0].message.content.strip()
-            logger.info(f"Получен текст поста ({len(post_text)} символов)")
+        elif isinstance(response, list) and response and isinstance(response[0], str):
+            post_text = response[0].strip()
         else:
             logger.error(f"Некорректный или пустой ответ от LLM при генерации поста. Ответ: {response}")
             post_text = "[Текст не сгенерирован из-за ошибки LLM]"
+        if not post_text:
+            post_text = "[Текст не сгенерирован из-за ошибки LLM]"
         # Генерация ключевых слов для поиска изображений через fallback-LLM
         image_keywords = await generate_image_keywords(post_text, topic_idea, format_style)
+        if isinstance(image_keywords, str):
+            image_keywords = [image_keywords]
+        elif isinstance(image_keywords, list):
+            image_keywords = [str(k) for k in image_keywords if k]
+        elif hasattr(image_keywords, 'choices') and image_keywords.choices and hasattr(image_keywords.choices[0], 'message') and image_keywords.choices[0].message and image_keywords.choices[0].message.content:
+            keywords_text = image_keywords.choices[0].message.content.strip()
+            image_keywords = [k.strip() for k in re.split(r'[,;\n]', keywords_text) if k.strip()]
+        else:
+            logger.error(f"Некорректный или пустой ответ от LLM при генерации ключевых слов. Ответ: {image_keywords}")
+            image_keywords = []
         logger.info(f"Сгенерированы ключевые слова для поиска изображений: {image_keywords}")
         for keyword in image_keywords[:3]:
             try:

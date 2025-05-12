@@ -81,11 +81,17 @@ async def generate_content_plan(request: Request, req):
         user_prompt = f"""Сгенерируй план контента для Telegram-канала \"{channel_name}\" на {period_days} дней.\nТемы: {', '.join(themes)}\nСтили (используй ТОЛЬКО их): {', '.join(styles)}\n\nВыдай ровно {period_days} строк СТРОГО в формате:\nДень <номер_дня>:: <Идея поста>:: <Стиль из списка>\n\nНе включай ничего, кроме этих строк."""
         response = await generate_plan_llm(user_prompt, period_days, styles, channel_name)
         plan_text = ""
-        if response and hasattr(response, 'choices') and response.choices and response.choices[0].message and response.choices[0].message.content:
+        # Универсальный парсер результата
+        if isinstance(response, str):
+            plan_text = response.strip()
+        elif hasattr(response, 'choices') and response.choices and hasattr(response.choices[0], 'message') and response.choices[0].message and response.choices[0].message.content:
             plan_text = response.choices[0].message.content.strip()
-            logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
+        elif isinstance(response, list) and response and isinstance(response[0], str):
+            plan_text = response[0].strip()
         else:
             logger.error(f"Некорректный или пустой ответ от LLM при генерации плана. Ответ: {response}")
+            plan_text = ""
+        logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
         plan_items = []
         lines = plan_text.split('\n') if plan_text else []
         expected_style_set = set(s.lower() for s in styles)

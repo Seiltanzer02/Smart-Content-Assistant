@@ -6,6 +6,7 @@ from backend.main import supabase, logger, OPENROUTER_API_KEY
 from backend.services.supabase_subscription_service import SupabaseSubscriptionService
 from datetime import datetime
 from pydantic import BaseModel
+import json
 
 class AnalyzeRequest(BaseModel):
     username: str
@@ -77,8 +78,26 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         logger.info(f"Анализируем {len(posts)} постов")
         texts = [post.get("text", "") for post in posts if post.get("text")]
         analysis_result = await analyze_content_with_deepseek_fallback(texts)
-        themes = analysis_result.get("themes", [])
-        styles = analysis_result.get("styles", [])
+        # Универсальный парсер результата
+        if isinstance(analysis_result, dict):
+            themes = analysis_result.get("themes", [])
+            styles = analysis_result.get("styles", [])
+        elif isinstance(analysis_result, str):
+            try:
+                parsed = json.loads(analysis_result)
+                themes = parsed.get("themes", [])
+                styles = parsed.get("styles", [])
+            except Exception as e:
+                logger.error(f"Не удалось распарсить строку-ответ анализа как JSON: {e}, ответ: {analysis_result}")
+                themes = []
+                styles = []
+        elif isinstance(analysis_result, list) and analysis_result and isinstance(analysis_result[0], dict):
+            themes = analysis_result[0].get("themes", [])
+            styles = analysis_result[0].get("styles", [])
+        else:
+            logger.error(f"Некорректный или пустой ответ от LLM при анализе. Ответ: {analysis_result}")
+            themes = []
+            styles = []
         # 5. Сохраняем результат анализа в БД
         try:
             analysis_data = {
