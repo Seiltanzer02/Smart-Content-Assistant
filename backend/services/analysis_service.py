@@ -1,12 +1,11 @@
 from fastapi import Request, HTTPException
 from typing import List, Dict, Any, Optional
 from backend.telegram_utils import get_telegram_posts_via_http, get_telegram_posts_via_telethon, get_sample_posts
-from backend.services.llm_fallback import analyze_content_with_deepseek_fallback
+from backend.deepseek_utils import analyze_content_with_deepseek
 from backend.main import supabase, logger, OPENROUTER_API_KEY
 from backend.services.supabase_subscription_service import SupabaseSubscriptionService
 from datetime import datetime
 from pydantic import BaseModel
-import json
 
 class AnalyzeRequest(BaseModel):
     username: str
@@ -77,27 +76,9 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         posts = posts[:20]
         logger.info(f"Анализируем {len(posts)} постов")
         texts = [post.get("text", "") for post in posts if post.get("text")]
-        analysis_result = await analyze_content_with_deepseek_fallback(texts)
-        # Универсальный парсер результата
-        if isinstance(analysis_result, dict):
-            themes = analysis_result.get("themes", [])
-            styles = analysis_result.get("styles", [])
-        elif isinstance(analysis_result, str):
-            try:
-                parsed = json.loads(analysis_result)
-                themes = parsed.get("themes", [])
-                styles = parsed.get("styles", [])
-            except Exception as e:
-                logger.error(f"Не удалось распарсить строку-ответ анализа как JSON: {e}, ответ: {analysis_result}")
-                themes = []
-                styles = []
-        elif isinstance(analysis_result, list) and analysis_result and isinstance(analysis_result[0], dict):
-            themes = analysis_result[0].get("themes", [])
-            styles = analysis_result[0].get("styles", [])
-        else:
-            logger.error(f"Некорректный или пустой ответ от LLM при анализе. Ответ: {analysis_result}")
-            themes = []
-            styles = []
+        analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
+        themes = analysis_result.get("themes", [])
+        styles = analysis_result.get("styles", [])
         # 5. Сохраняем результат анализа в БД
         try:
             analysis_data = {
