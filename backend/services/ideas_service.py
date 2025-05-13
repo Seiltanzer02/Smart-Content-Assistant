@@ -1,9 +1,7 @@
 # Сервис для работы с идеями и генерацией плана
 from fastapi import Request, HTTPException
 from typing import Dict, Any, List, Optional
-from backend.services.openrouter_utils import (
-    OPENROUTER_API_KEY, openrouter_with_fallback, generate_plan_llm
-)
+from backend.main import supabase, logger, OPENROUTER_API_KEY
 from pydantic import BaseModel
 import random
 import re
@@ -11,7 +9,6 @@ import uuid
 from openai import AsyncOpenAI
 from backend.services.supabase_subscription_service import SupabaseSubscriptionService
 from datetime import datetime
-from backend.main import supabase, logger  # временно, если отдельного модуля нет
 
 # Импорт моделей PlanItem, PlanGenerationResponse, SuggestedIdeasResponse, SaveIdeasRequest из main.py или отдельного файла моделей
 # from backend.models import PlanItem, PlanGenerationResponse, SuggestedIdeasResponse, SaveIdeasRequest
@@ -73,31 +70,66 @@ async def get_saved_ideas(request: Request, channel_name: Optional[str] = None):
 async def generate_content_plan(request: Request, req):
     try:
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            logger.warning("Запрос генерации плана без идентификации пользователя Telegram")
+            return {"message": "Для генерации плана необходимо авторизоваться через Telegram", "plan": []}
+        # Проверка лимита генерации идей
+        subscription_service = SupabaseSubscriptionService(supabase)
+        can_generate = await subscription_service.can_generate_idea(int(telegram_user_id))
+        if not can_generate:
+            usage = await subscription_service.get_user_usage(int(telegram_user_id))
+            reset_at = usage.get("reset_at")
+            return {"message": f"Достигнут лимит генерации идей для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Оформите подписку для снятия ограничений.", "plan": []}
         themes = req.themes
         styles = req.styles
         period_days = req.period_days
         channel_name = req.channel_name
         if not themes or not styles:
             logger.warning(f"Запрос с пустыми темами или стилями: themes={themes}, styles={styles}")
-            return {"plan": [], "message": "Необходимо указать темы и стили для генерации плана"}
+            return {"message": "Необходимо указать темы и стили для генерации плана", "plan": []}
+        if not OPENROUTER_API_KEY:
+            logger.warning("Генерация плана невозможна: отсутствует OPENROUTER_API_KEY")
+            plan_items = []
+            for day in range(1, period_days + 1):
+                random_theme = random.choice(themes)
+                random_style = random.choice(styles)
+                plan_items.append({
+                    "day": day,
+                    "topic_idea": f"Пост о {random_theme}",
+                    "format_style": random_style
+                })
+            logger.info(f"Создан базовый план из {len(plan_items)} идей (без использования API)")
+            return {"plan": plan_items, "message": "План сгенерирован с базовыми идеями (API недоступен)"}
+        system_prompt = f"""Ты - опытный контент-маркетолог. Твоя задача - сгенерировать план публикаций для Telegram-канала на {period_days} дней.\nИспользуй предоставленные темы и стили.\n\nТемы: {', '.join(themes)}\nСтили (используй ТОЛЬКО их): {', '.join(styles)}\n\nДля КАЖДОГО дня из {period_days} дней предложи ТОЛЬКО ОДНУ идею поста (конкретный заголовок/концепцию) и выбери ТОЛЬКО ОДИН стиль из списка выше.\n\nСТРОГО СЛЕДУЙ ФОРМАТУ ВЫВОДА:\nКаждая строка должна содержать только день, идею и стиль, разделенные ДВУМЯ двоеточиями (::).\nНЕ ДОБАВЛЯЙ НИКАКИХ ЗАГОЛОВКОВ, НОМЕРОВ ВЕРСИЙ, СПИСКОВ ФИЧ, КОММЕНТАРИЕВ ИЛИ ЛЮБОГО ДРУГОГО ЛИШНЕГО ТЕКСТА.\nТолько строки плана.\n\nПример НУЖНОГО формата:\nДень 1:: Запуск нового продукта X:: Анонс\nДень 2:: Советы по использованию Y:: Лайфхак\nДень 3:: Интервью с экспертом Z:: Интервью\n\nФормат КАЖДОЙ строки: День <номер_дня>:: <Идея поста>:: <Стиль из списка>"""
         user_prompt = f"""Сгенерируй план контента для Telegram-канала \"{channel_name}\" на {period_days} дней.\nТемы: {', '.join(themes)}\nСтили (используй ТОЛЬКО их): {', '.join(styles)}\n\nВыдай ровно {period_days} строк СТРОГО в формате:\nДень <номер_дня>:: <Идея поста>:: <Стиль из списка>\n\nНе включай ничего, кроме этих строк."""
-        # --- Новый вызов с fallback ---
-        try:
-            response = await generate_plan_llm(user_prompt, period_days, styles, channel_name)
-        except Exception as e:
-            logger.error(f"Ошибка при генерации плана через OpenRouter с fallback: {e}")
-            return {"plan": [], "message": f"Ошибка при генерации плана: {str(e)}"}
+        client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY
+        )
+        response = await client.chat.completions.create(
+            model="deepseek/deepseek-chat-v3-0324:free",
+            messages=[
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7,
+            max_tokens=150 * period_days,
+            timeout=120,
+            extra_headers={
+                "HTTP-Referer": "https://content-manager.onrender.com",
+                "X-Title": "Smart Content Assistant"
+            }
+        )
         plan_text = ""
-        if response and hasattr(response, 'choices') and response.choices:
-            first_choice = response.choices[0]
-            if hasattr(first_choice, 'message') and first_choice.message and hasattr(first_choice.message, 'content'):
-                plan_text = first_choice.message.content.strip()
-                logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
-            else:
-                logger.error(f"Ответ OpenRouter не содержит message.content: {first_choice}")
-                logger.error(f"Полный ответ: {response}")
+        if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+            plan_text = response.choices[0].message.content.strip()
+            logger.info(f"Получен ответ с планом публикаций (первые 100 символов): {plan_text[:100]}...")
         else:
-            logger.error(f"Ответ OpenRouter не содержит choices: {response}")
+            logger.error(f"Некорректный или пустой ответ от OpenRouter API при генерации плана. Status: {response.response.status_code if hasattr(response, 'response') else 'N/A'}")
+            try:
+                raw_response_content = await response.response.text() if hasattr(response, 'response') and hasattr(response.response, 'text') else str(response)
+                logger.error(f"Полный ответ API (или его представление): {raw_response_content}")
+            except Exception as log_err:
+                logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
         plan_items = []
         lines = plan_text.split('\n') if plan_text else []
         expected_style_set = set(s.lower() for s in styles)
@@ -110,11 +142,11 @@ async def generate_content_plan(request: Request, req):
                 try:
                     day_part = parts[0].lower().replace('день', '').strip()
                     day = int(day_part)
-                    topic_idea = parts[1].strip()
-                    format_style = parts[2].strip()
+                    topic_idea = clean_text_formatting(parts[1].strip())
+                    format_style = clean_text_formatting(parts[2].strip())
                     if format_style.lower() not in expected_style_set:
-                        logger.warning(f"Стиль '{format_style}' из ответа LLM не найден в запрошенных стилях. Выбираем случайный.")
-                        format_style = random.choice(styles) if styles else "Без указания стиля"
+                        logger.warning(f"Стиль '{format_style}' не найден в списке допустимых стилей: {styles}")
+                        format_style = random.choice(styles) if styles else format_style
                     if topic_idea:
                         plan_items.append({
                             "day": day,
@@ -124,9 +156,11 @@ async def generate_content_plan(request: Request, req):
                     else:
                         logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
                 except Exception as parse_err:
-                    logger.warning(f"Ошибка парсинга строки плана '{line}': {parse_err}")
+                    logger.error(f"Ошибка при парсинге строки плана: {line} — {parse_err}")
+                    continue
             else:
                 logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
+        # Если не удалось извлечь идеи — генерируем базовый план вручную
         if not plan_items:
             logger.warning("Не удалось извлечь идеи из ответа LLM или все строки были некорректными, генерируем базовый план.")
             for day in range(1, period_days + 1):
@@ -137,8 +171,13 @@ async def generate_content_plan(request: Request, req):
                     "topic_idea": f"Пост о {random_theme}",
                     "format_style": random_style
                 })
+        # Сортируем по дням и обрезаем до нужного количества
         plan_items.sort(key=lambda x: x["day"])
         plan_items = plan_items[:period_days]
+        # После успешной генерации идей увеличиваем счетчик использования
+        has_subscription = await subscription_service.has_active_subscription(int(telegram_user_id))
+        if not has_subscription:
+            await subscription_service.increment_idea_usage(int(telegram_user_id))
         return {"plan": plan_items}
     except Exception as e:
         logger.error(f"Ошибка при генерации плана: {e}")
