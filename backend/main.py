@@ -73,6 +73,7 @@ dotenv_loaded = load_dotenv(override=True)
 
 # Переменные из Render имеют приоритет над .env файлом
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Добавляем ключ для резервного API
 TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID")
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
@@ -90,6 +91,10 @@ missing_keys = []
 if not OPENROUTER_API_KEY:
     logger.warning("Ключ OPENROUTER_API_KEY не найден! Функции анализа контента будут недоступны.")
     missing_keys.append("OPENROUTER_API_KEY")
+
+# Для OPENAI_API_KEY предупреждение, но не добавление в missing_keys, так как это запасной вариант
+if not OPENAI_API_KEY:
+    logger.warning("Ключ OPENAI_API_KEY не найден! Запасной вариант API будет недоступен.")
 
 if not TELEGRAM_API_ID or not TELEGRAM_API_HASH:
     logger.warning("TELEGRAM_API_ID или TELEGRAM_API_HASH не найдены! Функции работы с Telegram API будут недоступны.")

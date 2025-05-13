@@ -339,7 +339,7 @@ async def delete_post(post_id: str, request: Request):
 
 async def generate_post_details(request: Request, req):
     import traceback
-    from backend.main import generate_image_keywords, search_unsplash_images, get_channel_analysis, IMAGE_RESULTS_COUNT, PostImage, OPENROUTER_API_KEY, logger
+    from backend.main import generate_image_keywords, search_unsplash_images, get_channel_analysis, IMAGE_RESULTS_COUNT, PostImage, OPENROUTER_API_KEY, OPENAI_API_KEY, logger
     from openai import AsyncOpenAI
     found_images = []
     api_error_message = None
@@ -366,9 +366,12 @@ async def generate_post_details(request: Request, req):
                     logger.info(f"Получено {len(post_samples)} примеров постов для канала @{channel_name}")
             except Exception as e:
                 logger.warning(f"Не удалось получить примеры постов для канала @{channel_name}: {e}")
-        if not OPENROUTER_API_KEY:
-            logger.warning("Генерация деталей поста невозможна: отсутствует OPENROUTER_API_KEY")
+        
+        # Проверка наличия хотя бы одного API ключа
+        if not OPENROUTER_API_KEY and not OPENAI_API_KEY:
+            logger.warning("Генерация деталей поста невозможна: отсутствуют OPENROUTER_API_KEY и OPENAI_API_KEY")
             raise HTTPException(status_code=503, detail="API для генерации текста недоступен")
+            
         system_prompt = """Ты — опытный контент-маркетолог для Telegram-каналов.
 Твоя задача — сгенерировать текст поста на основе идеи и формата, который будет готов к публикации.
 
@@ -387,45 +390,119 @@ async def generate_post_details(request: Request, req):
         if post_samples:
             sample_text = "\n\n".join(post_samples[:3])
             user_prompt += f"""\n\nВот несколько примеров постов из этого канала для сохранения стиля:\n\n{sample_text}\n"""
-        client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=OPENROUTER_API_KEY
-        )
+        
+        # Сначала пробуем OpenRouter API, если он доступен
         post_text = ""
-        try:
-            logger.info(f"Отправка запроса на генерацию поста по идее: {topic_idea}")
-            response = await client.chat.completions.create(
-                model="deepseek/deepseek-chat-v3-0324:free",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.7,
-                max_tokens=850,
-                timeout=60,
-                extra_headers={
-                    "HTTP-Referer": "https://content-manager.onrender.com",
-                    "X-Title": "Smart Content Assistant"
-                }
-            )
-            if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-                post_text = response.choices[0].message.content.strip()
-                logger.info(f"Получен текст поста ({len(post_text)} символов)")
-            elif response and hasattr(response, 'error') and response.error:
-                err_details = response.error
-                api_error_message = getattr(err_details, 'message', str(err_details))
-                logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
+        used_backup_api = False
+        
+        if OPENROUTER_API_KEY:
+            try:
+                logger.info(f"Отправка запроса на генерацию поста по идее через OpenRouter API: {topic_idea}")
+                client = AsyncOpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=OPENROUTER_API_KEY
+                )
+                
+                response = await client.chat.completions.create(
+                    model="deepseek/deepseek-chat-v3-0324:free",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=850,
+                    timeout=60,
+                    extra_headers={
+                        "HTTP-Referer": "https://content-manager.onrender.com",
+                        "X-Title": "Smart Content Assistant"
+                    }
+                )
+                
+                if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+                    post_text = response.choices[0].message.content.strip()
+                    logger.info(f"Получен текст поста через OpenRouter API ({len(post_text)} символов)")
+                elif response and hasattr(response, 'error') and response.error:
+                    err_details = response.error
+                    api_error_message = getattr(err_details, 'message', str(err_details))
+                    logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
+                    # Ошибка OpenRouter API - пробуем запасной вариант
+                    raise Exception(f"OpenRouter API вернул ошибку: {api_error_message}")
+                else:
+                    api_error_message = "OpenRouter API вернул некорректный или пустой ответ"
+                    logger.error(f"Некорректный или пустой ответ от OpenRouter API. Ответ: {response}")
+                    # Ошибка OpenRouter API - пробуем запасной вариант
+                    raise Exception("Некорректный или пустой ответ от OpenRouter API")
+                    
+            except Exception as api_error:
+                # В случае ошибки с OpenRouter API, проверяем наличие запасного ключа
+                api_error_message = f"Ошибка соединения с OpenRouter API: {str(api_error)}"
+                logger.error(f"Ошибка при запросе к OpenRouter API: {api_error}", exc_info=True)
+                
+                # Пробуем использовать OpenAI API как запасной вариант
+                if OPENAI_API_KEY:
+                    used_backup_api = True
+                    logger.info(f"Попытка использования OpenAI API как запасного варианта для идеи: {topic_idea}")
+                    try:
+                        openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+                        
+                        openai_response = await openai_client.chat.completions.create(
+                            model="gpt-3.5-turbo",  # Используем GPT-3.5 Turbo как запасной вариант
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt}
+                            ],
+                            temperature=0.7,
+                            max_tokens=850
+                        )
+                        
+                        if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
+                            post_text = openai_response.choices[0].message.content.strip()
+                            logger.info(f"Получен текст поста через запасной OpenAI API ({len(post_text)} символов)")
+                            # Сбрасываем сообщение об ошибке, так как запасной вариант сработал
+                            api_error_message = None
+                        else:
+                            logger.error(f"Некорректный или пустой ответ от запасного OpenAI API")
+                            post_text = "[Текст не сгенерирован из-за ошибок API]"
+                    except Exception as openai_error:
+                        logger.error(f"Ошибка при использовании запасного OpenAI API: {openai_error}", exc_info=True)
+                        post_text = "[Текст не сгенерирован из-за ошибок API]"
+                else:
+                    logger.error("Запасной OPENAI_API_KEY не настроен, невозможно использовать альтернативный API")
+                    post_text = "[Текст не сгенерирован из-за ошибки API]"
+        
+        # Если нет OPENROUTER_API_KEY, но есть OPENAI_API_KEY, используем его напрямую
+        elif OPENAI_API_KEY:
+            used_backup_api = True
+            logger.info(f"OPENROUTER_API_KEY отсутствует, используем OpenAI API напрямую для идеи: {topic_idea}")
+            try:
+                openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+                
+                openai_response = await openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",  # Используем GPT-3.5 Turbo
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=850
+                )
+                
+                if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
+                    post_text = openai_response.choices[0].message.content.strip()
+                    logger.info(f"Получен текст поста через OpenAI API ({len(post_text)} символов)")
+                else:
+                    logger.error(f"Некорректный или пустой ответ от OpenAI API")
+                    post_text = "[Текст не сгенерирован из-за ошибки API]"
+            except Exception as openai_error:
+                api_error_message = f"Ошибка соединения с OpenAI API: {str(openai_error)}"
+                logger.error(f"Ошибка при запросе к OpenAI API: {openai_error}", exc_info=True)
                 post_text = "[Текст не сгенерирован из-за ошибки API]"
-            else:
-                api_error_message = "API вернул некорректный или пустой ответ"
-                logger.error(f"Некорректный или пустой ответ от OpenRouter API. Ответ: {response}")
-                post_text = "[Текст не сгенерирован из-за ошибки API]"
-        except Exception as api_error:
-            api_error_message = f"Ошибка соединения с API: {str(api_error)}"
-            logger.error(f"Ошибка при запросе к OpenRouter API: {api_error}", exc_info=True)
-            post_text = "[Текст не сгенерирован из-за ошибки API]"
+        
+        # Генерация ключевых слов для поиска изображений
         image_keywords = await generate_image_keywords(post_text, topic_idea, format_style)
         logger.info(f"Сгенерированы ключевые слова для поиска изображений: {image_keywords}")
+        
+        # Поиск изображений
         for keyword in image_keywords[:3]:
             try:
                 image_count = min(5 - len(found_images), 3)
@@ -442,6 +519,7 @@ async def generate_post_details(request: Request, req):
             except Exception as e:
                 logger.error(f"Ошибка при поиске изображений для ключевого слова '{keyword}': {e}")
                 continue
+                
         if not found_images:
             try:
                 found_images = await search_unsplash_images(topic_idea, count=5, topic=topic_idea, format_style=format_style)
@@ -449,8 +527,13 @@ async def generate_post_details(request: Request, req):
             except Exception as e:
                 logger.error(f"Ошибка при поиске изображений по основной теме: {e}")
                 found_images = []
+                
         logger.info(f"Подготовлено {len(found_images)} предложенных изображений")
+        
+        # Формирование сообщения ответа с учетом использования запасного API
         response_message = f"Сгенерирован пост с {len(found_images[:IMAGE_RESULTS_COUNT])} предложенными изображениями"
+        if used_backup_api:
+            response_message = f"Использован резервный API (OpenAI). Сгенерирован пост с {len(found_images[:IMAGE_RESULTS_COUNT])} предложенными изображениями"
         if api_error_message:
             response_message = f"Ошибка генерации текста: {api_error_message}. Изображений найдено: {len(found_images[:IMAGE_RESULTS_COUNT])}"
             
