@@ -79,7 +79,13 @@ async def generate_content_plan(request: Request, req):
         if not can_generate:
             usage = await subscription_service.get_user_usage(int(telegram_user_id))
             reset_at = usage.get("reset_at")
-            return {"message": f"Достигнут лимит генерации идей для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Оформите подписку для снятия ограничений.", "plan": []}
+            return {
+                "plan": [],
+                "message": f"Достигнут лимит генерации идей для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}.",
+                "limit_reached": True,
+                "reset_at": reset_at,
+                "subscription_required": True
+            }
         themes = req.themes
         styles = req.styles
         period_days = req.period_days
@@ -272,9 +278,7 @@ async def generate_content_plan(request: Request, req):
             result_message = "План сгенерирован с использованием резервного API (OpenAI)"
         
         # После успешной генерации идей увеличиваем счетчик использования
-        has_subscription = await subscription_service.has_active_subscription(int(telegram_user_id))
-        if not has_subscription:
-            await subscription_service.increment_idea_usage(int(telegram_user_id))
+        await subscription_service.increment_idea_usage(int(telegram_user_id))
             
         return {"plan": plan_items, "message": result_message}
     except Exception as e:
@@ -322,6 +326,23 @@ async def save_suggested_ideas_batch(payload, request: Request):
     if not supabase:
         logger.error("Supabase client not initialized")
         raise HTTPException(status_code=500, detail="Database not initialized")
+        
+    # Добавляем проверку лимита генерации идей
+    subscription_service = SupabaseSubscriptionService(supabase)
+    can_generate = await subscription_service.can_generate_idea(telegram_user_id)
+    if not can_generate:
+        usage = await subscription_service.get_user_usage(telegram_user_id)
+        reset_at = usage.get("reset_at")
+        raise HTTPException(
+            status_code=403, 
+            detail={
+                "message": f"Достигнут лимит генерации идей для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}.",
+                "reset_at": reset_at,
+                "limit_reached": True,
+                "subscription_required": True
+            }
+        )
+        
     saved_count = 0
     errors = []
     saved_ids = []

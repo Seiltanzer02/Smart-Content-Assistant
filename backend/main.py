@@ -1247,6 +1247,9 @@ async def get_saved_ideas(request: Request, channel_name: Optional[str] = None):
 class PlanGenerationResponse(BaseModel):
     plan: List[PlanItem] = []
     message: Optional[str] = None
+    limit_reached: Optional[bool] = False
+    reset_at: Optional[str] = None
+    subscription_required: Optional[bool] = False
 
 # Функция для очистки текста от маркеров форматирования
 def clean_text_formatting(text):
