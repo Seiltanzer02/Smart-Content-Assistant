@@ -28,7 +28,7 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
             api_key=api_key
         )
         response = await client.chat.completions.create(
-            model="deepseek/deepseek-chat-v3-0324:free",
+            model="meta-llama/llama-4-maverick:free",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
