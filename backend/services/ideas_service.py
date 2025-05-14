@@ -121,7 +121,7 @@ async def generate_content_plan(request: Request, req):
                 )
                 
                 response = await client.chat.completions.create(
-                    model="deepseek/deepseek-chat-v3-0324:free",
+                    model="meta-llama/llama-4-maverick:free",
                     messages=[
                         {"role": "user", "content": user_prompt}
                     ],
@@ -217,38 +217,38 @@ async def generate_content_plan(request: Request, req):
         
         if plan_text:
             lines = plan_text.split('\n')
-            expected_style_set = set(s.lower() for s in styles)
+        expected_style_set = set(s.lower() for s in styles)
             
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
                     
-                parts = line.split('::')
-                if len(parts) == 3:
-                    try:
-                        day_part = parts[0].lower().replace('день', '').strip()
-                        day = int(day_part)
-                        topic_idea = clean_text_formatting(parts[1].strip())
-                        format_style = clean_text_formatting(parts[2].strip())
+            parts = line.split('::')
+            if len(parts) == 3:
+                try:
+                    day_part = parts[0].lower().replace('день', '').strip()
+                    day = int(day_part)
+                    topic_idea = clean_text_formatting(parts[1].strip())
+                    format_style = clean_text_formatting(parts[2].strip())
                         
-                        if format_style.lower() not in expected_style_set:
-                            logger.warning(f"Стиль '{format_style}' не найден в списке допустимых стилей: {styles}")
-                            format_style = random.choice(styles) if styles else format_style
+                    if format_style.lower() not in expected_style_set:
+                        logger.warning(f"Стиль '{format_style}' не найден в списке допустимых стилей: {styles}")
+                        format_style = random.choice(styles) if styles else format_style
                             
-                        if topic_idea:
-                            plan_items.append({
-                                "day": day,
-                                "topic_idea": topic_idea,
-                                "format_style": format_style
-                            })
-                        else:
-                            logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
-                    except Exception as parse_err:
-                        logger.error(f"Ошибка при парсинге строки плана: {line} — {parse_err}")
-                        continue
-                else:
-                    logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
+                    if topic_idea:
+                        plan_items.append({
+                            "day": day,
+                            "topic_idea": topic_idea,
+                            "format_style": format_style
+                        })
+                    else:
+                        logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
+                except Exception as parse_err:
+                    logger.error(f"Ошибка при парсинге строки плана: {line} — {parse_err}")
+                    continue
+            else:
+                logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
         
         # Если не удалось извлечь идеи — генерируем базовый план вручную
         if not plan_items:

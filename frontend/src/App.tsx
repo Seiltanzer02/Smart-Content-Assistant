@@ -459,6 +459,31 @@ function App() {
   const [postLimitExceeded, setPostLimitExceeded] = useState(false);
   // === ДОБАВЛЯЮ: Состояние для модального окна предпросмотра ===
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  
+  // === ДОБАВЛЯЮ: Массивы забавных сообщений для прогресс-баров ===
+  const postDetailsMessages = [
+    "Завариваем кофе для музы... Обычно это занимает некоторое время. ☕",
+    "Наши нейроны шевелятся быстрее, чем вы думаете! (но не всегда) 😉",
+    "Почти готово! Если 'почти' для вас — это как 'скоро' у разработчиков. 😅",
+    "Идет сложный процесс превращения байтов в буквы... и обратно. 🤖",
+    "Согласовываем текст с главным редактором — котиком. Он очень строг. 😼",
+    "Так-так-так... что бы такого остроумного написать?.. 🤔",
+    "Наши алгоритмы сейчас проходят тест Тьюринга... на выдержку. 🧘"
+  ];
+  
+  const ideasGenerationMessages = [
+    "Перебираем триллионы идей... Осталось всего пара миллиардов. 🤯",
+    "Штурмуем мозговой центр! Иногда там бывает ветрено. 💨",
+    "Ловим вдохновение сачком... Оно такое неуловимое! 🦋",
+    "Ищем нестандартные подходы... Иногда находим носки под диваном. 🤷‍♂️",
+    "Генератор идей заряжается... Пожалуйста, не отключайте от розетки! 🔌",
+    "Анализируем тренды, мемы и фазы Луны... для полной картины. 🌕",
+    "Разбудили креативного директора. Он просил передать, что 'еще 5 минуточек'. 😴"
+  ];
+  
+  const [currentPostDetailsMessage, setCurrentPostDetailsMessage] = useState(postDetailsMessages[0]);
+  const [currentIdeasMessage, setCurrentIdeasMessage] = useState(ideasGenerationMessages[0]);
+  
   // === ДОБАВЛЯЮ: Функция для добавления канала в allChannels ===
   const addChannelToAllChannels = (channel: string) => {
     const normalized = normalizeChannelName(channel);
@@ -1430,12 +1455,12 @@ function App() {
     if (isAnalyzing || isGeneratingPostDetails) {
       setProgress(0);
       interval = window.setInterval(() => {
-        setProgress(prev => (prev < 98 ? prev + Math.random() * 1.5 : prev)); // Было *3, стало *1.5 (в 2 раза медленнее)
+        setProgress(prev => (prev < 98 ? prev + Math.random() * 0.6 : prev)); // Было *1.5, стало *0.6 (в 2.5 раза медленнее)
       }, 100);
     } else if (isGeneratingIdeas) {
       setProgress(0);
       interval = window.setInterval(() => {
-        setProgress(prev => (prev < 98 ? prev + Math.random() * 2.5 : prev)); // Для идей чуть быстрее, чем для поста, но медленнее, чем было
+        setProgress(prev => (prev < 98 ? prev + Math.random() * 1.25 : prev)); // Было *2.5, стало *1.25 (в 2 раза медленнее)
       }, 150); // Можно подстроить скорость
     } else if (!isAnalyzing && !isGeneratingPostDetails && !isGeneratingIdeas) {
       setProgress(100);
@@ -1445,6 +1470,78 @@ function App() {
       if (interval) clearInterval(interval);
     };
   }, [isAnalyzing, isGeneratingPostDetails, isGeneratingIdeas]);
+  
+  // === ДОБАВЛЯЮ: Эффект для смены сообщений в прогресс-баре генерации деталей поста ===
+  useEffect(() => {
+    let messageInterval: number | null = null;
+    
+    if (isGeneratingPostDetails) {
+      // Начинаем с первого сообщения
+      setCurrentPostDetailsMessage(postDetailsMessages[0]);
+      
+      // Настраиваем интервал для смены сообщений
+      let messageIndex = 0;
+      messageInterval = window.setInterval(() => {
+        messageIndex = (messageIndex + 1) % postDetailsMessages.length;
+        setCurrentPostDetailsMessage(postDetailsMessages[messageIndex]);
+      }, 3500); // Меняем сообщение каждые 3.5 секунды
+    }
+    
+    return () => {
+      if (messageInterval) window.clearInterval(messageInterval);
+    };
+  }, [isGeneratingPostDetails]);
+  
+  // === ДОБАВЛЯЮ: Эффект для смены сообщений в прогресс-баре генерации идей ===
+  useEffect(() => {
+    let messageInterval: number | null = null;
+    
+    if (isGeneratingIdeas) {
+      // Начинаем с первого сообщения
+      setCurrentIdeasMessage(ideasGenerationMessages[0]);
+      
+      // Настраиваем интервал для смены сообщений
+      let messageIndex = 0;
+      messageInterval = window.setInterval(() => {
+        messageIndex = (messageIndex + 1) % ideasGenerationMessages.length;
+        setCurrentIdeasMessage(ideasGenerationMessages[messageIndex]);
+      }, 3500); // Меняем сообщение каждые 3.5 секунды
+    }
+    
+    return () => {
+      if (messageInterval) window.clearInterval(messageInterval);
+    };
+  }, [isGeneratingIdeas]);
+  
+  // --- Эффект слежения за userId для загрузки пользовательских настроек ---
+
+  // Добавляем CSS для анимации сообщений
+  useEffect(() => {
+    // Создаем стили для анимации сообщений
+    const styleElement = document.createElement('style');
+    styleElement.textContent = `
+      @keyframes fadeInOut {
+        0% { opacity: 0; }
+        10% { opacity: 1; }
+        90% { opacity: 1; }
+        100% { opacity: 0; }
+      }
+      
+      .loading-message {
+        animation: fadeInOut 3.5s ease-in-out;
+        opacity: 1;
+        font-size: 14px;
+        margin-top: 10px;
+        color: #555;
+      }
+    `;
+    
+    document.head.appendChild(styleElement);
+    
+    return () => {
+      document.head.removeChild(styleElement);
+    };
+  }, []);
 
   // Компонент загрузки
   if (loading) {
@@ -1626,7 +1723,9 @@ function App() {
               {isGeneratingIdeas && (
                 <div style={{ margin: '20px 0' }}>
                   <ProgressBar progress={progress} />
-                  <p>Генерируем идеи...</p>
+                  <p className="loading-message" style={{ textAlign: 'center', fontStyle: 'italic', transition: 'opacity 0.5s ease-in-out' }}>
+                    {currentIdeasMessage}
+                  </p>
                 </div>
               )}
               {ideasLimitExceeded && (
@@ -1652,7 +1751,9 @@ function App() {
               {isGeneratingIdeas && (
                 <div style={{ margin: '20px 0' }}>
                   <ProgressBar progress={progress} />
-                  <p>Генерируем идеи...</p>
+                  <p className="loading-message" style={{ textAlign: 'center', fontStyle: 'italic', transition: 'opacity 0.5s ease-in-out' }}>
+                    {currentIdeasMessage}
+                  </p>
                 </div>
               )}
 
@@ -1815,18 +1916,13 @@ function App() {
             <div className="view edit-view">
               <h2>{currentPostId ? 'Редактирование поста' : 'Создание нового поста'}</h2>
 
-              {/* Индикатор загрузки деталей */}
-              {isGeneratingPostDetails && (
-                 <div className="loading-indicator small">
-                    <div className="loading-spinner small"></div>
-                    <p>Генерация деталей поста...</p>
-                </div>
-              )}
-
+              {/* Прогресс-бар генерации с забавными сообщениями */}
               {isGeneratingPostDetails && (
                 <div style={{ margin: '20px 0' }}>
                   <ProgressBar progress={progress} />
-                  <p>Генерация деталей поста...</p>
+                  <p className="loading-message" style={{ textAlign: 'center', fontStyle: 'italic', transition: 'opacity 0.5s ease-in-out' }}>
+                    {currentPostDetailsMessage}
+                  </p>
                 </div>
               )}
 

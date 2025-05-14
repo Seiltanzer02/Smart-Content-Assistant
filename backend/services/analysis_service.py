@@ -259,7 +259,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                 "themes": themes,
                 "styles": styles,
                 "analyzed_posts_count": len(posts),
-                "sample_posts": posts[:5],
+                "sample_posts": [p.get("text", "") for p in posts[:10]],
                 "best_posting_time": "18:00-20:00",  # Можно доработать
                 "is_sample_data": sample_data_used,
                 "used_backup_api": used_backup_api,  # Добавляем информацию об использовании запасного API
@@ -289,7 +289,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         return AnalyzeResponse(
             themes=themes,
             styles=styles,
-            analyzed_posts_sample=[post.get("text", "") for post in posts[:5]],
+            analyzed_posts_sample=[post.get("text", "") for post in posts[:10]],
             best_posting_time="18:00-20:00",
             analyzed_posts_count=len(posts),
             message=error_message
