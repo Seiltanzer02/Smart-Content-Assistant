@@ -2,6 +2,8 @@ from datetime import datetime, timedelta, timezone
 import logging
 from typing import Dict, Any, Optional
 from dateutil.relativedelta import relativedelta
+import httpx
+import os
 
 # Константы для бесплатных лимитов
 FREE_ANALYSIS_LIMIT = 5
@@ -173,6 +175,10 @@ class SupabaseSubscriptionService:
                         # Подписка истекла, деактивируем её
                         self.supabase.table("user_subscription").update({"is_active": False}).eq("id", subscription.get("id")).execute()
                         logger.info(f"Деактивирована истекшая подписка пользователя {user_id}, end_date={end_date.isoformat()}, now={now_utc.isoformat()}")
+                        
+                        # Отправляем уведомление пользователю о том, что подписка закончилась
+                        await self.send_subscription_expiry_notification(user_id)
+                        
                         return None
                 except Exception as date_error:
                     logger.error(f"Ошибка при парсинге даты окончания подписки '{end_date_str}': {date_error}", exc_info=True)
@@ -321,4 +327,35 @@ class SupabaseSubscriptionService:
             return usage
         except Exception as e:
             logger.error(f"Ошибка при увеличении счетчика генерации идей: {e}")
-            return {"user_id": user_id, "ideas_generation_count": 0} 
+            return {"user_id": user_id, "ideas_generation_count": 0}
+
+    async def send_subscription_expiry_notification(self, user_id: int) -> bool:
+        """Отправляет уведомление о том, что подписка закончилась."""
+        try:
+            message_text = "Ваша подписка закончилась! Получите безлимитную генерацию контента всего за 70 Stars."
+            
+            telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
+            if not telegram_token:
+                logger.error(f"Отсутствует TELEGRAM_BOT_TOKEN при отправке уведомления об окончании подписки пользователю {user_id}")
+                return False
+                
+            telegram_api_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
+            async with httpx.AsyncClient() as client:
+                try:
+                    response = await client.post(telegram_api_url, json={
+                        "chat_id": user_id,
+                        "text": message_text,
+                        "parse_mode": "HTML"
+                    })
+                    if response.status_code == 200:
+                        logger.info(f"Уведомление об окончании подписки успешно отправлено пользователю {user_id}")
+                        return True
+                    else:
+                        logger.error(f"Ошибка при отправке уведомления об окончании подписки: {response.status_code} {response.text}")
+                        return False
+                except Exception as e:
+                    logger.error(f"Исключение при отправке уведомления об окончании подписки в Telegram: {e}")
+                    return False
+        except Exception as e:
+            logger.error(f"Ошибка при отправке уведомления об окончании подписки: {e}")
+            return False 

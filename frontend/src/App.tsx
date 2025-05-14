@@ -1198,6 +1198,13 @@ function App() {
         headers: { 'x-telegram-user-id': userId }
       });
       console.log('Получен ответ от сервера по анализу:', response.data);
+      
+      // Проверяем, есть ли ошибка в ответе
+      if (response.data.error) {
+        setError(response.data.error);
+        return;
+      }
+      
       if (!response.data || !response.data.themes || !response.data.styles) {
         console.error('Некорректный формат данных от сервера:', response.data);
         throw new Error('Сервер вернул некорректные данные анализа');
@@ -1205,8 +1212,18 @@ function App() {
       setAnalysisResult(response.data);
       setSuccess('Анализ успешно завершен');
     } catch (err) {
-      setError(err.response?.data?.detail || err.message || 'Ошибка при анализе канала');
       console.error('Ошибка при анализе:', err);
+      // Обрабатываем ошибки с разными форматами
+      if (err.response?.data?.error) {
+        setError(err.response.data.error);
+      } else if (err.response?.data?.detail) {
+        setError(err.response.data.detail);
+      } else if (err.response?.status === 403) {
+        setAnalyzeLimitExceeded(true);
+        setError("Достигнут лимит анализа каналов для бесплатной подписки");
+      } else {
+        setError(err.message || 'Ошибка при анализе канала');
+      }
     } finally {
       setIsAnalyzing(false);
     }
@@ -1748,6 +1765,13 @@ function App() {
                   <p>Анализируем канал...</p>
                 </div>
               )}
+              
+              {error && !isAnalyzing && !analysisResult && (
+                <div className="error-message" style={{ margin: '20px 0', padding: '15px', borderRadius: '8px' }}>
+                  <p style={{ marginBottom: '10px', fontWeight: 'bold' }}>Ошибка анализа:</p>
+                  <p>{error}</p>
+                </div>
+              )}
 
       {analysisResult && (
           <div className="results-container">
@@ -1788,10 +1812,10 @@ function App() {
                       onClick={() => setShowSubscription(true)} 
                       className="action-button subscription-button"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight: '8px'}}>
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight: '8px', verticalAlign: 'middle'}}>
                         <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
                       </svg>
-                      <span>Оформить подписку</span>
+                      <span style={{verticalAlign: 'middle'}}>Оформить подписку</span>
                     </button>
                   </p>
                 </div>
@@ -1811,6 +1835,26 @@ function App() {
           {/* Вид идей */}
           {currentView === 'suggestions' && channelName && (
             <div className="view suggestions-view">
+              {ideasLimitExceeded && (
+                <div className="error-message">
+                  <p>Достигнут лимит генерации идей для бесплатной подписки.</p>
+                  {ideasLimitResetTime && (
+                    <p>Следующая попытка будет доступна после: <strong>{new Date(ideasLimitResetTime).toLocaleString()}</strong></p>
+                  )}
+                  <p style={{ marginTop: '10px' }}>
+                    <button 
+                      onClick={() => setShowSubscription(true)} 
+                      className="action-button subscription-button"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight: '8px', verticalAlign: 'middle'}}>
+                        <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+                      </svg>
+                      <span style={{verticalAlign: 'middle'}}>Оформить подписку</span>
+                    </button>
+                  </p>
+                </div>
+              )}
+              
               <h2>Идеи контента для @{channelName}</h2>
               
               {isGeneratingIdeas && (
@@ -1830,19 +1874,19 @@ function App() {
                         <div className="idea-header">
                           <span className="idea-title">{idea.topic_idea}</span>
                           <span className="idea-style">({idea.format_style})</span>
-            </div>
+                        </div>
                         {idea.day && <div className="idea-day">День {idea.day}</div>}
-                                </div>
-                            <button 
+                      </div>
+                      <button 
                         className="action-button small"
                         onClick={() => handleDetailIdea(idea)}
                       >
                         Детализировать
-                            </button>
-                        </div>
-                  ))}
+                      </button>
                     </div>
-              ) : !isGeneratingIdeas ? (
+                  ))}
+                </div>
+              ) : (
                 <p>
                   {analysisResult 
                     ? 'Нажмите "Сгенерировать идеи" на вкладке Анализ, чтобы создать новые идеи для контента.' 
@@ -1851,34 +1895,16 @@ function App() {
                         : 'Сначала выполните анализ канала на вкладке "Анализ" или выберите канал с сохраненным анализом.'
                   }
                 </p>
-              ) : null}
-        <button 
-                    onClick={generateIdeas} 
-                    className="action-button generate-button"
-                    disabled={isGeneratingIdeas || !analysisResult || ideasLimitExceeded} 
-                    style={{marginTop: '20px'}} // Добавим отступ
-                  >
-                    {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать новые идеи'}
-        </button>
-        {ideasLimitExceeded && (
-          <div className="error-message">
-            <p>Достигнут лимит генерации идей для бесплатной подписки.</p>
-            {ideasLimitResetTime && (
-              <p>Следующая попытка будет доступна после: <strong>{new Date(ideasLimitResetTime).toLocaleString()}</strong></p>
-            )}
-            <p style={{ marginTop: '10px' }}>
+              )}
+              
               <button 
-                onClick={() => setShowSubscription(true)} 
-                className="action-button subscription-button"
+                onClick={generateIdeas} 
+                className="action-button generate-button"
+                disabled={isGeneratingIdeas || !analysisResult || ideasLimitExceeded} 
+                style={{marginTop: '20px'}} // Добавим отступ
               >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight: '8px'}}>
-                  <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
-                </svg>
-                <span>Оформить подписку</span>
+                {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать новые идеи'}
               </button>
-            </p>
-          </div>
-        )}
              </div>
               )}
             {/* Сообщение, если канал не выбран для идей */} 

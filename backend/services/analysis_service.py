@@ -65,13 +65,48 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         # 3. Примеры
         sample_data_used = False
         if not posts:
-            logger.warning(f"Используем примеры постов для канала {username}")
-            sample_posts = get_sample_posts(username)
-            posts = [{"text": post} for post in sample_posts]
-            error_message = "Не удалось получить реальные посты. Используются примеры для демонстрации."
-            errors_list.append(error_message)
-            sample_data_used = True
-            logger.info(f"Используем примеры постов для канала {username}")
+            logger.warning(f"Не удалось получить посты канала {username}")
+            
+            # Проверяем наличие явных ошибок доступа, чтобы определить тип проблемы
+            channel_not_exists = False
+            channel_is_private = False
+            
+            for error in errors_list:
+                if "No user has" in error or "not found" in error.lower() or "does not exist" in error.lower():
+                    channel_not_exists = True
+                    break
+                if "private" in error.lower() or "not accessible" in error.lower() or "access" in error.lower():
+                    channel_is_private = True
+                    break
+            
+            if channel_not_exists:
+                return AnalyzeResponse(
+                    themes=[],
+                    styles=[],
+                    analyzed_posts_sample=[],
+                    best_posting_time="",
+                    analyzed_posts_count=0,
+                    error=f"Канал @{username} не существует. Пожалуйста, проверьте правильность написания имени канала."
+                )
+            elif channel_is_private:
+                return AnalyzeResponse(
+                    themes=[],
+                    styles=[],
+                    analyzed_posts_sample=[],
+                    best_posting_time="",
+                    analyzed_posts_count=0,
+                    error=f"Канал @{username} является закрытым и недоступен для анализа. Выберите публичный канал."
+                )
+            else:
+                return AnalyzeResponse(
+                    themes=[],
+                    styles=[],
+                    analyzed_posts_sample=[],
+                    best_posting_time="",
+                    analyzed_posts_count=0,
+                    error=f"Не удалось получить доступ к каналу @{username}. Возможно, канал не существует, является закрытым или превышен лимит запросов."
+                )
+                
         # 4. Анализируем первые 20 постов
         posts = posts[:20]
         logger.info(f"Анализируем {len(posts)} постов")
