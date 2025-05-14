@@ -86,7 +86,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                     analyzed_posts_sample=[],
                     best_posting_time="",
                     analyzed_posts_count=0,
-                    error=f"Канал @{username} не существует. Пожалуйста, проверьте правильность написания имени канала."
+                    error=f"Канал @{username} не существует или закрытый. Пожалуйста, проверьте правильность написания имени канала."
                 )
             elif channel_is_private:
                 return AnalyzeResponse(
