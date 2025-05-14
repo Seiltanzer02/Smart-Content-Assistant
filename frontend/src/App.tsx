@@ -459,6 +459,8 @@ function App() {
   const [postLimitExceeded, setPostLimitExceeded] = useState(false);
   // === ДОБАВЛЯЮ: Состояние для модального окна предпросмотра ===
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  // Добавляю состояние для хранения времени сброса лимита
+  const [ideasLimitResetTime, setIdeasLimitResetTime] = useState<string | null>(null);
   
   // === ДОБАВЛЯЮ: Массивы забавных сообщений для прогресс-баров ===
   const postDetailsMessages = [
@@ -1102,8 +1104,15 @@ function App() {
       // toast.success('Идеи сохранены в фоне');
     } catch (err: any) {
       console.error('Ошибка при сохранении идей:', err);
-      setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении идей');
-      toast.error('Ошибка при сохранении идей'); // Показываем ошибку пользователю
+      if (err.response?.data?.detail?.limit_reached) {
+        // Новый формат с детальной информацией об ошибке
+        setIdeasLimitExceeded(true);
+        setIdeasLimitResetTime(err.response.data.detail.reset_at);
+        toast.error(err.response.data.detail.message || 'Достигнут лимит сохранения идей');
+      } else {
+        setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении идей');
+        toast.error('Ошибка при сохранении идей'); // Показываем ошибку пользователю
+      }
     }
   };
   
@@ -1206,6 +1215,7 @@ function App() {
   // Функция для генерации идей
   const generateIdeas = async () => {
     setIdeasLimitExceeded(false);
+    setIdeasLimitResetTime(null);
     try {
       if (suggestedIdeas.length > 0) {
         const confirmed = confirm("У вас уже есть сгенерированные идеи. Сгенерировать новые? Старые идеи будут удалены.");
@@ -1259,12 +1269,23 @@ function App() {
         setSuggestedIdeas(formattedIdeas);
         setSuccess('Идеи успешно сгенерированы');
         saveIdeasToDatabase(formattedIdeas);
+      } else if (response.data && response.data.limit_reached) {
+        // Обработка случая, когда достигнут лимит
+        setIdeasLimitExceeded(true);
+        setIdeasLimitResetTime(response.data.reset_at);
+        toast.error(response.data.message || 'Достигнут лимит генерации идей');
       }
     } catch (err) {
       console.error('Ошибка при генерации идей:', err);
-      if (err.response && err.response.status === 403 && err.response.data?.error?.includes('лимит генерации идей')) {
+      if (err.response?.data?.detail?.limit_reached) {
+        // Новый формат с детальной информацией об ошибке
         setIdeasLimitExceeded(true);
-        toast.error(err.response.data.error);
+        setIdeasLimitResetTime(err.response.data.detail.reset_at);
+        toast.error(err.response.data.detail.message || 'Достигнут лимит генерации идей');
+      } else if (err.response && err.response.status === 403) {
+        // Обрабатываем старый формат ошибки
+        setIdeasLimitExceeded(true);
+        toast.error(err.response.data.detail || err.response.data.error || 'Достигнут лимит генерации идей');
       } else {
         setError(err.response?.data?.detail || err.response?.data?.error || err.message || 'Ошибка при генерации идей');
       }
@@ -1534,6 +1555,34 @@ function App() {
         margin-top: 10px;
         color: #555;
       }
+      
+      .subscription-button {
+        background-color: #8e44ad !important;
+        color: white !important;
+        border: none !important;
+        transition: background-color 0.3s ease;
+      }
+      
+      .subscription-button:hover {
+        background-color: #9b59b6 !important;
+      }
+      
+      .error-message {
+        background-color: #fff8f8;
+        border: 1px solid #ffebee;
+        padding: 15px;
+        border-radius: 8px;
+        margin: 15px 0;
+        color: #d32f2f;
+      }
+      
+      .error-message p {
+        margin: 5px 0;
+      }
+      
+      .error-message strong {
+        font-weight: 600;
+      }
     `;
     
     document.head.appendChild(styleElement);
@@ -1729,7 +1778,23 @@ function App() {
                 </div>
               )}
               {ideasLimitExceeded && (
-                <div className="error-message small">Достигнут лимит генерации идей для бесплатной подписки. Оформите подписку для снятия ограничений.</div>
+                <div className="error-message">
+                  <p>Достигнут лимит генерации идей для бесплатной подписки.</p>
+                  {ideasLimitResetTime && (
+                    <p>Следующая попытка будет доступна после: <strong>{new Date(ideasLimitResetTime).toLocaleString()}</strong></p>
+                  )}
+                  <p style={{ marginTop: '10px' }}>
+                    <button 
+                      onClick={() => setShowSubscription(true)} 
+                      className="action-button subscription-button"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight: '8px'}}>
+                        <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+                      </svg>
+                      <span>Оформить подписку</span>
+                    </button>
+                  </p>
+                </div>
               )}
           </div>
       )}
@@ -1796,7 +1861,23 @@ function App() {
                     {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать новые идеи'}
         </button>
         {ideasLimitExceeded && (
-          <div className="error-message small">Достигнут лимит генерации идей для бесплатной подписки. Оформите подписку для снятия ограничений.</div>
+          <div className="error-message">
+            <p>Достигнут лимит генерации идей для бесплатной подписки.</p>
+            {ideasLimitResetTime && (
+              <p>Следующая попытка будет доступна после: <strong>{new Date(ideasLimitResetTime).toLocaleString()}</strong></p>
+            )}
+            <p style={{ marginTop: '10px' }}>
+              <button 
+                onClick={() => setShowSubscription(true)} 
+                className="action-button subscription-button"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight: '8px'}}>
+                  <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+                </svg>
+                <span>Оформить подписку</span>
+              </button>
+            </p>
+          </div>
         )}
              </div>
               )}
