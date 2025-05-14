@@ -404,7 +404,7 @@ async def generate_post_details(request: Request, req):
                 )
                 
                 response = await client.chat.completions.create(
-                    model="deepseek/deepseek-chat-v3-0324:free",
+                    model="meta-llama/llama-4-maverick:free",
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
