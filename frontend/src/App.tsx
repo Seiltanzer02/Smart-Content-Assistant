@@ -1430,12 +1430,12 @@ function App() {
     if (isAnalyzing || isGeneratingPostDetails) {
       setProgress(0);
       interval = window.setInterval(() => {
-        setProgress(prev => (prev < 98 ? prev + Math.random() * 1.5 : prev)); // Было *3, стало *1.5 (в 2 раза медленнее)
+        setProgress(prev => (prev < 98 ? prev + Math.random() * 0.6 : prev)); // Было *1.5, стало *0.6 (в 2.5 раза медленнее)
       }, 100);
     } else if (isGeneratingIdeas) {
       setProgress(0);
       interval = window.setInterval(() => {
-        setProgress(prev => (prev < 98 ? prev + Math.random() * 2.5 : prev)); // Для идей чуть быстрее, чем для поста, но медленнее, чем было
+        setProgress(prev => (prev < 98 ? prev + Math.random() * 1.25 : prev)); // Было *2.5, стало *1.25 (в 2 раза медленнее)
       }, 150); // Можно подстроить скорость
     } else if (!isAnalyzing && !isGeneratingPostDetails && !isGeneratingIdeas) {
       setProgress(100);
