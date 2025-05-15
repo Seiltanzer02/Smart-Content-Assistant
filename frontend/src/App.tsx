@@ -463,7 +463,7 @@ function App() {
   const [ideasLimitResetTime, setIdeasLimitResetTime] = useState<string | null>(null);
   // --- ДОБАВЛЕНО: Состояния для проверки подписки ---
   const [subscriptionChecked, setSubscriptionChecked] = useState(false);
-  const [isSubscribed, setIsSubscribed] = useState(true); // по умолчанию true, чтобы не блокировать старых пользователей
+  const [isSubscribed, setIsSubscribed] = useState(false); // теперь по умолчанию false
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
   const [channelLink, setChannelLink] = useState<string | null>(null);
   
@@ -1188,6 +1188,57 @@ function App() {
       setSubscriptionChecked(true);
     }
   };
+
+  // --- ДОБАВЛЕНО: useEffect для проверки подписки при каждом запуске и смене userId ---
+  useEffect(() => {
+    if (userId) {
+      checkSubscription();
+    }
+    // eslint-disable-next-line
+  }, [userId]);
+
+  // --- Блокировка интерфейса до завершения проверки подписки ---
+  if (!subscriptionChecked) {
+    return (
+      <div style={{
+        position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+        background: '#fff', zIndex: 9999, display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center'
+      }}>
+        <h2>Проверка подписки...</h2>
+      </div>
+    );
+  }
+
+  if (showSubscriptionModal && !isSubscribed) {
+    return (
+      <div style={{
+        position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+        background: '#fff', zIndex: 9999, display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center'
+      }}>
+        <h2>Доступ ограничен</h2>
+        <p>Чтобы пользоваться приложением, подпишитесь на наш канал!</p>
+        {channelLink && (
+          <a href={channelLink} target="_blank" rel="noopener noreferrer"
+             style={{ fontSize: 20, color: '#1976d2', margin: '20px 0', textDecoration: 'underline' }}>
+            Перейти в канал
+          </a>
+        )}
+        <button
+          className="action-button"
+          style={{ fontSize: 18, padding: '12px 32px', marginTop: 20 }}
+          onClick={checkSubscription}
+        >
+          Проверить подписку
+        </button>
+        <p style={{ marginTop: 30, color: '#888' }}>
+          После подписки вернитесь в приложение и нажмите "Проверить подписку".
+        </p>
+      </div>
+    );
+  }
+  // ... основной return ...
 
   // Функция для анализа канала теперь принимает имя канала как аргумент
   const analyzeChannel = async (inputChannel?: string) => {
