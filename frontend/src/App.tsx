@@ -418,6 +418,31 @@ const normalizeChannelName = (name: string) => name.replace(/^@/, '').toLowerCas
 
 // Код, который вызывал ошибки Cannot find name, перемещен внутрь функции App
 
+// --- ДОБАВЛЯЮ: Модалка для подписки ---
+const ChannelSubscriptionModal = ({ open, onCheck, channelUrl }: { open: boolean, onCheck: () => void, channelUrl: string }) => {
+  if (!open) return null;
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.85)', zIndex: 2000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: '#fff',
+    }}>
+      <div style={{ background: '#222', padding: 32, borderRadius: 16, maxWidth: 400, textAlign: 'center', boxShadow: '0 2px 16px #0008' }}>
+        <h2 style={{ marginBottom: 16 }}>Подпишитесь на наш канал</h2>
+        <p style={{ marginBottom: 24 }}>
+          Чтобы пользоваться приложением, подпишитесь на наш Telegram-канал.<br />
+          <a href={channelUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#ffd600', fontWeight: 600, fontSize: 18, textDecoration: 'underline' }}>
+            Перейти в канал
+          </a>
+        </p>
+        <button className="action-button" onClick={onCheck} style={{ fontSize: 18, padding: '10px 28px', marginBottom: 8 }}>
+          Проверить подписку
+        </button>
+        <p style={{ fontSize: 13, color: '#bbb', marginTop: 12 }}>После подписки вернитесь и нажмите кнопку</p>
+      </div>
+    </div>
+  );
+};
+
 function App() {
   // --- ВСЕ useState ТОЛЬКО ЗДЕСЬ ---
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -461,11 +486,9 @@ function App() {
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   // Добавляю состояние для хранения времени сброса лимита
   const [ideasLimitResetTime, setIdeasLimitResetTime] = useState<string | null>(null);
-  // --- ДОБАВЛЕНО: Состояния для проверки подписки ---
-  const [subscriptionChecked, setSubscriptionChecked] = useState(false);
-  const [isSubscribed, setIsSubscribed] = useState(false); // теперь по умолчанию false
-  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
-  const [channelLink, setChannelLink] = useState<string | null>(null);
+  const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
+  const [checkingSubscription, setCheckingSubscription] = useState(false);
+  const [channelUrl, setChannelUrl] = useState('');
   
   // === ДОБАВЛЯЮ: Массивы забавных сообщений для прогресс-баров ===
   const postDetailsMessages = [
@@ -1147,8 +1170,11 @@ function App() {
     }
     console.log('Авторизация успешна:', authUserId);
     setUserId(authUserId);
+    // Устанавливаем глобальный заголовок для всех запросов axios
     axios.defaults.headers.common['X-Telegram-User-Id'] = authUserId;
     setIsAuthenticated(true);
+    
+    // Инициализируем лимиты пользователя сразу после авторизации
     axios.post('/api/user/init-usage', {}, {
       headers: { 'x-telegram-user-id': authUserId }
     }).then(() => {
@@ -1156,86 +1182,9 @@ function App() {
     }).catch(initError => {
       console.warn('Не удалось инициализировать лимиты пользователя при входе:', initError);
     });
-    // checkSubscription(); // УДАЛЯЮ этот вызов
+    
+    // setLoading(false); // Управление loading теперь в useEffect [isAuthenticated, userId]
   };
-
-  // --- ДОБАВЛЕНО: Функция проверки подписки ---
-  const checkSubscription = async () => {
-    if (!userId) return;
-    try {
-      const response = await axios.post('/check-subscription', { user_id: userId });
-      if (response.data && response.data.subscribed) {
-        setIsSubscribed(true);
-        setShowSubscriptionModal(false);
-        setSubscriptionChecked(true);
-      } else {
-        setIsSubscribed(false);
-        setShowSubscriptionModal(true);
-        setChannelLink(response.data.channel_link || null);
-        setSubscriptionChecked(true);
-      }
-    } catch (err) {
-      setIsSubscribed(false);
-      setShowSubscriptionModal(true);
-      setChannelLink(null);
-      setSubscriptionChecked(true);
-    }
-  };
-
-  // --- ДОБАВЛЕНО: useEffect для проверки подписки при каждом запуске и смене userId ---
-  useEffect(() => {
-    if (!userId) {
-      setSubscriptionChecked(true);
-      setIsSubscribed(false);
-      setShowSubscriptionModal(false);
-      return;
-    }
-    checkSubscription();
-    // eslint-disable-next-line
-  }, [userId]);
-
-  // --- Блокировка интерфейса до завершения проверки подписки ---
-  if (!subscriptionChecked) {
-    return (
-      <div style={{
-        position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-        background: '#fff', zIndex: 9999, display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center'
-      }}>
-        <h2>Проверка подписки...</h2>
-      </div>
-    );
-  }
-
-  if (showSubscriptionModal && !isSubscribed) {
-    return (
-      <div style={{
-        position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-        background: '#fff', zIndex: 9999, display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center'
-      }}>
-        <h2>Доступ ограничен</h2>
-        <p>Чтобы пользоваться приложением, подпишитесь на наш канал!</p>
-        {channelLink && (
-          <a href={channelLink} target="_blank" rel="noopener noreferrer"
-             style={{ fontSize: 20, color: '#1976d2', margin: '20px 0', textDecoration: 'underline' }}>
-            Перейти в канал
-          </a>
-        )}
-        <button
-          className="action-button"
-          style={{ fontSize: 18, padding: '12px 32px', marginTop: 20 }}
-          onClick={checkSubscription}
-        >
-          Проверить подписку
-        </button>
-        <p style={{ marginTop: 30, color: '#888' }}>
-          После подписки вернитесь в приложение и нажмите "Проверить подписку".
-        </p>
-      </div>
-    );
-  }
-  // ... основной return ...
 
   // Функция для анализа канала теперь принимает имя канала как аргумент
   const analyzeChannel = async (inputChannel?: string) => {
@@ -1703,40 +1652,10 @@ function App() {
     return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
   }
 
-  // ... внутри функции App, перед return ...
-  if (showSubscriptionModal && !isSubscribed) {
-    return (
-      <div style={{
-        position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-        background: '#fff', zIndex: 9999, display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center'
-      }}>
-        <h2>Доступ ограничен</h2>
-        <p>Чтобы пользоваться приложением, подпишитесь на наш канал!</p>
-        {channelLink && (
-          <a href={channelLink} target="_blank" rel="noopener noreferrer"
-             style={{ fontSize: 20, color: '#1976d2', margin: '20px 0', textDecoration: 'underline' }}>
-            Перейти в канал
-          </a>
-        )}
-        <button
-          className="action-button"
-          style={{ fontSize: 18, padding: '12px 32px', marginTop: 20 }}
-          onClick={checkSubscription}
-        >
-          Проверить подписку
-        </button>
-        <p style={{ marginTop: 30, color: '#888' }}>
-          После подписки вернитесь в приложение и нажмите "Проверить подписку".
-        </p>
-      </div>
-    );
-  }
-  // ... основной return ...
-
   // Основной интерфейс
   return (
     <div className="app-container">
+      <ChannelSubscriptionModal open={subscriptionModalOpen} onCheck={handleCheckSubscription} channelUrl={channelUrl} />
       <header className="app-header" style={{ minHeight: '36px', padding: '6px 0', fontSize: '1.1em' }}>
         <h1 style={{ margin: 0, fontSize: '1.2em', fontWeight: 600 }}>Smart Content Assistant</h1>
       </header>
@@ -2403,6 +2322,55 @@ function cleanPostText(text: string) {
   return text.replace(/[\*\_\#\-]+/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
+// --- ДОБАВЛЯЮ: Функция для повторной проверки ---
+const handleCheckSubscription = async () => {
+  if (!userId) return;
+  setCheckingSubscription(true);
+  try {
+    const resp = await axios.get('/api/check-channel-subscription', {
+      headers: { 'X-Telegram-User-Id': userId }
+    });
+    if (resp.data && resp.data.subscribed) {
+      setSubscriptionModalOpen(false);
+      toast.success('Подписка подтверждена!');
+    } else {
+      setSubscriptionModalOpen(true);
+      toast.error('Вы ещё не подписаны на канал!');
+    }
+  } catch (e) {
+    setSubscriptionModalOpen(true);
+    toast.error('Ошибка проверки подписки');
+  } finally {
+    setCheckingSubscription(false);
+  }
+};
 
+// --- ДОБАВЛЯЮ: Проверка подписки на канал при запуске ---
+useEffect(() => {
+  const checkSubscription = async () => {
+    if (!userId) return;
+    try {
+      setCheckingSubscription(true);
+      const resp = await axios.get('/api/check-channel-subscription', {
+        headers: { 'X-Telegram-User-Id': userId }
+      });
+      if (resp.data && resp.data.subscribed) {
+        setSubscriptionModalOpen(false);
+      } else {
+        // Получаем username канала из переменной окружения (или захардкожено, если нужно)
+        const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'your_channel';
+        setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
+        setSubscriptionModalOpen(true);
+      }
+    } catch (e) {
+      setSubscriptionModalOpen(true);
+    } finally {
+      setCheckingSubscription(false);
+    }
+  };
+  if (isAuthenticated && userId) {
+    checkSubscription();
+  }
+}, [isAuthenticated, userId]);
 
 export default App;
