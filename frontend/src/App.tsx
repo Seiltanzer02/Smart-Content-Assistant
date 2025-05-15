@@ -1147,11 +1147,8 @@ function App() {
     }
     console.log('Авторизация успешна:', authUserId);
     setUserId(authUserId);
-    // Устанавливаем глобальный заголовок для всех запросов axios
     axios.defaults.headers.common['X-Telegram-User-Id'] = authUserId;
     setIsAuthenticated(true);
-    
-    // Инициализируем лимиты пользователя сразу после авторизации
     axios.post('/api/user/init-usage', {}, {
       headers: { 'x-telegram-user-id': authUserId }
     }).then(() => {
@@ -1159,11 +1156,7 @@ function App() {
     }).catch(initError => {
       console.warn('Не удалось инициализировать лимиты пользователя при входе:', initError);
     });
-    
-    // setLoading(false); // Управление loading теперь в useEffect [isAuthenticated, userId]
-    // --- ДОБАВЛЕНО: Проверка подписки ---
-    // после setIsAuthenticated(true);
-    checkSubscription();
+    // checkSubscription(); // УДАЛЯЮ этот вызов
   };
 
   // --- ДОБАВЛЕНО: Функция проверки подписки ---
@@ -1191,9 +1184,13 @@ function App() {
 
   // --- ДОБАВЛЕНО: useEffect для проверки подписки при каждом запуске и смене userId ---
   useEffect(() => {
-    if (userId) {
-      checkSubscription();
+    if (!userId) {
+      setSubscriptionChecked(true);
+      setIsSubscribed(false);
+      setShowSubscriptionModal(false);
+      return;
     }
+    checkSubscription();
     // eslint-disable-next-line
   }, [userId]);
 
