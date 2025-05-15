@@ -451,6 +451,14 @@ const cleanPostText = (text: string): string => {
   return text.replace(/\s+/g, ' ').trim();
 };
 
+// Глобальное объявление для process.env (CRA)
+declare var process: {
+  env: {
+    [key: string]: string | undefined;
+    REACT_APP_TARGET_CHANNEL_USERNAME?: string;
+  };
+};
+
 function App() {
   console.log('Рендер приложения App');
   
@@ -1668,9 +1676,8 @@ function App() {
       } else {
         // Убеждаемся, что channelUrl установлен
         if (!channelUrl) {
-          // Используем захардкоженное значение вместо process.env
-          const channelUsername = 'your_default_channel';
-          console.log('Установка дефолтного channelUrl для канала:', channelUsername);
+          const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
+          console.log('Установка channelUrl для канала:', channelUsername);
           setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
         }
         setSubscriptionModalOpen(true);
@@ -1679,9 +1686,8 @@ function App() {
     } catch (e) {
       console.error('Ошибка при проверке подписки:', e);
       if (!channelUrl) {
-        // Используем захардкоженное значение вместо process.env
-        const channelUsername = 'your_default_channel';
-        console.log('Установка дефолтного channelUrl при ошибке для канала:', channelUsername);
+        const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
+        console.log('Установка channelUrl при ошибке для канала:', channelUsername);
         setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
       }
       setSubscriptionModalOpen(true);
@@ -1711,16 +1717,14 @@ function App() {
         if (resp.data && resp.data.subscribed) {
           setSubscriptionModalOpen(false);
         } else {
-          // Используем захардкоженное значение вместо process.env
-          const channelUsername = 'your_default_channel';
+          const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
           console.log('Установка channelUrl внутри useEffect для канала:', channelUsername);
           setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
           setSubscriptionModalOpen(true);
         }
       } catch (e) {
         console.error('Ошибка при первоначальной проверке подписки:', e);
-        // Используем захардкоженное значение вместо process.env
-        const channelUsername = 'your_default_channel';
+        const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
         console.log('Установка channelUrl при ошибке внутри useEffect для канала:', channelUsername);
         setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
         setSubscriptionModalOpen(true);
