@@ -7,6 +7,14 @@ export default defineConfig({
   server: {
     port: 5173,
     host: '0.0.0.0',
+    proxy: {
+      // Проксируем все запросы, начинающиеся с /api, на бэкенд
+      '/api': {
+        target: 'http://localhost:8000', // Укажите здесь адрес вашего FastAPI сервера
+        changeOrigin: true,
+        secure: false,
+      }
+    }
   },
   // Добавляем обработку env переменных
   define: {
