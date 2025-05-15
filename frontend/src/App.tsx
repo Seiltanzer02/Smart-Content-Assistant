@@ -6,17 +6,16 @@ import { v4 as uuidv4 } from 'uuid';
 import { Toaster, toast } from 'react-hot-toast';
 import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
-import DirectPremiumStatus from './components/DirectPremiumStatus'; // <-- Импортируем новый компонент
+import DirectPremiumStatus from './components/DirectPremiumStatus';
 import ProgressBar from './components/ProgressBar';
-import { ToastContainer } from 'react-hot-toast';
-import 'react-hot-toast/dist/ReactToastify.css';
-import toastify from 'react-hot-toast';
+import { ToastContainer, toast as toastify } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 // Определяем базовый URL API
-// Так как фронтенд и API на одном домене, используем пустую строку
-// чтобы axios использовал относительные пути (например, /generate-plan)
 const API_BASE_URL = '';
-// const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000'; // Убираем использование process.env
+
+// Добавляем константу с именем целевого канала (одну и только одну)
+const TARGET_CHANNEL_USERNAME = 'your_channel_username'; // Замени на имя нужного канала
 
 // --- ДОБАВЛЕНО: Вспомогательная функция для ключей localStorage ---
 const getUserSpecificKey = (baseKey: string, userId: string | null): string | null => {
@@ -426,6 +425,9 @@ const normalizeChannelName = (name: string) => name.replace(/^@/, '').toLowerCas
 // Заменяю константу на использование переменной окружения
 const TARGET_CHANNEL_USERNAME = process.env.TARGET_CHANNEL_USERNAME || 'default_channel_name';
 
+// Добавляю константу для имени целевого канала
+const TARGET_CHANNEL_USERNAME = 'your_channel_username'; // Замени на имя своего канала, либо будет использоваться из .env
+
 // Компонент проверки подписки на канал
 const SubscriptionCheck = ({ 
   onSubscribed, 
@@ -456,7 +458,7 @@ const SubscriptionCheck = ({
       });
 
       if (response.data.success && response.data.is_subscribed) {
-        toastify.success("Подписка подтверждена");
+        toast.success("Подписка подтверждена");
         onSubscribed();
       } else {
         setError("Для использования приложения необходимо подписаться на канал");
