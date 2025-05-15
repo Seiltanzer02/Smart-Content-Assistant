@@ -22,14 +22,19 @@ import httpx
 import aiofiles
 import os
 from dotenv import load_dotenv
-from PIL import Image
-import io
-from aiohttp import ClientSession
-import aiohttp
-from secrets import token_hex
-import uuid
-import glob
-from pathlib import Path
+
+# Безопасный импорт PIL - обработка ошибки, если библиотека не установлена
+try:
+    from PIL import Image
+except ImportError:
+    # Создаем заглушку для Image, чтобы код мог запускаться без ошибок
+    # даже если PIL не установлен
+    class DummyImage:
+        @staticmethod
+        def open(*args, **kwargs):
+            logging.warning("PIL/Pillow не установлен. Функции работы с изображениями недоступны.")
+            return None
+    Image = DummyImage
 
 # Загрузка переменных окружения
 load_dotenv(override=True)
