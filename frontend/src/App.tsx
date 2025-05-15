@@ -1131,8 +1131,8 @@ function App() {
         setIdeasLimitResetTime(err.response.data.detail.reset_at);
         toast.error(err.response.data.detail.message || 'Достигнут лимит сохранения идей');
       } else {
-        setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении идей');
-        toast.error('Ошибка при сохранении идей'); // Показываем ошибку пользователю
+      setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении идей');
+      toast.error('Ошибка при сохранении идей'); // Показываем ошибку пользователю
       }
     }
   };
@@ -1286,14 +1286,14 @@ function App() {
       }
       
       const response = await axios.post(`${API_URL}/generate-plan`, {
-        themes: analysisResult.themes,
-        styles: analysisResult.styles,
-        period_days: 7,
-        channel_name: channelName
+          themes: analysisResult.themes,
+          styles: analysisResult.styles,
+          period_days: 7,
+          channel_name: channelName
       }, {
-        headers: {
-          'x-telegram-user-id': userId || 'unknown'
-        }
+          headers: {
+            'x-telegram-user-id': userId || 'unknown'
+          }
       });
       if (response.data && response.data.plan) {
         const formattedIdeas = response.data.plan.map((idea, index) => ({
@@ -1529,7 +1529,7 @@ function App() {
       if (interval) clearInterval(interval);
     };
   }, [isAnalyzing, isGeneratingPostDetails, isGeneratingIdeas]);
-  
+
   // === ДОБАВЛЯЮ: Эффект для смены сообщений в прогресс-баре генерации деталей поста ===
   useEffect(() => {
     let messageInterval: number | null = null;
@@ -1691,7 +1691,7 @@ function App() {
   const SubscriptionModal = () => {
     if (!showSubscriptionModal) return null;
     
-    return (
+                                  return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-w-md w-full">
           <h2 className="text-2xl font-bold mb-4 text-center">Требуется подписка</h2>
@@ -1710,25 +1710,25 @@ function App() {
             >
               Подписаться на канал
             </a>
-          </div>
+                                      </div>
 
           {subscriptionError && (
             <div className="mb-4 text-center text-red-500">
               {subscriptionError}
-            </div>
-          )}
-          
+                    </div>
+                  )}
+                  
           <div className="flex justify-center">
-            <button 
+                                  <button 
               className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded mr-2 disabled:opacity-50"
               onClick={checkChannelSubscription}
               disabled={isCheckingSubscription}
             >
               {isCheckingSubscription ? 'Проверка...' : 'Проверить подписку'}
-            </button>
-          </div>
-        </div>
-      </div>
+                                  </button>
+                                </div>
+                              </div>
+                          </div>
     );
   };
 
@@ -1742,8 +1742,8 @@ function App() {
             <div className="text-center">
               <h1 className="text-2xl font-bold mb-4">Добро пожаловать в Smart Content Assistant</h1>
               <p className="mb-4">Пожалуйста, откройте приложение в Telegram для авторизации.</p>
-            </div>
-          </div>
+                </div>
+              </div>
         ) : (
           <>
             {/* Модальное окно проверки подписки */}
@@ -1775,16 +1775,16 @@ function App() {
                   )}
                   
                   <div className="flex justify-center">
-                    <button 
+                  <button 
                       className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded mr-2 disabled:opacity-50"
                       onClick={checkChannelSubscription}
                       disabled={isCheckingSubscription}
                     >
                       {isCheckingSubscription ? 'Проверка...' : 'Проверить подписку'}
-                    </button>
-                  </div>
+                  </button>
                 </div>
-              </div>
+            </div>
+        </div>
             )}
             
             {/* Основной контент приложения - показываем, только если подписка подтверждена или режим проверки отключен */}
@@ -1806,10 +1806,10 @@ function App() {
                       {/* Существующее содержимое вкладок */}
                     </TabsBody>
                   </Tabs>
-                </div>
+          </div>
                 <footer className="py-4 text-center text-gray-500 dark:text-gray-400 text-sm">Smart Content Assistant &copy; 2023</footer>
-              </div>
-            )}
+        </div>
+      )}
           </>
         )}
       </SimpleErrorBoundary>
