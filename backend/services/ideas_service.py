@@ -81,7 +81,7 @@ async def generate_content_plan(request: Request, req):
             reset_at = usage.get("reset_at")
             return {
                 "plan": [],
-                "message": f"Достигнут лимит генерации идей для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}.",
+                "message": f"Достигнут лимит в 3 генерации идей для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Лимиты обновляются каждые 3 дня.",
                 "limit_reached": True,
                 "reset_at": reset_at,
                 "subscription_required": True

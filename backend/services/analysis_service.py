@@ -30,7 +30,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         if not can_analyze:
             usage = await subscription_service.get_user_usage(int(telegram_user_id))
             reset_at = usage.get("reset_at")
-            raise HTTPException(status_code=403, detail=f"Достигнут лимит анализа каналов для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Оформите подписку для снятия ограничений.")
+            raise HTTPException(status_code=403, detail=f"Достигнут лимит в 5 анализов каналов для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Лимиты обновляются каждые 3 дня. Оформите подписку для снятия ограничений.")
         username = req.username.replace("@", "").strip()
         posts = []
         errors_list = []

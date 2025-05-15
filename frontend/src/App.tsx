@@ -8,6 +8,9 @@ import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
 import DirectPremiumStatus from './components/DirectPremiumStatus'; // <-- Импортируем новый компонент
 import ProgressBar from './components/ProgressBar';
+import { ToastContainer } from 'react-hot-toast';
+import 'react-hot-toast/dist/ReactToastify.css';
+import toastify from 'react-hot-toast';
 
 // Определяем базовый URL API
 // Так как фронтенд и API на одном домене, используем пустую строку
@@ -402,6 +405,7 @@ interface ApiUserSettings {
   channelName: string | null;
   selectedChannels: string[];
   allChannels: string[];
+  is_subscribed_to_channel?: boolean; // Добавляем это поле
   // Можно добавить id, user_id, created_at, updated_at если они нужны на фронте
 }
 
@@ -409,6 +413,7 @@ interface UserSettingsPayload {
   channelName?: string | null;
   selectedChannels?: string[];
   allChannels?: string[];
+  is_subscribed_to_channel?: boolean; // Добавляем это поле
 }
 // === КОНЕЦ ИНТЕРФЕЙСОВ ===
 
@@ -417,6 +422,91 @@ const normalizeChannelName = (name: string) => name.replace(/^@/, '').toLowerCas
 // === КОНЕЦ ФУНКЦИИ ===
 
 // Код, который вызывал ошибки Cannot find name, перемещен внутрь функции App
+
+// Заменяю константу на использование переменной окружения
+const TARGET_CHANNEL_USERNAME = process.env.TARGET_CHANNEL_USERNAME || 'default_channel_name';
+
+// Компонент проверки подписки на канал
+const SubscriptionCheck = ({ 
+  onSubscribed, 
+  userId, 
+  channelUsername 
+}: { 
+  onSubscribed: () => void;
+  userId: string | null;
+  channelUsername: string;
+}) => {
+  const [isChecking, setIsChecking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const checkSubscription = async () => {
+    if (!userId) {
+      setError("Пользователь не авторизован");
+      return;
+    }
+
+    setIsChecking(true);
+    setError(null);
+
+    try {
+      const response = await axios.post('/api/user/check-subscription', {
+        channel_username: channelUsername
+      }, {
+        headers: { 'X-Telegram-User-Id': userId }
+      });
+
+      if (response.data.success && response.data.is_subscribed) {
+        toastify.success("Подписка подтверждена");
+        onSubscribed();
+      } else {
+        setError("Для использования приложения необходимо подписаться на канал");
+      }
+    } catch (err: any) {
+      console.error("Ошибка при проверке подписки:", err);
+      setError(err.response?.data?.error || "Ошибка при проверке подписки");
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
+  // Открыть канал в Telegram
+  const openChannel = () => {
+    const tg = window.Telegram?.WebApp;
+    if (tg) {
+      tg.openTelegramLink(`https://t.me/${channelUsername}`);
+    } else {
+      window.open(`https://t.me/${channelUsername}`, '_blank');
+    }
+  };
+
+  return (
+    <div className="subscription-check-overlay">
+      <div className="subscription-check-modal">
+        <h2>Требуется подписка на канал</h2>
+        <p>Для использования данного приложения необходимо подписаться на наш канал.</p>
+        
+        {error && <div className="error-message">{error}</div>}
+        
+        <div className="subscription-buttons">
+          <button 
+            className="primary-button" 
+            onClick={openChannel}
+          >
+            Перейти на канал
+          </button>
+          
+          <button 
+            className="secondary-button" 
+            onClick={checkSubscription} 
+            disabled={isChecking}
+          >
+            {isChecking ? "Проверка..." : "Проверить подписку"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 function App() {
   // --- ВСЕ useState ТОЛЬКО ЗДЕСЬ ---
@@ -461,6 +551,8 @@ function App() {
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   // Добавляю состояние для хранения времени сброса лимита
   const [ideasLimitResetTime, setIdeasLimitResetTime] = useState<string | null>(null);
+  const [isSubscribedToChannel, setIsSubscribedToChannel] = useState<boolean>(false);
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState<boolean>(false);
   
   // === ДОБАВЛЯЮ: Массивы забавных сообщений для прогресс-баров ===
   const postDetailsMessages = [
@@ -1493,13 +1585,13 @@ function App() {
     if (isAnalyzing || isGeneratingPostDetails) {
       setProgress(0);
       interval = window.setInterval(() => {
-        setProgress(prev => (prev < 98 ? prev + Math.random() * 0.6 : prev)); // Было *1.5, стало *0.6 (в 2.5 раза медленнее)
+        setProgress(prev => (prev < 98 ? prev + Math.random() * 0.6 : prev)); // Уменьшаем скорость в 2.5 раза
       }, 100);
     } else if (isGeneratingIdeas) {
       setProgress(0);
       interval = window.setInterval(() => {
-        setProgress(prev => (prev < 98 ? prev + Math.random() * 1.25 : prev)); // Было *2.5, стало *1.25 (в 2 раза медленнее)
-      }, 150); // Можно подстроить скорость
+        setProgress(prev => (prev < 98 ? prev + Math.random() * 1.25 : prev)); // Уменьшаем скорость в 2 раза
+      }, 150); // Настраиваем скорость
     } else if (!isAnalyzing && !isGeneratingPostDetails && !isGeneratingIdeas) {
       setProgress(100);
       setTimeout(() => setProgress(0), 500);
@@ -2283,6 +2375,27 @@ function App() {
         </div>
       )}
       <Toaster position="top-center" reverseOrder={false} />
+      <ToastContainer position="top-right" autoClose={3000} />
+      {/* Модальное окно проверки подписки */}
+      {showSubscriptionModal && !isSubscribedToChannel && (
+        <SubscriptionCheck 
+          onSubscribed={handleSuccessfulSubscription} 
+          userId={userId} 
+          channelUsername={TARGET_CHANNEL_USERNAME} 
+        />
+      )}
+
+      {/* Основной контент приложения, отображается только если пользователь авторизован и подписан на канал */}
+      {isAuthenticated && (isSubscribedToChannel || !showSubscriptionModal) && (
+        <>
+          {/* Существующий интерфейс приложения */}
+          <header className="app-header" style={{ minHeight: '36px', padding: '6px 0', fontSize: '1.1em' }}>
+            <h1 style={{ margin: 0, fontSize: '1.2em', fontWeight: 600 }}>Smart Content Assistant</h1>
+          </header>
+          
+          {/* ... остальной код приложения ... */}
+        </>
+      )}
     </div>
   );
 }
@@ -2293,6 +2406,132 @@ function cleanPostText(text: string) {
   return text.replace(/[\*\_\#\-]+/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
+// Стили для модального окна проверки подписки
+const styles = `
+.subscription-check-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
 
+.subscription-check-modal {
+  background-color: #fff;
+  border-radius: 12px;
+  padding: 24px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  text-align: center;
+}
+
+.subscription-check-modal h2 {
+  margin-top: 0;
+  color: #333;
+  font-size: 1.5rem;
+}
+
+.subscription-check-modal p {
+  margin-bottom: 24px;
+  color: #666;
+}
+
+.subscription-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.primary-button, .secondary-button {
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+  font-size: 1rem;
+}
+
+.primary-button {
+  background-color: #0088cc;
+  color: white;
+}
+
+.primary-button:hover {
+  background-color: #006699;
+}
+
+.secondary-button {
+  background-color: #f0f0f0;
+  color: #333;
+}
+
+.secondary-button:hover {
+  background-color: #e0e0e0;
+}
+
+.error-message {
+  background-color: #ffebee;
+  color: #c62828;
+  padding: 8px 16px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+  font-size: 0.9rem;
+}
+`;
+
+// Добавляем стили в head документа
+const styleSheet = document.createElement("style");
+styleSheet.type = "text/css";
+styleSheet.innerText = styles;
+document.head.appendChild(styleSheet);
+
+// Добавляем функцию для обработки успешной подписки
+const handleSuccessfulSubscription = () => {
+  setIsSubscribedToChannel(true);
+  setShowSubscriptionModal(false);
+  // Сохраняем статус подписки в настройках пользователя
+  saveUserSettings({ is_subscribed_to_channel: true });
+};
+
+// Добавляем функцию для проверки подписки
+const checkChannelSubscription = async () => {
+  if (!userId) return;
+  
+  try {
+    // Сначала проверяем в настройках
+    const settings = await fetchUserSettings();
+    
+    if (settings?.is_subscribed_to_channel) {
+      setIsSubscribedToChannel(true);
+      return;
+    }
+    
+    // Если в настройках нет подтверждения, проверяем напрямую через API
+    const response = await axios.post('/api/user/check-subscription', {
+      channel_username: TARGET_CHANNEL_USERNAME
+    }, {
+      headers: { 'X-Telegram-User-Id': userId }
+    });
+    
+    setIsSubscribedToChannel(response.data.success && response.data.is_subscribed);
+    
+    // Если пользователь не подписан, показываем модальное окно
+    if (!response.data.is_subscribed) {
+      setShowSubscriptionModal(true);
+    }
+    
+  } catch (err) {
+    console.error("Ошибка при проверке подписки:", err);
+    // По умолчанию показываем модальное окно при ошибке
+    setShowSubscriptionModal(true);
+  }
+};
 
 export default App;
