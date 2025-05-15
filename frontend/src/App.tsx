@@ -112,9 +112,13 @@ declare global {
           query_id?: string | undefined;
         };
       };
-    }; // Совпадает с предыдущим объявлением из ошибки
+    };
   }
 }
+
+// Константа для базового URL API, получаемая из переменных окружения Vite
+// Если VITE_BACKEND_URL не установлена, используется пустая строка (для относительных путей)
+const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
 
 // Инициализируем Telegram WebApp сразу
 try {
@@ -1679,7 +1683,6 @@ function App() {
 
   // --- Функция для проверки подписки на канал ---
   const handleCheckSubscription = async () => {
-    // Используем только userId из Telegram WebApp для проверки подписки на канал
     const channelUserId = getUserIdForChannelSubscription();
     console.log('Вызов handleCheckSubscription, channelUserId:', channelUserId);
     if (!channelUserId) {
@@ -1689,12 +1692,16 @@ function App() {
     }
     setCheckingSubscription(true);
     try {
-      console.log('Отправка запроса на /api/check-channel-subscription');
-      const resp = await axios.get('/api/check-channel-subscription', {
-        headers: { 'X-Telegram-User-Id': channelUserId }
+      const apiUrl = `${backendUrl}/api/check-channel-subscription`;
+      console.log(`Отправка запроса на ${apiUrl}`);
+      const resp = await axios.get(apiUrl, {
+        headers: {
+          'X-Telegram-User-Id': channelUserId,
+          'Authorization': `Bearer ${localStorage.getItem('token')}` // Добавлен токен авторизации, если он нужен для API
+        }
       });
-      console.log('Ответ от /api/check-channel-subscription:', resp.data);
-      
+      console.log('Ответ от /api/check-channel-subscription (данные):', resp.data); // Логируем именно resp.data
+
       if (resp.data && resp.data.subscribed) {
         setSubscriptionModalOpen(false);
         toast.success('Подписка подтверждена!');
@@ -1793,7 +1800,7 @@ function App() {
       <div className="loading-container">
         <div className="loading-spinner"></div>
         <p>Загрузка приложения...</p>
-                                      </div>
+            </div>
                                   );
   }
 
