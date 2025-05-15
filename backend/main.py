@@ -213,7 +213,7 @@ app.add_middleware(
 )
 
 # --- Подключение роутеров ---
-from backend.routes import user_limits, analysis, ideas, posts, user_settings, images
+from backend.routes import user_limits, analysis, ideas, posts, user_settings, images, subscription_check
 
 app.include_router(user_limits.router)
 app.include_router(analysis.router)
@@ -221,6 +221,7 @@ app.include_router(ideas.router)
 app.include_router(posts.router)
 app.include_router(user_settings.router, prefix="/api/user", tags=["User Settings"])
 app.include_router(images.router, prefix="/api", tags=["Images"])
+app.include_router(subscription_check.router)
 # --- Конец подключения роутеров ---
 
 # --- ВАЖНО: API-эндпоинты для проверки подписки ПЕРЕД SPA-маршрутами ---
@@ -4187,44 +4188,4 @@ async def send_image_to_chat(request: Request):
             return JSONResponse({'success': False, 'error': resp.text}, status_code=500)
     except Exception as e:
         return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
-
-@app.get("/api/telegram-channel-status")
-async def get_telegram_channel_status_endpoint(request: Request):
-    telegram_user_id_str = request.headers.get("X-Telegram-User-Id")
-    if not telegram_user_id_str or not telegram_user_id_str.isdigit():
-        logger.warning(f"Telegram User ID not found or invalid in header: {telegram_user_id_str}")
-        raise HTTPException(status_code=401, detail="User ID not found or invalid.")
-    
-    telegram_user_id = int(telegram_user_id_str)
-    
-    if not ENV_TARGET_CHANNEL_USERNAME:
-        logger.info("TARGET_CHANNEL_USERNAME not set. Subscription check bypassed for /api/telegram-channel-status.")
-        return {"is_subscribed": True, "channel_username": None}
-
-    logger.info(f"Checking channel subscription status for user {telegram_user_id} via /api/telegram-channel-status")
-    is_subscribed = await check_user_subscription_status(telegram_user_id)
-    logger.info(f"Subscription status for user {telegram_user_id}: {is_subscribed}. Channel: {ENV_TARGET_CHANNEL_USERNAME}")
-    return {"is_subscribed": is_subscribed, "channel_username": ENV_TARGET_CHANNEL_USERNAME.replace('@','')}
-
-
-@app.post("/api/request-telegram-subscription-prompt")
-async def request_telegram_subscription_prompt_endpoint(request: Request):
-    telegram_user_id_str = request.headers.get("X-Telegram-User-Id")
-    if not telegram_user_id_str or not telegram_user_id_str.isdigit():
-        logger.warning(f"Telegram User ID not found or invalid for subscription prompt: {telegram_user_id_str}")
-        raise HTTPException(status_code=401, detail="User ID not found or invalid.")
-    
-    telegram_user_id = int(telegram_user_id_str)
-
-    if not ENV_TARGET_CHANNEL_USERNAME:
-        logger.info("TARGET_CHANNEL_USERNAME not set. Prompt message not sent for user {telegram_user_id}.")
-        return {"message_sent": False, "reason": "Target channel not configured."}
-        
-    logger.info(f"Requesting to send subscription prompt to user {telegram_user_id} for channel {ENV_TARGET_CHANNEL_USERNAME}")
-    sent = await send_subscription_prompt_message(telegram_user_id)
-    if not sent:
-        logger.error(f"Failed to send subscription prompt to user {telegram_user_id} via API call.")
-        return {"message_sent": False, "reason": "Failed to send message via bot."}
-    logger.info(f"Subscription prompt successfully requested for user {telegram_user_id}")
-    return {"message_sent": True}
 
