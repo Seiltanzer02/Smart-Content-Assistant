@@ -1751,7 +1751,7 @@ function App() {
           Можно добавить стиль display: showSubscriptionForcedModal ? 'none' : 'block' 
           к основным блокам header, main, footer, если требуется полное скрытие. */}
       
-      <div style={{ display: showSubscriptionForcedModal ? 'none' : 'block' }}>
+      <div style={{ display: (showSubscriptionForcedModal && targetChannelUsername) ? 'none' : 'block' }}>
         <header className="app-header" style={{ minHeight: '36px', padding: '6px 0', fontSize: '1.1em' }}>
           <h1 style={{ margin: 0, fontSize: '1.2em', fontWeight: 600 }}>Smart Content Assistant</h1>
         </header>
