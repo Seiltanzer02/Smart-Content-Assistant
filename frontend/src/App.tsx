@@ -8,21 +8,12 @@ import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
 import DirectPremiumStatus from './components/DirectPremiumStatus'; // <-- Импортируем новый компонент
 import ProgressBar from './components/ProgressBar';
-import { Tabs, TabsHeader, TabItem, TabsBody } from './components/Tabs';
-import { format, addDays, subDays, addMonths, subMonths, isSameMonth, isSameDay } from 'date-fns';
-import { ru } from 'date-fns/locale';
-import Loading from './components/Loading';
-import { ChannelInput } from './components/ChannelInput';
-import { ChannelAnalysis } from './components/ChannelAnalysis';
-import { ContentPlan } from './components/ContentPlan';
-import { PostDetails } from './components/PostDetails';
 
 // Определяем базовый URL API
 // Так как фронтенд и API на одном домене, используем пустую строку
-const API_URL = '';
-
-// Константа для имени канала, на который нужна подписка
-const TARGET_CHANNEL_USERNAME = "smartcontenthelper";
+// чтобы axios использовал относительные пути (например, /generate-plan)
+const API_BASE_URL = '';
+// const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000'; // Убираем использование process.env
 
 // --- ДОБАВЛЕНО: Вспомогательная функция для ключей localStorage ---
 const getUserSpecificKey = (baseKey: string, userId: string | null): string | null => {
@@ -108,7 +99,6 @@ class SimpleErrorBoundary extends React.Component<
 declare global {
   interface Window {
     Telegram?: any; // Simpler, should resolve linter
-    INJECTED_USER_ID?: string;
   }
 }
 
@@ -230,7 +220,7 @@ const ImageUploader = ({ onImageUploaded, userId }: { onImageUploaded: (imageUrl
       const formData = new FormData();
       formData.append('file', file);
       
-      const response = await axios.post(`${API_URL}/upload-image`, formData, {
+      const response = await axios.post(`${API_BASE_URL}/upload-image`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
           // --- ДОБАВЛЕНО: Передача userId --- 
@@ -291,7 +281,7 @@ const PostImageGallery = ({
     
     try {
       // Запрашиваем изображения для поста
-      const response = await axios.get(`${API_URL}/posts/${postId}/images`);
+      const response = await axios.get(`${API_BASE_URL}/posts/${postId}/images`);
       
       if (response.data && response.data.images) {
         setImages(response.data.images);
@@ -429,27 +419,16 @@ const normalizeChannelName = (name: string) => name.replace(/^@/, '').toLowerCas
 // Код, который вызывал ошибки Cannot find name, перемещен внутрь функции App
 
 function App() {
-  // === Состояния для авторизации ===
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  // --- ВСЕ useState ТОЛЬКО ЗДЕСЬ ---
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
   const [currentView, setCurrentView] = useState<ViewType>('analyze');
-  
-  // === Состояния для проверки подписки на канал ===
-  const [isSubscriptionVerified, setIsSubscriptionVerified] = useState<boolean>(false);
-  const [isCheckingSubscription, setIsCheckingSubscription] = useState<boolean>(false);
-  const [showSubscriptionModal, setShowSubscriptionModal] = useState<boolean>(false);
-  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
-  const [subscriptionChannel, setSubscriptionChannel] = useState<string>(TARGET_CHANNEL_USERNAME);
-  
-  // === Состояния для каналов ===
   const [channelName, setChannelName] = useState<string>('');
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
   const [allChannels, setAllChannels] = useState<string[]>([]);
   const [initialSettingsLoaded, setInitialSettingsLoaded] = useState(false);
-  
-  // === Остальные состояния приложения ===
-  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysisLoadedFromDB, setAnalysisLoadedFromDB] = useState(false);
@@ -482,6 +461,11 @@ function App() {
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   // Добавляю состояние для хранения времени сброса лимита
   const [ideasLimitResetTime, setIdeasLimitResetTime] = useState<string | null>(null);
+  const [isChannelSubscribed, setIsChannelSubscribed] = useState<boolean | null>(null);
+  const [showSubscriptionForcedModal, setShowSubscriptionForcedModal] = useState<boolean>(false);
+  const [targetChannelUsername, setTargetChannelUsername] = useState<string | null>(null);
+  const [checkingSubscription, setCheckingSubscription] = useState<boolean>(false);
+  const [initialSubscriptionCheckDone, setInitialSubscriptionCheckDone] = useState<boolean>(false);
   
   // === ДОБАВЛЯЮ: Массивы забавных сообщений для прогресс-баров ===
   const postDetailsMessages = [
@@ -553,7 +537,7 @@ function App() {
   const fetchUserSettings = async (): Promise<ApiUserSettings | null> => {
     if (!userId) return null;
     try {
-      const response = await axios.get<ApiUserSettings>(`${API_URL}/api/user/settings`);
+      const response = await axios.get<ApiUserSettings>(`${API_BASE_URL}/api/user/settings`);
       return response.data;
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 404) {
@@ -568,7 +552,7 @@ function App() {
   const saveUserSettings = async (settings: UserSettingsPayload) => {
     if (!userId) return;
     try {
-      await axios.put(`${API_URL}/api/user/settings`, settings); // PUT вместо PATCH
+      await axios.put(`${API_BASE_URL}/api/user/settings`, settings); // PUT вместо PATCH
     } catch (error) {
       console.error('Failed to save user settings:', error);
       toast.error('Ошибка сохранения настроек на сервере.');
@@ -815,7 +799,7 @@ function App() {
   const fetchSavedPosts = async () => {
     setLoadingSavedPosts(true);
     try {
-      let url = `${API_URL}/posts`;
+      let url = `${API_BASE_URL}/posts`;
       const params: any = {};
       if (channelName) {
         params.channel_name = normalizeChannelName(channelName);
@@ -870,7 +854,7 @@ function App() {
     setSuccess('');
 
     try {
-      const response = await axios.post(`${API_URL}/generate-post-details`, {
+      const response = await axios.post(`${API_BASE_URL}/generate-post-details`, {
         topic_idea: selectedIdea.topic_idea,
         format_style: selectedIdea.format_style || '',
         channel_name: selectedIdea.channel_name || '',
@@ -1006,7 +990,7 @@ function App() {
     if (!imageId) return;
     try {
       console.log(`Загрузка данных для сохраненного изображения: ${imageId}`);
-      const response = await axios.get(`${API_URL}/images/${imageId}`, {
+      const response = await axios.get(`${API_BASE_URL}/images/${imageId}`, {
           headers: { 'x-telegram-user-id': userId }
       });
       if (response.data && !response.data.error) {
@@ -1109,7 +1093,7 @@ function App() {
     
     try {
       await axios.post(
-        `${API_URL}/save-suggested-ideas`, 
+        `${API_BASE_URL}/save-suggested-ideas`, 
         {
           ideas: ideasToSave,
           channel_name: channelName // Передаем текущее имя канала
@@ -1131,8 +1115,8 @@ function App() {
         setIdeasLimitResetTime(err.response.data.detail.reset_at);
         toast.error(err.response.data.detail.message || 'Достигнут лимит сохранения идей');
       } else {
-      setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении идей');
-      toast.error('Ошибка при сохранении идей'); // Показываем ошибку пользователю
+        setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении идей');
+        toast.error('Ошибка при сохранении идей'); // Показываем ошибку пользователю
       }
     }
   };
@@ -1215,12 +1199,8 @@ function App() {
       }
       // Теперь выполняем анализ канала
       console.log(`Отправляем запрос на анализ канала: ${channelToAnalyze}, userId: ${userId}`);
-      const response = await axios.post(`${API_URL}/analyze`, {
-        username: channelToAnalyze
-      }, {
-        headers: {
-          'X-Telegram-User-Id': userId
-        }
+      const response = await axios.post('/analyze', { username: channelToAnalyze }, {
+        headers: { 'x-telegram-user-id': userId }
       });
       console.log('Получен ответ от сервера по анализу:', response.data);
       
@@ -1285,16 +1265,20 @@ function App() {
         // Продолжаем выполнение, даже если инициализация не удалась
       }
       
-      const response = await axios.post(`${API_URL}/generate-plan`, {
+      const response = await axios.post(
+        `${API_BASE_URL}/generate-plan`,
+        {
           themes: analysisResult.themes,
           styles: analysisResult.styles,
           period_days: 7,
           channel_name: channelName
-      }, {
+        },
+        {
           headers: {
             'x-telegram-user-id': userId || 'unknown'
           }
-      });
+        }
+      );
       if (response.data && response.data.plan) {
         const formattedIdeas = response.data.plan.map((idea, index) => ({
           id: `idea-${Date.now()}-${index}`,
@@ -1338,7 +1322,7 @@ function App() {
   const fetchSavedIdeas = async () => {
     setLoading(true);
     try {
-      let url = `${API_URL}/ideas`;
+      let url = `${API_BASE_URL}/ideas`;
       const params: any = {};
       if (channelName) {
         params.channel_name = channelName;
@@ -1419,7 +1403,7 @@ function App() {
         setSelectedImage(null); // Ensure no image is pre-selected
 
         try {
-          const response = await axios.post(`${API_URL}/generate-post-details`, {
+          const response = await axios.post(`${API_BASE_URL}/generate-post-details`, {
             topic_idea: selectedIdea.topic_idea,
           format_style: selectedIdea.format_style,
           post_samples: analysisResult?.analyzed_posts_sample || [] 
@@ -1456,7 +1440,7 @@ function App() {
           setIsGeneratingPostDetails(false);
         }
       }
-  }, [currentView, currentPostId, selectedIdea, userId, API_URL, analysisResult, setIsGeneratingPostDetails, setError, setSuggestedImages, setSelectedImage, setCurrentPostText]);
+  }, [currentView, currentPostId, selectedIdea, userId, API_BASE_URL, analysisResult, setIsGeneratingPostDetails, setError, setSuggestedImages, setSelectedImage, setCurrentPostText]);
 
   // Вызываем useCallback-функцию внутри useEffect
   useEffect(() => {
@@ -1471,7 +1455,7 @@ function App() {
     setAnalysisResult(null);
     setAnalysisLoadedFromDB(false);
     try {
-      let url = `${API_URL}/channel-analysis?channel_name=${encodeURIComponent(channel)}`;
+      let url = `${API_BASE_URL}/channel-analysis`;
       const params: any = { channel_name: channel };
       const response = await axios.get(url, {
         params,
@@ -1529,7 +1513,7 @@ function App() {
       if (interval) clearInterval(interval);
     };
   }, [isAnalyzing, isGeneratingPostDetails, isGeneratingIdeas]);
-
+  
   // === ДОБАВЛЯЮ: Эффект для смены сообщений в прогресс-баре генерации деталей поста ===
   useEffect(() => {
     let messageInterval: number | null = null;
@@ -1630,189 +1614,189 @@ function App() {
     };
   }, []);
 
-  // Проверяем авторизацию при загрузке
-  useEffect(() => {
-    const checkAuth = async () => {
-      setLoading(true);
-      try {
-        // Проверяем, есть ли Telegram WebApp
-        if (window.Telegram?.WebApp) {
-          console.log('Telegram WebApp найден, проверяем авторизацию...');
-          
-          // Обозначаем что WebApp готов
-          if (window.Telegram.WebApp.ready) {
-            window.Telegram.WebApp.ready();
-          }
-          
-          // Получаем ID пользователя из WebApp
-          const webAppUser = window.Telegram.WebApp.initDataUnsafe?.user;
-          if (webAppUser && webAppUser.id) {
-            console.log('Пользователь авторизован через Telegram WebApp:', webAppUser.id);
-            handleAuthSuccess(webAppUser.id.toString());
-            return;
-          }
+  const requestSubscriptionPrompt = async () => {
+    if (!userId) return;
+    try {
+      logger.log("Requesting subscription prompt from backend...");
+      await axios.post(`${API_BASE_URL}/api/request-telegram-subscription-prompt`, {},
+        {
+          headers: { 'X-Telegram-User-Id': userId }
         }
-        
-        // Fallback для тестирования - ищем ID в localStorage или injectUserId
-        const storedUserId = localStorage.getItem('telegram_user_id');
-        const injectedUserId = window.INJECTED_USER_ID;
-        
-        if (injectedUserId) {
-          console.log('Используем инжектированный ID пользователя:', injectedUserId);
-          handleAuthSuccess(injectedUserId);
-        } else if (storedUserId) {
-          console.log('Используем сохраненный ID пользователя:', storedUserId);
-          handleAuthSuccess(storedUserId);
-        } else {
-          console.log('Пользователь не авторизован');
-          setIsAuthenticated(false);
-          setUserId(null);
-        }
-      } catch (error) {
-        console.error('Ошибка при проверке авторизации:', error);
-        setIsAuthenticated(false);
-        setUserId(null);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    checkAuth();
-  }, []);
-
-  // После успешной авторизации проверяем подписку на канал
-  useEffect(() => {
-    if (isAuthenticated && userId) {
-      checkChannelSubscription();
+      );
+      logger.log("Subscription prompt request successful.");
+    } catch (error) {
+      logger.error("Error requesting subscription prompt:", error);
+      // Не критично, если не удалось отправить, модальное окно все равно покажется
     }
-  }, [isAuthenticated, userId]);
+  };
 
-  // Компонент модального окна для проверки подписки
-  const SubscriptionModal = () => {
-    if (!showSubscriptionModal) return null;
-    
-                                  return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-w-md w-full">
-          <h2 className="text-2xl font-bold mb-4 text-center">Требуется подписка</h2>
-          
-          <div className="mb-4 text-center">
-            <p className="mb-4">Для использования приложения необходимо подписаться на наш канал:</p>
-            <a 
-              href={`https://t.me/${subscriptionChannel}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
-              onClick={(e) => {
-                e.preventDefault();
-                goToChannel();
-              }}
-            >
-              Подписаться на канал
-            </a>
-                                      </div>
+  const checkChannelSubscriptionStatus = useCallback(async (isInitialCheck = false) => {
+    if (!userId) return;
+    setCheckingSubscription(true);
+    logger.log(`Checking channel subscription (isInitial: ${isInitialCheck}). Current status: ${isChannelSubscribed}`);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/telegram-channel-status`, {
+        headers: { 'X-Telegram-User-Id': userId }
+      });
+      logger.log("Subscription status response:", response.data);
+      if (response.data) {
+        const currentlySubscribed = response.data.is_subscribed;
+        setIsChannelSubscribed(currentlySubscribed);
+        setTargetChannelUsername(response.data.channel_username);
 
-          {subscriptionError && (
-            <div className="mb-4 text-center text-red-500">
-              {subscriptionError}
-                    </div>
-                  )}
-                  
-          <div className="flex justify-center">
-                                  <button 
-              className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded mr-2 disabled:opacity-50"
-              onClick={checkChannelSubscription}
-              disabled={isCheckingSubscription}
-            >
-              {isCheckingSubscription ? 'Проверка...' : 'Проверить подписку'}
-                                  </button>
-                                </div>
-                              </div>
-                          </div>
+        if (!currentlySubscribed && response.data.channel_username) {
+          setShowSubscriptionForcedModal(true);
+          // Отправляем сообщение в бот только при первой проверке, если пользователь не подписан
+          // и если модальное окно еще не было показано (чтобы избежать повторных отправок при клике "проверить")
+          if (isInitialCheck) { 
+            logger.log("User not subscribed on initial check, requesting prompt.");
+            await requestSubscriptionPrompt();
+          }
+        } else {
+          setShowSubscriptionForcedModal(false);
+        }
+      }
+    } catch (error) {
+      logger.error("Error checking channel subscription:", error);
+      toast.error("Не удалось проверить подписку на канал. Попробуйте позже.");
+      // В случае ошибки проверки, не блокируем приложение, но и не подтверждаем подписку
+      // Оставляем isChannelSubscribed как есть или null, чтобы не было ложноположительного доступа
+      // setShowSubscriptionForcedModal(false); // Не скрываем модалку, если она уже была
+    } finally {
+      setCheckingSubscription(false);
+      if(isInitialCheck) {
+        setInitialSubscriptionCheckDone(true);
+      }
+    }
+  }, [userId, API_BASE_URL]); // logger не добавляем в зависимости, т.к. он внешний
+
+  useEffect(() => {
+    if (isAuthenticated && userId && !initialSubscriptionCheckDone) {
+      logger.log("Authenticated, performing initial subscription check.");
+      checkChannelSubscriptionStatus(true);
+    }
+  }, [isAuthenticated, userId, initialSubscriptionCheckDone, checkChannelSubscriptionStatus]);
+
+  const SubscriptionForcedModal = () => {
+    if (!showSubscriptionForcedModal || !targetChannelUsername) return null;
+
+    const handleCheckSubscriptionClick = async () => {
+      await checkChannelSubscriptionStatus(false); // false, т.к. это не начальная проверка
+    };
+
+    const channelLink = `https://t.me/${targetChannelUsername}`;
+
+    return (
+      <div style={{
+        position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+        backgroundColor: 'rgba(0, 0, 0, 0.92)', color: 'white',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        zIndex: 2000, padding: '20px', textAlign: 'center', boxSizing: 'border-box'
+      }}>
+        <h2 style={{ fontSize: 'clamp(1.5em, 4vw, 1.8em)', marginBottom: '20px' }}>Необходима подписка!</h2>
+        <p style={{ fontSize: 'clamp(1em, 3vw, 1.1em)', marginBottom: '15px', lineHeight: '1.6', maxWidth: '500px' }}>
+          Для использования всех функций приложения, пожалуйста, подпишитесь на наш Telegram-канал:
+        </p>
+        <a href={channelLink} target="_blank" rel="noopener noreferrer"
+           style={{
+             display: 'inline-block', backgroundColor: '#0088cc', color: 'white',
+             padding: '12px 25px', borderRadius: '8px', textDecoration: 'none',
+             fontSize: 'clamp(1em, 3vw, 1.1em)', fontWeight: 'bold', marginBottom: '25px',
+             boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)', transition: 'background-color 0.2s ease'
+           }}
+           onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#0077b3')}
+           onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#0088cc')}
+           >
+          Канал: @{targetChannelUsername}
+        </a>
+        <p style={{ fontSize: 'clamp(0.9em, 2.5vw, 1em)', marginBottom: '25px', maxWidth: '500px' }}>
+          После подписки вернитесь в приложение и нажмите кнопку ниже.
+        </p>
+        <button
+          onClick={handleCheckSubscriptionClick}
+          disabled={checkingSubscription}
+          style={{
+            backgroundColor: checkingSubscription ? '#b0b0b0' : '#28a745', color: 'white',
+            padding: '12px 25px', borderRadius: '8px', border: 'none',
+            fontSize: 'clamp(1em, 3vw, 1.1em)', fontWeight: 'bold', cursor: 'pointer',
+            boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)', transition: 'background-color 0.2s ease',
+            minWidth: '220px'
+          }}
+          onMouseOver={(e) => !checkingSubscription && (e.currentTarget.style.backgroundColor = '#218838')}
+          onMouseOut={(e) => !checkingSubscription && (e.currentTarget.style.backgroundColor = '#28a745')}
+          >
+          {checkingSubscription ? <ClipLoader size={20} color="#fff" cssOverride={{ marginRight: '10px' }} /> : null}
+          {checkingSubscription ? 'Проверка...' : 'Я подписался, проверить!'}
+        </button>
+      </div>
     );
   };
 
-  return (
-    <div className="app bg-white dark:bg-gray-900 min-h-screen">
-      <SimpleErrorBoundary>
-        {loading ? (
-          <Loading message="Загрузка приложения..." />
-        ) : !isAuthenticated ? (
-          <div className="flex flex-col items-center justify-center min-h-screen p-4">
-            <div className="text-center">
-              <h1 className="text-2xl font-bold mb-4">Добро пожаловать в Smart Content Assistant</h1>
-              <p className="mb-4">Пожалуйста, откройте приложение в Telegram для авторизации.</p>
-                </div>
-              </div>
-        ) : (
-          <>
-            {/* Модальное окно проверки подписки */}
-            {showSubscriptionModal && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-                <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-w-md w-full">
-                  <h2 className="text-2xl font-bold mb-4 text-center">Требуется подписка</h2>
-                  
-                  <div className="mb-4 text-center">
-                    <p className="mb-4">Для использования приложения необходимо подписаться на наш канал:</p>
-                    <a 
-                      href={`https://t.me/${subscriptionChannel}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-block bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        goToChannel();
-                      }}
-                    >
-                      Подписаться на канал
-                    </a>
-                  </div>
+  // Логика загрузки и отображения основного контента
+  if (!initialSubscriptionCheckDone && isAuthenticated && userId) {
+    // Показываем основной спиннер загрузки, пока идет ПЕРВАЯ проверка подписки
+    return (
+      <div className="loading-container">
+        <SubscriptionForcedModal /> {/* Модалка может появиться и тут, если проверка быстрая */}
+        <div className="loading-spinner"></div>
+        <p>Загрузка и проверка статуса...</p>
+      </div>
+    );
+  }
+  
+  if (!isAuthenticated) {
+    return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
+  }
 
-                  {subscriptionError && (
-                    <div className="mb-4 text-center text-red-500">
-                      {subscriptionError}
-                    </div>
-                  )}
-                  
-                  <div className="flex justify-center">
-                  <button 
-                      className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded mr-2 disabled:opacity-50"
-                      onClick={checkChannelSubscription}
-                      disabled={isCheckingSubscription}
-                    >
-                      {isCheckingSubscription ? 'Проверка...' : 'Проверить подписку'}
-                  </button>
-                </div>
-            </div>
-        </div>
-            )}
-            
-            {/* Основной контент приложения - показываем, только если подписка подтверждена или режим проверки отключен */}
-            {!showSubscriptionModal && (
-              <div className="flex flex-col min-h-screen">
-                <Toaster position="top-center" />
-                <div className="flex-grow container mx-auto px-4 pt-6">
-                  {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
-                  {success && <SuccessMessage message={success} onClose={() => setSuccess(null)} />}
-            
-                  <Tabs defaultValue="analyze">
-                    <TabsHeader>
-                      <TabItem value="analyze" onClick={() => setCurrentView('analyze')}>Анализ канала</TabItem>
-                      <TabItem value="ideas" onClick={() => setCurrentView('suggestions')}>Идеи постов</TabItem>
-                      <TabItem value="calendar" onClick={() => setCurrentView('calendar')}>Календарь постов</TabItem>
-                    </TabsHeader>
-                    <ProgressBar progress={progress} />
-                    <TabsBody>
-                      {/* Существующее содержимое вкладок */}
-                    </TabsBody>
-                  </Tabs>
-          </div>
-                <footer className="py-4 text-center text-gray-500 dark:text-gray-400 text-sm">Smart Content Assistant &copy; 2023</footer>
-        </div>
-      )}
+  // Основной рендер приложения
+  return (
+    <div className="app-container">
+      <SubscriptionForcedModal />
+      {/* Если модальное окно активно, остальной интерфейс будет под ним и неактивен
+          Можно добавить стиль display: showSubscriptionForcedModal ? 'none' : 'block' 
+          к основным блокам header, main, footer, если требуется полное скрытие. */}
+      
+      <div style={{ display: showSubscriptionForcedModal ? 'none' : 'block' }}>
+        <header className="app-header" style={{ minHeight: '36px', padding: '6px 0', fontSize: '1.1em' }}>
+          <h1 style={{ margin: 0, fontSize: '1.2em', fontWeight: 600 }}>Smart Content Assistant</h1>
+        </header>
+        
+        {showSubscription && (
+          <>
+            <SubscriptionWidget userId={userId} isActive={true}/>
           </>
         )}
-      </SimpleErrorBoundary>
+
+        <main className="app-main">
+          {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
+          {success && <SuccessMessage message={success} onClose={() => setSuccess(null)} />}
+          
+          {/* Навигация и контент вкладок */}
+          {/* ... вся ваша существующая навигация и рендер вкладок (analyze, suggestions, calendar, posts, edit) ... */}
+          {/* Пример: */}
+          <div className="navigation-buttons">
+             {/* ... ваши кнопки навигации ... */}
+          </div>
+          <div className="channel-selector">
+            {/* ... ваш селектор каналов ... */}
+          </div>
+          <div className="view-container">
+            {currentView === 'analyze' && ( <div className="view analyze-view"> {/* ... */} </div>)}
+            {currentView === 'suggestions' && channelName && ( <div className="view suggestions-view"> {/* ... */} </div>)}
+            {/* ... и так далее для всех вью ... */}
+            {/* Убедитесь, что этот контент не рендерится или блокируется, если модальное окно активно */}
+          </div>
+        </main>
+
+        <footer className="app-footer">
+          <p>© 2024 Smart Content Assistant</p>
+        </footer>
+      </div> {/* Этот div скрывается, если модалка активна */}
+
+      {isImageModalOpen && selectedImage && (
+        // ... ваш код модального окна для изображения ...
+      )}
+      <Toaster position="top-center" reverseOrder={false} />
     </div>
   );
 }

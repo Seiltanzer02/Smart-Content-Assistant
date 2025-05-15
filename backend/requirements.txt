@@ -15,4 +15,3 @@ gunicorn
 python-telegram-bot
 aiogram
 asyncpg
-Pillow # Добавляем Pillow (PIL)
