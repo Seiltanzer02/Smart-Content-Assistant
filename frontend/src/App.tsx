@@ -1115,8 +1115,8 @@ function App() {
         setIdeasLimitResetTime(err.response.data.detail.reset_at);
         toast.error(err.response.data.detail.message || 'Достигнут лимит сохранения идей');
       } else {
-        setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении идей');
-        toast.error('Ошибка при сохранении идей'); // Показываем ошибку пользователю
+      setError(err.response?.data?.detail || err.message || 'Ошибка при сохранении идей');
+      toast.error('Ошибка при сохранении идей'); // Показываем ошибку пользователю
       }
     }
   };
@@ -1513,7 +1513,7 @@ function App() {
       if (interval) clearInterval(interval);
     };
   }, [isAnalyzing, isGeneratingPostDetails, isGeneratingIdeas]);
-  
+
   // === ДОБАВЛЯЮ: Эффект для смены сообщений в прогресс-баре генерации деталей поста ===
   useEffect(() => {
     let messageInterval: number | null = null;
@@ -1617,15 +1617,15 @@ function App() {
   const requestSubscriptionPrompt = async () => {
     if (!userId) return;
     try {
-      logger.log("Requesting subscription prompt from backend...");
+      console.log("Requesting subscription prompt from backend...");
       await axios.post(`${API_BASE_URL}/api/request-telegram-subscription-prompt`, {},
         {
           headers: { 'X-Telegram-User-Id': userId }
         }
       );
-      logger.log("Subscription prompt request successful.");
+      console.log("Subscription prompt request successful.");
     } catch (error) {
-      logger.error("Error requesting subscription prompt:", error);
+      console.error("Error requesting subscription prompt:", error);
       // Не критично, если не удалось отправить, модальное окно все равно покажется
     }
   };
@@ -1633,12 +1633,12 @@ function App() {
   const checkChannelSubscriptionStatus = useCallback(async (isInitialCheck = false) => {
     if (!userId) return;
     setCheckingSubscription(true);
-    logger.log(`Checking channel subscription (isInitial: ${isInitialCheck}). Current status: ${isChannelSubscribed}`);
+    console.log(`Checking channel subscription (isInitial: ${isInitialCheck}). Current status: ${isChannelSubscribed}`);
     try {
       const response = await axios.get(`${API_BASE_URL}/api/telegram-channel-status`, {
         headers: { 'X-Telegram-User-Id': userId }
       });
-      logger.log("Subscription status response:", response.data);
+      console.log("Subscription status response:", response.data);
       if (response.data) {
         const currentlySubscribed = response.data.is_subscribed;
         setIsChannelSubscribed(currentlySubscribed);
@@ -1646,10 +1646,8 @@ function App() {
 
         if (!currentlySubscribed && response.data.channel_username) {
           setShowSubscriptionForcedModal(true);
-          // Отправляем сообщение в бот только при первой проверке, если пользователь не подписан
-          // и если модальное окно еще не было показано (чтобы избежать повторных отправок при клике "проверить")
           if (isInitialCheck) { 
-            logger.log("User not subscribed on initial check, requesting prompt.");
+            console.log("User not subscribed on initial check, requesting prompt.");
             await requestSubscriptionPrompt();
           }
         } else {
@@ -1657,22 +1655,19 @@ function App() {
         }
       }
     } catch (error) {
-      logger.error("Error checking channel subscription:", error);
+      console.error("Error checking channel subscription:", error);
       toast.error("Не удалось проверить подписку на канал. Попробуйте позже.");
-      // В случае ошибки проверки, не блокируем приложение, но и не подтверждаем подписку
-      // Оставляем isChannelSubscribed как есть или null, чтобы не было ложноположительного доступа
-      // setShowSubscriptionForcedModal(false); // Не скрываем модалку, если она уже была
     } finally {
       setCheckingSubscription(false);
       if(isInitialCheck) {
         setInitialSubscriptionCheckDone(true);
       }
     }
-  }, [userId, API_BASE_URL]); // logger не добавляем в зависимости, т.к. он внешний
+  }, [userId, API_BASE_URL, isChannelSubscribed, requestSubscriptionPrompt]); // Добавил isChannelSubscribed и requestSubscriptionPrompt
 
   useEffect(() => {
     if (isAuthenticated && userId && !initialSubscriptionCheckDone) {
-      logger.log("Authenticated, performing initial subscription check.");
+      console.log("Authenticated, performing initial subscription check.");
       checkChannelSubscriptionStatus(true);
     }
   }, [isAuthenticated, userId, initialSubscriptionCheckDone, checkChannelSubscriptionStatus]);
@@ -1686,7 +1681,7 @@ function App() {
 
     const channelLink = `https://t.me/${targetChannelUsername}`;
 
-    return (
+                                  return (
       <div style={{
         position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
         backgroundColor: 'rgba(0, 0, 0, 0.92)', color: 'white',
@@ -1712,7 +1707,7 @@ function App() {
         <p style={{ fontSize: 'clamp(0.9em, 2.5vw, 1em)', marginBottom: '25px', maxWidth: '500px' }}>
           После подписки вернитесь в приложение и нажмите кнопку ниже.
         </p>
-        <button
+                                  <button 
           onClick={handleCheckSubscriptionClick}
           disabled={checkingSubscription}
           style={{
@@ -1727,8 +1722,8 @@ function App() {
           >
           {checkingSubscription ? <ClipLoader size={20} color="#fff" cssOverride={{ marginRight: '10px' }} /> : null}
           {checkingSubscription ? 'Проверка...' : 'Я подписался, проверить!'}
-        </button>
-      </div>
+                                  </button>
+                                </div>
     );
   };
 
@@ -1740,7 +1735,7 @@ function App() {
         <SubscriptionForcedModal /> {/* Модалка может появиться и тут, если проверка быстрая */}
         <div className="loading-spinner"></div>
         <p>Загрузка и проверка статуса...</p>
-      </div>
+                              </div>
     );
   }
   
@@ -1776,10 +1771,10 @@ function App() {
           {/* Пример: */}
           <div className="navigation-buttons">
              {/* ... ваши кнопки навигации ... */}
-          </div>
+            </div>
           <div className="channel-selector">
             {/* ... ваш селектор каналов ... */}
-          </div>
+        </div>
           <div className="view-container">
             {currentView === 'analyze' && ( <div className="view analyze-view"> {/* ... */} </div>)}
             {currentView === 'suggestions' && channelName && ( <div className="view suggestions-view"> {/* ... */} </div>)}
@@ -1788,13 +1783,55 @@ function App() {
           </div>
         </main>
 
-        <footer className="app-footer">
-          <p>© 2024 Smart Content Assistant</p>
-        </footer>
+      <footer className="app-footer">
+        <p>© 2024 Smart Content Assistant</p>
+      </footer>
       </div> {/* Этот div скрывается, если модалка активна */}
 
+      {/* Модальное окно предпросмотра изображения */}
       {isImageModalOpen && selectedImage && (
-        // ... ваш код модального окна для изображения ...
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0,0,0,0.85)',
+          zIndex: 1000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh', padding: '16px' }}>
+            <img
+              src={selectedImage.url}
+              alt={selectedImage.alt || 'Изображение'}
+              style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: '10px', boxShadow: '0 2px 16px #0008', display: 'block' }}
+            />
+            <button
+              onClick={() => setIsImageModalOpen(false)}
+              style={{
+                position: 'absolute',
+                top: 16,
+                right: 16,
+                background: '#fff',
+                color: '#222',
+                border: 'none',
+                borderRadius: '50%',
+                width: 36,
+                height: 36,
+                fontSize: 22,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px #0004',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              title="Закрыть"
+            >×</button>
+          </div>
+        </div>
       )}
       <Toaster position="top-center" reverseOrder={false} />
     </div>
