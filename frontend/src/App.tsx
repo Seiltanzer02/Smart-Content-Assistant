@@ -1765,33 +1765,58 @@ function App() {
       }
       setCheckingSubscription(true);
       try {
-        console.log('Отправка запроса на /api/check-channel-subscription внутри useEffect');
-        const resp = await axios.get('/api/check-channel-subscription', {
-          headers: { 'X-Telegram-User-Id': channelUserId }
+        const apiUrl = `${backendUrl}/api/check-channel-subscription`; // <--- ИЗМЕНЕНИЕ ЗДЕСЬ
+        console.log(`Отправка запроса на ${apiUrl} внутри useEffect`); // <--- ИЗМЕНЕНИЕ ЗДЕСЬ
+        const resp = await axios.get(apiUrl, { // <--- ИЗМЕНЕНИЕ ЗДЕСЬ
+          headers: { 
+            'X-Telegram-User-Id': channelUserId,
+            'Authorization': `Bearer ${localStorage.getItem('token')}` // Добавлен токен авторизации для консистентности
+          }
         });
         console.log('Ответ от /api/check-channel-subscription внутри useEffect:', resp.data);
         if (resp.data && resp.data.subscribed) {
           setSubscriptionModalOpen(false);
         } else {
-          const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
+          const channelUsernameFromServer = resp.data?.channel;
+          const channelUsernameEnv = process.env.REACT_APP_TARGET_CHANNEL_USERNAME;
+          const defaultChannel = 'smart_content_helper';
+          
+          const channelUsername = channelUsernameFromServer || channelUsernameEnv || defaultChannel;
+
           console.log('Установка channelUrl внутри useEffect для канала:', channelUsername);
           setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
           setSubscriptionModalOpen(true);
+          if (resp.data && resp.data.error) {
+            toast.error(resp.data.error);
+          } else if (!resp.data?.subscribed) {
+            // Показываем ошибку, только если нет явной ошибки от API, но подписки нет
+            // toast.error('Вы ещё не подписаны на канал! (useEffect)');
+          }
         }
       } catch (e) {
         console.error('Ошибка при первоначальной проверке подписки:', e);
+        // Получаем детали ошибки
+        let errorMessage = 'Ошибка проверки подписки (useEffect)';
+        if (e.response && e.response.data && e.response.data.error) {
+            errorMessage = e.response.data.error;
+            console.error('Детали ошибки от API (useEffect):', e.response.data);
+        }
+
         const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
         console.log('Установка channelUrl при ошибке внутри useEffect для канала:', channelUsername);
         setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
         setSubscriptionModalOpen(true);
+        // toast.error(errorMessage); // Не показываем toast здесь, чтобы не дублировать с модалкой
       } finally {
         setCheckingSubscription(false);
       }
     };
 
-    checkSubscription();
+    if (isAuthenticated) { // Добавил проверку isAuthenticated перед вызовом
+        checkSubscription();
+    }
     // eslint-disable-next-line
-  }, [isAuthenticated]);
+  }, [isAuthenticated]); // Оставляем зависимость только от isAuthenticated
   
   // Компонент загрузки
   if (loading) {
