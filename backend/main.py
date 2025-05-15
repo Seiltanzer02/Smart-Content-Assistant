@@ -43,6 +43,7 @@ from backend.telegram_utils import get_telegram_posts_via_telethon, get_telegram
 import backend.move_temp_files
 from datetime import datetime, timedelta
 import traceback
+from backend.services.telegram_subscription_check import check_user_channel_subscription, send_subscription_prompt
 
 # Unsplash
 from unsplash import Api as UnsplashApi
