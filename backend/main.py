@@ -18,7 +18,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
-import httpx
+    import httpx
 import aiofiles
 import os
 from dotenv import load_dotenv
