@@ -213,7 +213,7 @@ app.add_middleware(
 )
 
 # --- Подключение роутеров ---
-from backend.routes import user_limits, analysis, ideas, posts, user_settings, images, subscription_check
+from backend.routes import user_limits, analysis, ideas, posts, user_settings, images
 
 app.include_router(user_limits.router)
 app.include_router(analysis.router)
@@ -221,7 +221,6 @@ app.include_router(ideas.router)
 app.include_router(posts.router)
 app.include_router(user_settings.router, prefix="/api/user", tags=["User Settings"])
 app.include_router(images.router, prefix="/api", tags=["Images"])
-app.include_router(subscription_check.router)
 # --- Конец подключения роутеров ---
 
 # --- ВАЖНО: API-эндпоинты для проверки подписки ПЕРЕД SPA-маршрутами ---
@@ -4188,4 +4187,18 @@ async def send_image_to_chat(request: Request):
             return JSONResponse({'success': False, 'error': resp.text}, status_code=500)
     except Exception as e:
         return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
+
+@app.get("/api/check-channel-subscription")
+async def check_channel_subscription(request: Request):
+    telegram_user_id = request.headers.get("X-Telegram-User-Id")
+    if not telegram_user_id or not telegram_user_id.isdigit():
+        return {"subscribed": False, "error": "Не удалось определить Telegram ID"}
+    user_id = int(telegram_user_id)
+    try:
+        is_subscribed = await check_user_channel_subscription(user_id)
+        if not is_subscribed:
+            await send_subscription_prompt(user_id)
+        return {"subscribed": is_subscribed}
+    except Exception as e:
+        return {"subscribed": False, "error": str(e)}
 
