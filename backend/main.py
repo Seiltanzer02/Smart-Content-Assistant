@@ -4228,6 +4228,17 @@ async def check_channel_subscription(request: Request):
         }
     
     try:
+        # Добавляем дополнительное логирование и диагностику
+        logger.info(f"Используемый токен бота: {bot_token[:5]}...{bot_token[-5:] if len(bot_token) > 10 else ''}")
+        logger.info(f"Имя канала для проверки: {channel_username}")
+        
+        # Проверка корректности имени канала
+        formatted_channel = channel_username.lstrip("@")
+        if not formatted_channel:
+            error_msg = "Некорректное имя канала (пустое после удаления символа @)"
+            logger.error(error_msg)
+            return {"subscribed": False, "error": error_msg}
+        
         # Проверяем подписку на канал
         is_subscribed = await check_user_channel_subscription(user_id)
         logger.info(f"Результат проверки подписки для {user_id}: {is_subscribed}")
@@ -4235,12 +4246,15 @@ async def check_channel_subscription(request: Request):
         if not is_subscribed:
             # Отправляем уведомление пользователю, если не подписан
             logger.info(f"Пользователь {user_id} не подписан на канал, отправляем уведомление")
-            await send_subscription_prompt(user_id)
+            try:
+                await send_subscription_prompt(user_id)
+            except Exception as prompt_error:
+                logger.error(f"Ошибка при отправке напоминания о подписке: {prompt_error}")
         
         return {
             "subscribed": is_subscribed,
             "user_id": user_id,
-            "channel": channel_username.lstrip("@"),
+            "channel": formatted_channel,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -4249,13 +4263,27 @@ async def check_channel_subscription(request: Request):
         # Добавляем расширенную диагностическую информацию
         import traceback
         trace = traceback.format_exc()
+        error_message = str(e)
+        
+        # Добавляем пользовательское сообщение об ошибке в зависимости от типа ошибки
+        user_friendly_error = "Ошибка при проверке подписки на канал"
+        
+        if "getaddrinfo failed" in error_message or "Connection refused" in error_message:
+            user_friendly_error = "Не удалось подключиться к API Telegram. Проверьте интернет-соединение."
+        elif "Not Found" in error_message or "404" in error_message:
+            user_friendly_error = "Ошибка в настройках Telegram бота. Возможно, неверный токен."
+        elif "Forbidden" in error_message or "403" in error_message:
+            user_friendly_error = "Нет доступа к каналу. Убедитесь, что бот имеет права администратора."
+        elif "user not found" in error_message.lower():
+            user_friendly_error = "Вы ещё не подписаны на канал!"
         
         return {
             "subscribed": False, 
-            "error": str(e),
+            "error": user_friendly_error,
+            "technical_error": error_message if error_message else None,
             "user_id": user_id,
             "channel": channel_username.lstrip("@") if channel_username else None,
-            "traceback": trace[:500]  # Ограничиваем длину трейсбека
+            "traceback": trace[:500] if trace else None  # Ограничиваем длину трейсбека
         }
 
 # Эндпоинт для прямой диагностики проблем с подпиской на канал

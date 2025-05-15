@@ -98,7 +98,21 @@ class SimpleErrorBoundary extends React.Component<
 // Типы для typescript
 declare global {
   interface Window {
-    Telegram?: any; // Simpler, should resolve linter
+    Telegram?: {
+      WebApp: {
+        ready: () => void;
+        initData: string;
+        initDataUnsafe: {
+          user?: {
+            id?: number | undefined;
+            first_name?: string | undefined;
+            last_name?: string | undefined;
+            username?: string | undefined;
+          } | undefined;
+          query_id?: string | undefined;
+        };
+      };
+    }; // Совпадает с предыдущим объявлением из ошибки
   }
 }
 
@@ -1680,27 +1694,51 @@ function App() {
         headers: { 'X-Telegram-User-Id': channelUserId }
       });
       console.log('Ответ от /api/check-channel-subscription:', resp.data);
+      
       if (resp.data && resp.data.subscribed) {
         setSubscriptionModalOpen(false);
         toast.success('Подписка подтверждена!');
       } else {
-        if (!channelUrl) {
-          const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
-          console.log('Установка channelUrl для канала:', channelUsername);
-          setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
-        }
+        // Получаем имя канала из переменных окружения или ответа API
+        const channelUsername = resp.data?.channel || 
+                               process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 
+                               'smart_content_helper';
+        
+        console.log('Пользователь не подписан на канал:', channelUsername);
+        console.log('Полный ответ API:', resp.data);
+        
+        // Формируем URL канала, убирая символ @ если он есть
+        const formattedChannelName = channelUsername.replace(/^@/, '');
+        const channelLink = `https://t.me/${formattedChannelName}`;
+        console.log('Установка channelUrl:', channelLink);
+        
+        setChannelUrl(channelLink);
         setSubscriptionModalOpen(true);
-        toast.error('Вы ещё не подписаны на канал!');
+        
+        // Показываем сообщение об ошибке, если оно есть в ответе
+        if (resp.data && resp.data.error) {
+          toast.error(resp.data.error);
+        } else {
+          toast.error('Вы ещё не подписаны на канал!');
+        }
       }
     } catch (e) {
       console.error('Ошибка при проверке подписки:', e);
-      if (!channelUrl) {
-        const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
-        console.log('Установка channelUrl при ошибке для канала:', channelUsername);
-        setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
+      
+      // Получаем детали ошибки
+      let errorMessage = 'Ошибка проверки подписки';
+      if (e.response && e.response.data && e.response.data.error) {
+        errorMessage = e.response.data.error;
+        console.error('Детали ошибки от API:', e.response.data);
       }
+      
+      // Все равно показываем модальное окно подписки
+      const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
+      console.log('Установка channelUrl при ошибке для канала:', channelUsername);
+      setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
       setSubscriptionModalOpen(true);
-      toast.error('Ошибка проверки подписки');
+      
+      toast.error(errorMessage);
     } finally {
       setCheckingSubscription(false);
     }
@@ -1751,12 +1789,12 @@ function App() {
   // Компонент загрузки
   if (loading) {
     console.log('Рендер: loading === true, показываем индикатор загрузки');
-    return (
+                                  return (
       <div className="loading-container">
         <div className="loading-spinner"></div>
         <p>Загрузка приложения...</p>
-      </div>
-    );
+                                      </div>
+                                  );
   }
 
   // Компонент авторизации
