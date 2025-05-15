@@ -47,13 +47,25 @@ async def check_user_channel_subscription(user_id: int) -> bool:
             if not data.get("ok"):
                 error_msg = f"Ошибка Telegram API: {data.get('description')}"
                 logger.error(error_msg)
+                
+                # Если пользователь не найден в чате, это означает, что он не подписан
+                if "user not found" in data.get("description", "").lower():
+                    logger.info(f"Пользователь {user_id} не найден в канале @{channel}, считаем не подписанным")
+                    return False
+                    
                 raise HTTPException(status_code=500, detail=error_msg)
             
             status = data["result"]["status"]
             logger.info(f"Статус пользователя в канале: {status}")
             
             # Подписан, если статус member, administrator, creator
+            # НЕ подписан, если статус left, kicked или restricted с is_member=False
             is_subscribed = status in ("member", "administrator", "creator")
+            
+            # Дополнительная проверка для статуса restricted
+            if status == "restricted" and data["result"].get("is_member") == True:
+                is_subscribed = True
+            
             logger.info(f"Результат проверки подписки: {is_subscribed}")
             
             return is_subscribed
