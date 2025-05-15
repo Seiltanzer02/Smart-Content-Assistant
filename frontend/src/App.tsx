@@ -420,6 +420,7 @@ const normalizeChannelName = (name: string) => name.replace(/^@/, '').toLowerCas
 
 // --- ДОБАВЛЯЮ: Модалка для подписки ---
 const ChannelSubscriptionModal = ({ open, onCheck, channelUrl }: { open: boolean, onCheck: () => void, channelUrl: string }) => {
+  console.log('Рендер ChannelSubscriptionModal, состояние open:', open);
   if (!open) return null;
   return (
     <div style={{
@@ -443,7 +444,16 @@ const ChannelSubscriptionModal = ({ open, onCheck, channelUrl }: { open: boolean
   );
 };
 
+// --- ДОБАВЛЯЮ: Базовая функция для очистки текста поста (замена для cleanPostText) ---
+const cleanPostText = (text: string): string => {
+  if (!text) return '';
+  // Удаляем специальные символы и лишние пробелы
+  return text.replace(/\s+/g, ' ').trim();
+};
+
 function App() {
+  console.log('Рендер приложения App');
+  
   // === ВСЕ useState и другие хуки объявляются ЗДЕСЬ, ВНУТРИ App ===
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true); // Предполагается, что loading есть
@@ -1161,6 +1171,7 @@ function App() {
 
   // Обработчик успешной авторизации
   const handleAuthSuccess = (authUserId: string) => {
+    console.log('handleAuthSuccess вызван с userId:', authUserId);
     if (!authUserId || authUserId === '123456789') {
       console.error('Некорректный ID пользователя:', authUserId);
       setError('Ошибка авторизации: некорректный ID пользователя');
@@ -1168,7 +1179,7 @@ function App() {
       setUserId(null);
       return;
     }
-    console.log('Авторизация успешна:', authUserId);
+    console.log('Авторизация успешна, устанавливаем userId:', authUserId);
     setUserId(authUserId);
     // Устанавливаем глобальный заголовок для всех запросов axios
     axios.defaults.headers.common['X-Telegram-User-Id'] = authUserId;
@@ -1637,29 +1648,20 @@ function App() {
     };
   }, []);
 
-  // Компонент загрузки
-  if (loading) {
-                                  return (
-      <div className="loading-container">
-        <div className="loading-spinner"></div>
-        <p>Загрузка приложения...</p>
-                                      </div>
-                                  );
-  }
-
-  // Компонент авторизации
-  if (!isAuthenticated) {
-    return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
-  }
-
   // --- Функция для проверки подписки на канал ---
   const handleCheckSubscription = async () => {
-    if (!userId) return;
+    console.log('Вызов handleCheckSubscription, userId:', userId);
+    if (!userId) {
+      console.error('handleCheckSubscription: userId не определен!');
+      return;
+    }
     setCheckingSubscription(true);
     try {
+      console.log('Отправка запроса на /api/check-channel-subscription');
       const resp = await axios.get('/api/check-channel-subscription', {
         headers: { 'X-Telegram-User-Id': userId }
       });
+      console.log('Ответ от /api/check-channel-subscription:', resp.data);
       if (resp.data && resp.data.subscribed) {
         setSubscriptionModalOpen(false);
         toast.success('Подписка подтверждена!');
@@ -1668,15 +1670,18 @@ function App() {
         if (!channelUrl) {
           // Используем захардкоженное значение вместо process.env
           const channelUsername = 'your_default_channel';
+          console.log('Установка дефолтного channelUrl для канала:', channelUsername);
           setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
         }
         setSubscriptionModalOpen(true);
         toast.error('Вы ещё не подписаны на канал!');
       }
     } catch (e) {
+      console.error('Ошибка при проверке подписки:', e);
       if (!channelUrl) {
         // Используем захардкоженное значение вместо process.env
         const channelUsername = 'your_default_channel';
+        console.log('Установка дефолтного channelUrl при ошибке для канала:', channelUsername);
         setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
       }
       setSubscriptionModalOpen(true);
@@ -1688,37 +1693,68 @@ function App() {
   
   // --- Проверка подписки на канал при запуске ---
   useEffect(() => {
+    console.log('useEffect для проверки подписки запущен, isAuthenticated:', isAuthenticated, 'userId:', userId);
+    
     const checkSubscription = async () => {
-      if (!userId || !isAuthenticated) return;
+      console.log('Функция checkSubscription запущена');
+      if (!userId || !isAuthenticated) {
+        console.log('Выход из checkSubscription: !userId || !isAuthenticated');
+        return;
+      }
       setCheckingSubscription(true);
       try {
+        console.log('Отправка запроса на /api/check-channel-subscription внутри useEffect');
         const resp = await axios.get('/api/check-channel-subscription', {
           headers: { 'X-Telegram-User-Id': userId }
         });
+        console.log('Ответ от /api/check-channel-subscription внутри useEffect:', resp.data);
         if (resp.data && resp.data.subscribed) {
           setSubscriptionModalOpen(false);
         } else {
           // Используем захардкоженное значение вместо process.env
           const channelUsername = 'your_default_channel';
+          console.log('Установка channelUrl внутри useEffect для канала:', channelUsername);
           setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
           setSubscriptionModalOpen(true);
         }
       } catch (e) {
+        console.error('Ошибка при первоначальной проверке подписки:', e);
         // Используем захардкоженное значение вместо process.env
         const channelUsername = 'your_default_channel';
+        console.log('Установка channelUrl при ошибке внутри useEffect для канала:', channelUsername);
         setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
         setSubscriptionModalOpen(true);
-        console.error("Ошибка при первоначальной проверке подписки:", e);
       } finally {
         setCheckingSubscription(false);
       }
     };
+    
     if (isAuthenticated && userId) {
+      console.log('Вызов checkSubscription, так как isAuthenticated && userId');
       checkSubscription();
+    } else {
+      console.log('checkSubscription не вызван: !isAuthenticated || !userId');
     }
   }, [isAuthenticated, userId]);
   
-  // ... остальной код компонента App ...
+  // Компонент загрузки
+  if (loading) {
+    console.log('Рендер: loading === true, показываем индикатор загрузки');
+    return (
+      <div className="loading-container">
+        <div className="loading-spinner"></div>
+        <p>Загрузка приложения...</p>
+      </div>
+    );
+  }
+
+  // Компонент авторизации
+  if (!isAuthenticated) {
+    console.log('Рендер: !isAuthenticated === true, показываем форму авторизации');
+    return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
+  }
+
+  console.log('Рендер: основной UI приложения, isAuthenticated:', isAuthenticated, 'userId:', userId, 'subscriptionModalOpen:', subscriptionModalOpen);
 
   // Основной интерфейс
   return (
