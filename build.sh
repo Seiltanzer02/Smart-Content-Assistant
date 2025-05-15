@@ -12,10 +12,6 @@ echo "Установка зависимостей Python..."
 pip install --upgrade pip
 pip install -r backend/requirements.txt
 
-# Явно устанавливаем Pillow, чтобы избежать ошибки ModuleNotFoundError: No module named 'PIL'
-echo "Установка Pillow..."
-pip install Pillow
-
 # Проверка наличия NVM и использование корректной версии Node.js
 echo "Проверка наличия NVM..."
 if [ -d "$HOME/.nvm" ]; then
