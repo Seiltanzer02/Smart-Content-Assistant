@@ -1656,25 +1656,34 @@ function App() {
     };
   }, []);
 
+  // --- Функция для получения userId только для проверки подписки на канал ---
+  function getUserIdForChannelSubscription() {
+    return window.Telegram?.WebApp?.initDataUnsafe?.user?.id
+      ? String(window.Telegram.WebApp.initDataUnsafe.user.id)
+      : null;
+  }
+
   // --- Функция для проверки подписки на канал ---
   const handleCheckSubscription = async () => {
-    console.log('Вызов handleCheckSubscription, userId:', userId);
-    if (!userId) {
-      console.error('handleCheckSubscription: userId не определен!');
+    // Используем только userId из Telegram WebApp для проверки подписки на канал
+    const channelUserId = getUserIdForChannelSubscription();
+    console.log('Вызов handleCheckSubscription, channelUserId:', channelUserId);
+    if (!channelUserId) {
+      console.error('handleCheckSubscription: userId не определен через Telegram WebApp!');
+      toast.error('Не удалось определить ваш Telegram ID. Откройте приложение внутри Telegram.');
       return;
     }
     setCheckingSubscription(true);
     try {
       console.log('Отправка запроса на /api/check-channel-subscription');
       const resp = await axios.get('/api/check-channel-subscription', {
-        headers: { 'X-Telegram-User-Id': userId }
+        headers: { 'X-Telegram-User-Id': channelUserId }
       });
       console.log('Ответ от /api/check-channel-subscription:', resp.data);
       if (resp.data && resp.data.subscribed) {
         setSubscriptionModalOpen(false);
         toast.success('Подписка подтверждена!');
       } else {
-        // Убеждаемся, что channelUrl установлен
         if (!channelUrl) {
           const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
           console.log('Установка channelUrl для канала:', channelUsername);
@@ -1696,22 +1705,24 @@ function App() {
       setCheckingSubscription(false);
     }
   };
-  
+
   // --- Проверка подписки на канал при запуске ---
   useEffect(() => {
     console.log('useEffect для проверки подписки запущен, isAuthenticated:', isAuthenticated, 'userId:', userId);
     
     const checkSubscription = async () => {
-      console.log('Функция checkSubscription запущена');
-      if (!userId || !isAuthenticated) {
-        console.log('Выход из checkSubscription: !userId || !isAuthenticated');
+      // Используем только userId из Telegram WebApp для проверки подписки на канал
+      const channelUserId = getUserIdForChannelSubscription();
+      console.log('Функция checkSubscription запущена, channelUserId:', channelUserId);
+      if (!channelUserId || !isAuthenticated) {
+        console.log('Выход из checkSubscription: !channelUserId || !isAuthenticated');
         return;
       }
       setCheckingSubscription(true);
       try {
         console.log('Отправка запроса на /api/check-channel-subscription внутри useEffect');
         const resp = await axios.get('/api/check-channel-subscription', {
-          headers: { 'X-Telegram-User-Id': userId }
+          headers: { 'X-Telegram-User-Id': channelUserId }
         });
         console.log('Ответ от /api/check-channel-subscription внутри useEffect:', resp.data);
         if (resp.data && resp.data.subscribed) {
@@ -1732,14 +1743,10 @@ function App() {
         setCheckingSubscription(false);
       }
     };
-    
-    if (isAuthenticated && userId) {
-      console.log('Вызов checkSubscription, так как isAuthenticated && userId');
-      checkSubscription();
-    } else {
-      console.log('checkSubscription не вызван: !isAuthenticated || !userId');
-    }
-  }, [isAuthenticated, userId]);
+
+    checkSubscription();
+    // eslint-disable-next-line
+  }, [isAuthenticated]);
   
   // Компонент загрузки
   if (loading) {
