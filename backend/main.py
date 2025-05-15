@@ -18,9 +18,8 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
-    import httpx
+import httpx
 import aiofiles
-import os
 from dotenv import load_dotenv
 
 # Безопасный импорт PIL - обработка ошибки, если библиотека не установлена
@@ -58,7 +57,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ... existing code ...
+# Создание экземпляра приложения FastAPI
+app = FastAPI()
+
+# Настройка CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Импорт других модулей (если нужно)
+# from backend.services.something import some_function
 
 @app.get("/check-channel-subscription", response_model=Dict[str, Any])
 async def check_channel_subscription(request: Request):
@@ -99,4 +111,36 @@ async def check_channel_subscription(request: Request):
     except Exception as e:
         logger.error(f"Ошибка при проверке подписки на канал: {e}")
         return {"subscribed": False, "error": f"Внутренняя ошибка сервера: {str(e)}", "reset_url": f"https://t.me/{TARGET_CHANNEL_USERNAME}"}
+
+# Определяем функцию для отправки Telegram сообщений
+async def send_telegram_message(chat_id, text, parse_mode="HTML"):
+    """Отправляет сообщение через Telegram Bot API"""
+    if not TELEGRAM_BOT_TOKEN:
+        logger.error("TELEGRAM_BOT_TOKEN не найден в окружении")
+        return False
+    
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": parse_mode
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, data=payload)
+            if response.status_code == 200:
+                logger.info(f"Сообщение успешно отправлено пользователю {chat_id}")
+                return True
+            else:
+                logger.error(f"Ошибка отправки сообщения: {response.status_code} {response.text}")
+                return False
+    except Exception as e:
+        logger.error(f"Ошибка при отправке Telegram сообщения: {e}")
+        return False
+
+# Корневой эндпоинт
+@app.get("/")
+async def root():
+    return {"message": "Smart Content API работает!"}
 
