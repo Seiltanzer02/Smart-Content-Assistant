@@ -1,6 +1,9 @@
 from fastapi import APIRouter, Request
 from backend.services.telegram_subscription_check import check_user_channel_subscription, send_subscription_prompt
-from backend.main import logger
+import logging
+
+# Создаем собственный логгер вместо импорта из main
+logger = logging.getLogger("subscription_check")
 
 router = APIRouter(
     prefix="/api",
