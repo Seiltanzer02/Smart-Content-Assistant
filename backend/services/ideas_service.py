@@ -121,27 +121,27 @@ async def generate_content_plan(request: Request, req):
         if OPENROUTER_API_KEY:
             try:
                 logger.info(f"Отправка запроса на генерацию плана через OpenRouter API для канала {channel_name}")
-        client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=OPENROUTER_API_KEY
-        )
+                client = AsyncOpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=OPENROUTER_API_KEY
+                )
                 
-        response = await client.chat.completions.create(
+                response = await client.chat.completions.create(
                     model="meta-llama/llama-4-maverick:free",
-            messages=[
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.7,
-            max_tokens=150 * period_days,
-            timeout=120,
-            extra_headers={
-                "HTTP-Referer": "https://content-manager.onrender.com",
-                "X-Title": "Smart Content Assistant"
-            }
-        )
+                    messages=[
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=150 * period_days,
+                    timeout=120,
+                    extra_headers={
+                        "HTTP-Referer": "https://content-manager.onrender.com",
+                        "X-Title": "Smart Content Assistant"
+                    }
+                )
                 
-        if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-            plan_text = response.choices[0].message.content.strip()
+                if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+                    plan_text = response.choices[0].message.content.strip()
                     logger.info(f"Получен ответ с планом публикаций через OpenRouter API (первые 100 символов): {plan_text[:100]}...")
                 elif response and hasattr(response, 'error') and response.error:
                     err_details = response.error
@@ -149,13 +149,13 @@ async def generate_content_plan(request: Request, req):
                     logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
                     # Ошибка OpenRouter API - пробуем запасной вариант
                     raise Exception(f"OpenRouter API вернул ошибку: {api_error_message}")
-        else:
-            logger.error(f"Некорректный или пустой ответ от OpenRouter API при генерации плана. Status: {response.response.status_code if hasattr(response, 'response') else 'N/A'}")
-            try:
-                raw_response_content = await response.response.text() if hasattr(response, 'response') and hasattr(response.response, 'text') else str(response)
-                logger.error(f"Полный ответ API (или его представление): {raw_response_content}")
-            except Exception as log_err:
-                logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
+                else:
+                    logger.error(f"Некорректный или пустой ответ от OpenRouter API при генерации плана. Status: {response.response.status_code if hasattr(response, 'response') else 'N/A'}")
+                    try:
+                        raw_response_content = await response.response.text() if hasattr(response, 'response') and hasattr(response.response, 'text') else str(response)
+                        logger.error(f"Полный ответ API (или его представление): {raw_response_content}")
+                    except Exception as log_err:
+                        logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
                     # Ошибка OpenRouter API - пробуем запасной вариант
                     raise Exception("Некорректный или пустой ответ от OpenRouter API")
                 
@@ -223,38 +223,38 @@ async def generate_content_plan(request: Request, req):
         
         if plan_text:
             lines = plan_text.split('\n')
-        expected_style_set = set(s.lower() for s in styles)
+            expected_style_set = set(s.lower() for s in styles)
             
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                    
-            parts = line.split('::')
-            if len(parts) == 3:
-                try:
-                    day_part = parts[0].lower().replace('день', '').strip()
-                    day = int(day_part)
-                    topic_idea = clean_text_formatting(parts[1].strip())
-                    format_style = clean_text_formatting(parts[2].strip())
-                        
-                    if format_style.lower() not in expected_style_set:
-                        logger.warning(f"Стиль '{format_style}' не найден в списке допустимых стилей: {styles}")
-                        format_style = random.choice(styles) if styles else format_style
-                            
-                    if topic_idea:
-                        plan_items.append({
-                            "day": day,
-                            "topic_idea": topic_idea,
-                            "format_style": format_style
-                        })
-                    else:
-                        logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
-                except Exception as parse_err:
-                    logger.error(f"Ошибка при парсинге строки плана: {line} — {parse_err}")
+            for line in lines:
+                line = line.strip()
+                if not line:
                     continue
-            else:
-                logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
+                    
+                parts = line.split('::')
+                if len(parts) == 3:
+                    try:
+                        day_part = parts[0].lower().replace('день', '').strip()
+                        day = int(day_part)
+                        topic_idea = clean_text_formatting(parts[1].strip())
+                        format_style = clean_text_formatting(parts[2].strip())
+                        
+                        if format_style.lower() not in expected_style_set:
+                            logger.warning(f"Стиль '{format_style}' не найден в списке допустимых стилей: {styles}")
+                            format_style = random.choice(styles) if styles else format_style
+                            
+                        if topic_idea:
+                            plan_items.append({
+                                "day": day,
+                                "topic_idea": topic_idea,
+                                "format_style": format_style
+                            })
+                        else:
+                            logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
+                    except Exception as parse_err:
+                        logger.error(f"Ошибка при парсинге строки плана: {line} — {parse_err}")
+                        continue
+                else:
+                    logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
         
         # Если не удалось извлечь идеи — генерируем базовый план вручную
         if not plan_items:
@@ -278,7 +278,7 @@ async def generate_content_plan(request: Request, req):
             result_message = "План сгенерирован с использованием резервного API (OpenAI)"
         
         # После успешной генерации идей увеличиваем счетчик использования
-            await subscription_service.increment_idea_usage(int(telegram_user_id))
+        await subscription_service.increment_idea_usage(int(telegram_user_id))
             
         return {"plan": plan_items, "message": result_message}
     except Exception as e:
@@ -314,130 +314,65 @@ async def save_suggested_idea(idea_data: Dict[str, Any], request: Request):
         raise HTTPException(status_code=500, detail=f"Ошибка при сохранении идеи: {str(e)}")
 
 async def save_suggested_ideas_batch(payload, request: Request):
-    telegram_user_id = request.headers.get("X-Telegram-User-Id")
-    if not telegram_user_id:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    # Преобразуем ID пользователя в целое число
     try:
-        telegram_user_id = int(telegram_user_id)
-    except (ValueError, TypeError):
-        logger.error(f"Некорректный ID пользователя в заголовке: {telegram_user_id}")
-        raise HTTPException(status_code=400, detail="Некорректный формат ID пользователя")
-    if not supabase:
-        logger.error("Supabase client not initialized")
-        raise HTTPException(status_code=500, detail="Database not initialized")
+        telegram_user_id = request.headers.get("X-Telegram-User-Id")
+        if not telegram_user_id:
+            logger.warning("Запрос пакетного сохранения идей без идентификации пользователя Telegram")
+            raise HTTPException(status_code=401, detail="Для сохранения идей необходимо авторизоваться через Telegram")
         
-    # Добавляем проверку лимита генерации идей
-    subscription_service = SupabaseSubscriptionService(supabase)
-    can_generate = await subscription_service.can_generate_idea(telegram_user_id)
-    if not can_generate:
-        usage = await subscription_service.get_user_usage(telegram_user_id)
-        reset_at = usage.get("reset_at")
-        raise HTTPException(
-            status_code=403, 
-            detail={
-                "message": f"Достигнут лимит генерации идей для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}.",
-                "reset_at": reset_at,
-                "limit_reached": True,
-                "subscription_required": True
-            }
-        )
+        ideas = payload.ideas
+        channel_name = payload.channel_name
         
-    saved_count = 0
-    errors = []
-    saved_ids = []
-    ideas_to_save = payload.ideas
-    channel_name = payload.channel_name
-    logger.info(f"Получен запрос на сохранение {len(ideas_to_save)} идей для канала {channel_name}")
-    # --- НАЧАЛО: Удаление старых идей для этого канала перед сохранением новых --- 
-    if channel_name:
-        try:
-            delete_result = supabase.table("suggested_ideas")\
-                .delete()\
-                .eq("user_id", int(telegram_user_id))\
-                .eq("channel_name", channel_name)\
-                .execute()
-            logger.info(f"Удалено {len(delete_result.data)} старых идей для канала {channel_name}")
-        except Exception as del_err:
-            logger.error(f"Ошибка при удалении старых идей для канала {channel_name}: {del_err}")
-            errors.append(f"Ошибка удаления старых идей: {str(del_err)}")
-    # --- КОНЕЦ: Удаление старых идей --- 
-    # --- ДОБАВЛЕНО: Вызов fix_schema перед вставкой --- 
-    try:
-        logger.info("Вызов fix_schema непосредственно перед сохранением идей...")
-        from backend.main import fix_schema
-        fix_result = await fix_schema()
-        if not fix_result.get("success"):
-            logger.warning(f"Не удалось обновить/проверить схему перед сохранением идей: {fix_result}")
-            errors.append("Предупреждение: не удалось проверить/обновить схему перед сохранением.")
-        else:
-            logger.info("Проверка/обновление схемы перед сохранением идей завершена успешно.")
-    except Exception as pre_save_fix_err:
-        logger.error(f"Ошибка при вызове fix_schema перед сохранением идей: {pre_save_fix_err}", exc_info=True)
-        errors.append(f"Ошибка проверки схемы перед сохранением: {str(pre_save_fix_err)}")
-    # --- КОНЕЦ ДОБАВЛЕНИЯ ---
-    records_to_insert = []
-    for idea_data in ideas_to_save:
-        try:
-            topic_idea = clean_text_formatting(idea_data.get("topic_idea", ""))
-            format_style = clean_text_formatting(idea_data.get("format_style", ""))
-            if not topic_idea or not format_style:
+        if not ideas or not isinstance(ideas, list):
+            logger.warning(f"Некорректный запрос на сохранение идей. payload.ideas: {ideas}")
+            raise HTTPException(status_code=400, detail="Необходимо предоставить непустой список идей")
+        
+        saved_ideas = []
+        
+        for idea in ideas:
+            try:
+                idea_to_save = {}
+                
+                # Обязательные поля для идеи
+                if "topic_idea" not in idea or not idea["topic_idea"]:
+                    logger.warning(f"Пропущена идея без topic_idea: {idea}")
+                    continue
+                
+                idea_to_save["topic_idea"] = idea["topic_idea"]
+                idea_to_save["format_style"] = idea.get("format_style", "")
+                idea_to_save["user_id"] = int(telegram_user_id)
+                idea_to_save["channel_name"] = channel_name if channel_name else idea.get("channel_name", "")
+                idea_to_save["id"] = str(uuid.uuid4())
+                
+                # Опциональные поля
+                if "day" in idea:
+                    idea_to_save["relative_day"] = idea["day"]
+                elif "relative_day" in idea:
+                    idea_to_save["relative_day"] = idea["relative_day"]
+                
+                idea_to_save["is_detailed"] = idea.get("is_detailed", False)
+                
+                # Сохраняем идею в БД
+                result = supabase.table("suggested_ideas").insert(idea_to_save).execute()
+                
+                if hasattr(result, 'data') and len(result.data) > 0:
+                    saved_ideas.append({
+                        "id": idea_to_save["id"],
+                        "topic_idea": idea_to_save["topic_idea"],
+                        "format_style": idea_to_save["format_style"]
+                    })
+                else:
+                    logger.error(f"Ошибка при сохранении идеи в пакетном режиме: {result}")
+            except Exception as idea_error:
+                logger.error(f"Ошибка при обработке идеи в пакетном сохранении: {idea_error}")
                 continue
-            idea_id = str(uuid.uuid4())
-            # Корректно переносим day -> relative_day
-            relative_day = idea_data.get("relative_day") or idea_data.get("day")
-            # Заполняем все нужные поля
-            record = {
-                "id": idea_id,
-                "user_id": int(telegram_user_id),
-                "channel_name": idea_data.get("channel_name") or channel_name,
-                "topic_idea": topic_idea,
-                "format_style": format_style,
-                "relative_day": relative_day,
-                "created_at": datetime.now().isoformat(),
-                "is_detailed": bool(idea_data.get("is_detailed", False)),
-            }
-            records_to_insert.append(record)
-            saved_ids.append(idea_id)
-        except Exception as e:
-            errors.append(f"Ошибка подготовки идеи {idea_data.get('topic_idea')}: {str(e)}")
-            logger.error(f"Ошибка подготовки идеи {idea_data.get('topic_idea')}: {str(e)}")
-    if not records_to_insert:
-        logger.warning("Нет идей для сохранения после обработки.")
-        return {"message": "Нет корректных идей для сохранения.", "saved_count": 0, "errors": errors}
-    try:
-        result = supabase.table("suggested_ideas").insert(records_to_insert).execute()
-        if hasattr(result, 'data') and result.data:
-            saved_count = len(result.data)
-            logger.info(f"Успешно сохранено {saved_count} идей батчем.")
-            return {"message": f"Успешно сохранено {saved_count} идей.", "saved_count": saved_count, "saved_ids": saved_ids, "errors": errors}
+        
+        if saved_ideas:
+            logger.info(f"Сохранено {len(saved_ideas)} идей для пользователя {telegram_user_id}")
+            return {"success": True, "saved_count": len(saved_ideas), "saved_ideas": saved_ideas}
         else:
-            error_detail = getattr(result, 'error', 'Unknown error')
-            logger.error(f"Ошибка при батч-сохранении идей: {error_detail}")
-            errors.append(f"Ошибка при батч-сохранении: {error_detail}")
-            logger.warning("Попытка сохранить идеи по одной...")
-            saved_count_single = 0
-            saved_ids_single = []
-            for record in records_to_insert:
-                try:
-                    single_result = supabase.table("suggested_ideas").insert(record).execute()
-                    if hasattr(single_result, 'data') and single_result.data:
-                        saved_count_single += 1
-                        saved_ids_single.append(record['id'])
-                    else:
-                        single_error = getattr(single_result, 'error', 'Unknown error')
-                        errors.append(f"Ошибка сохранения идеи {record.get('topic_idea')}: {single_error}")
-                        logger.error(f"Ошибка сохранения идеи {record.get('topic_idea')}: {single_error}")
-                except Exception as single_e:
-                    errors.append(f"Исключение при сохранении идеи {record.get('topic_idea')}: {str(single_e)}")
-                    logger.error(f"Исключение при сохранении идеи {record.get('topic_idea')}: {str(single_e)}")
-            logger.info(f"Сохранено {saved_count_single} идей по одной.")
-            return {
-                "message": f"Сохранено {saved_count_single} идей (остальные с ошибкой).",
-                "saved_count": saved_count_single,
-                "saved_ids": saved_ids_single,
-                "errors": errors
-            }
+            logger.warning(f"Не удалось сохранить ни одной идеи для пользователя {telegram_user_id}")
+            return {"success": False, "saved_count": 0, "message": "Не удалось сохранить ни одной идеи"}
     except Exception as e:
-        logger.error(f"Исключение при батч-сохранении идей: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Исключение при батч-сохранении: {str(e)}") 
+        logger.error(f"Ошибка при пакетном сохранении идей: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при пакетном сохранении идей: {str(e)}") 

@@ -1,4 +1,4 @@
-# Сервис для работы с постами
+﻿# РЎРµСЂРІРёСЃ РґР»СЏ СЂР°Р±РѕС‚С‹ СЃ РїРѕСЃС‚Р°РјРё
 from fastapi import Request, HTTPException
 from typing import Dict, Any, List, Optional
 from backend.main import supabase, logger
@@ -8,30 +8,30 @@ import asyncio
 from datetime import datetime
 import traceback
 
-# Импорт моделей PostImage, PostData, SavedPostResponse, PostDetailsResponse из main.py или отдельного файла моделей
+# РРјРїРѕСЂС‚ РјРѕРґРµР»РµР№ PostImage, PostData, SavedPostResponse, PostDetailsResponse РёР· main.py РёР»Рё РѕС‚РґРµР»СЊРЅРѕРіРѕ С„Р°Р№Р»Р° РјРѕРґРµР»РµР№
 # from backend.models import PostImage, PostData, SavedPostResponse, PostDetailsResponse
 
 async def get_posts(request: Request, channel_name: Optional[str] = None):
     try:
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
         if not telegram_user_id:
-            logger.warning("Запрос постов без идентификации пользователя Telegram")
-            raise HTTPException(status_code=401, detail="Для доступа к постам необходимо авторизоваться через Telegram")
+            logger.warning("Р—Р°РїСЂРѕСЃ РїРѕСЃС‚РѕРІ Р±РµР· РёРґРµРЅС‚РёС„РёРєР°С†РёРё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Telegram")
+            raise HTTPException(status_code=401, detail="Р”Р»СЏ РґРѕСЃС‚СѓРїР° Рє РїРѕСЃС‚Р°Рј РЅРµРѕР±С…РѕРґРёРјРѕ Р°РІС‚РѕСЂРёР·РѕРІР°С‚СЊСЃСЏ С‡РµСЂРµР· Telegram")
         if not supabase:
-            logger.error("Клиент Supabase не инициализирован")
-            raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
+            logger.error("РљР»РёРµРЅС‚ Supabase РЅРµ РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅ")
+            raise HTTPException(status_code=500, detail="РћС€РёР±РєР°: РЅРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ Рє Р±Р°Р·Рµ РґР°РЅРЅС‹С…")
         query = supabase.table("saved_posts").select("*, saved_images(*)").eq("user_id", int(telegram_user_id))
         if channel_name:
             query = query.eq("channel_name", channel_name)
         result = query.order("target_date", desc=True).execute()
         if not hasattr(result, 'data'):
-            logger.error(f"Ошибка при получении постов из БД: {result}")
+            logger.error(f"РћС€РёР±РєР° РїСЂРё РїРѕР»СѓС‡РµРЅРёРё РїРѕСЃС‚РѕРІ РёР· Р‘Р”: {result}")
             return []
         posts_with_images = []
         for post_data in result.data:
-            response_item = post_data  # Здесь должен быть SavedPostResponse(**post_data), если модель импортирована
+            response_item = post_data  # Р—РґРµСЃСЊ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ SavedPostResponse(**post_data), РµСЃР»Рё РјРѕРґРµР»СЊ РёРјРїРѕСЂС‚РёСЂРѕРІР°РЅР°
             image_relation_data = post_data.get("saved_images")
-            logger.info(f"Обработка поста ID: {post_data.get('id')}. Связанные данные изображения: {image_relation_data}")
+            logger.info(f"РћР±СЂР°Р±РѕС‚РєР° РїРѕСЃС‚Р° ID: {post_data.get('id')}. РЎРІСЏР·Р°РЅРЅС‹Рµ РґР°РЅРЅС‹Рµ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ: {image_relation_data}")
             if image_relation_data and isinstance(image_relation_data, dict):
                 try:
                     alt_text = image_relation_data.get("alt_description") or image_relation_data.get("alt")
@@ -44,62 +44,62 @@ async def get_posts(request: Request, channel_name: Optional[str] = None):
                         "author_url": image_relation_data.get("author_url"),
                         "source": image_relation_data.get("source")
                     }
-                    logger.info(f"Успешно создано selected_image_data для поста {post_data.get('id')} с изображением ID: {image_relation_data.get('id')}")
+                    logger.info(f"РЈСЃРїРµС€РЅРѕ СЃРѕР·РґР°РЅРѕ selected_image_data РґР»СЏ РїРѕСЃС‚Р° {post_data.get('id')} СЃ РёР·РѕР±СЂР°Р¶РµРЅРёРµРј ID: {image_relation_data.get('id')}")
                 except Exception as mapping_error:
-                    logger.error(f"Ошибка при создании PostImage для поста {post_data.get('id')}: {mapping_error}")
-                    logger.error(f"Данные изображения: {image_relation_data}")
+                    logger.error(f"РћС€РёР±РєР° РїСЂРё СЃРѕР·РґР°РЅРёРё PostImage РґР»СЏ РїРѕСЃС‚Р° {post_data.get('id')}: {mapping_error}")
+                    logger.error(f"Р”Р°РЅРЅС‹Рµ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ: {image_relation_data}")
                     response_item["selected_image_data"] = None
             else:
                 response_item["selected_image_data"] = None
                 if post_data.get("saved_image_id"):
-                    logger.warning(f"Для поста {post_data['id']} есть saved_image_id, но связанные данные изображения не были получены или пусты. Связанные данные: {image_relation_data}")
+                    logger.warning(f"Р”Р»СЏ РїРѕСЃС‚Р° {post_data['id']} РµСЃС‚СЊ saved_image_id, РЅРѕ СЃРІСЏР·Р°РЅРЅС‹Рµ РґР°РЅРЅС‹Рµ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ РЅРµ Р±С‹Р»Рё РїРѕР»СѓС‡РµРЅС‹ РёР»Рё РїСѓСЃС‚С‹. РЎРІСЏР·Р°РЅРЅС‹Рµ РґР°РЅРЅС‹Рµ: {image_relation_data}")
             posts_with_images.append(response_item)
         return posts_with_images
     except Exception as e:
-        logger.error(f"Ошибка при получении постов: {e}")
+        logger.error(f"РћС€РёР±РєР° РїСЂРё РїРѕР»СѓС‡РµРЅРёРё РїРѕСЃС‚РѕРІ: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 async def create_post(request: Request, post_data):
     try:
         from backend.main import fix_schema, download_and_save_external_image
         try:
-            logger.info("Вызов fix_schema перед созданием поста...")
+            logger.info("Р’С‹Р·РѕРІ fix_schema РїРµСЂРµРґ СЃРѕР·РґР°РЅРёРµРј РїРѕСЃС‚Р°...")
             fix_result = await fix_schema()
             if not fix_result.get("success"):
-                logger.warning(f"Не удалось обновить/проверить схему перед созданием поста: {fix_result}")
+                logger.warning(f"РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ/РїСЂРѕРІРµСЂРёС‚СЊ СЃС…РµРјСѓ РїРµСЂРµРґ СЃРѕР·РґР°РЅРёРµРј РїРѕСЃС‚Р°: {fix_result}")
             else:
-                logger.info("Проверка/обновление схемы перед созданием поста завершена успешно.")
+                logger.info("РџСЂРѕРІРµСЂРєР°/РѕР±РЅРѕРІР»РµРЅРёРµ СЃС…РµРјС‹ РїРµСЂРµРґ СЃРѕР·РґР°РЅРёРµРј РїРѕСЃС‚Р° Р·Р°РІРµСЂС€РµРЅР° СѓСЃРїРµС€РЅРѕ.")
         except Exception as pre_save_fix_err:
-            logger.error(f"Ошибка при вызове fix_schema перед созданием поста: {pre_save_fix_err}", exc_info=True)
-        logger.info("Небольшая пауза после fix_schema, чтобы дать PostgREST время...")
+            logger.error(f"РћС€РёР±РєР° РїСЂРё РІС‹Р·РѕРІРµ fix_schema РїРµСЂРµРґ СЃРѕР·РґР°РЅРёРµРј РїРѕСЃС‚Р°: {pre_save_fix_err}", exc_info=True)
+        logger.info("РќРµР±РѕР»СЊС€Р°СЏ РїР°СѓР·Р° РїРѕСЃР»Рµ fix_schema, С‡С‚РѕР±С‹ РґР°С‚СЊ PostgREST РІСЂРµРјСЏ...")
         await asyncio.sleep(0.7)
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
         if not telegram_user_id:
-            logger.warning("Запрос создания поста без идентификации пользователя Telegram")
-            raise HTTPException(status_code=401, detail="Для создания поста необходимо авторизоваться через Telegram")
+            logger.warning("Р—Р°РїСЂРѕСЃ СЃРѕР·РґР°РЅРёСЏ РїРѕСЃС‚Р° Р±РµР· РёРґРµРЅС‚РёС„РёРєР°С†РёРё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Telegram")
+            raise HTTPException(status_code=401, detail="Р”Р»СЏ СЃРѕР·РґР°РЅРёСЏ РїРѕСЃС‚Р° РЅРµРѕР±С…РѕРґРёРјРѕ Р°РІС‚РѕСЂРёР·РѕРІР°С‚СЊСЃСЏ С‡РµСЂРµР· Telegram")
         if not supabase:
-            logger.error("Клиент Supabase не инициализирован")
-            raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
+            logger.error("РљР»РёРµРЅС‚ Supabase РЅРµ РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅ")
+            raise HTTPException(status_code=500, detail="РћС€РёР±РєР°: РЅРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ Рє Р±Р°Р·Рµ РґР°РЅРЅС‹С…")
         selected_image = post_data.selected_image_data
         post_to_save = post_data.dict(exclude={"selected_image_data"})
         post_to_save["user_id"] = int(telegram_user_id)
         post_to_save["id"] = str(uuid.uuid4())
         if not post_to_save.get("target_date"):
-            logger.warning(f"Получена пустая target_date для нового поста {post_to_save['id']}, устанавливаем в NULL.")
+            logger.warning(f"РџРѕР»СѓС‡РµРЅР° РїСѓСЃС‚Р°СЏ target_date РґР»СЏ РЅРѕРІРѕРіРѕ РїРѕСЃС‚Р° {post_to_save['id']}, СѓСЃС‚Р°РЅР°РІР»РёРІР°РµРј РІ NULL.")
             post_to_save["target_date"] = None
         else:
             try:
                 datetime.strptime(post_to_save["target_date"], '%Y-%m-%d')
             except ValueError:
-                logger.error(f"Некорректный формат target_date: {post_to_save['target_date']} для поста {post_to_save['id']}. Устанавливаем в NULL.")
+                logger.error(f"РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚ target_date: {post_to_save['target_date']} РґР»СЏ РїРѕСЃС‚Р° {post_to_save['id']}. РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј РІ NULL.")
                 post_to_save["target_date"] = None
         saved_image_id = None
         if selected_image:
             try:
-                logger.info(f"Обработка выбранного изображения: {selected_image.dict() if hasattr(selected_image, 'dict') else selected_image}")
+                logger.info(f"РћР±СЂР°Р±РѕС‚РєР° РІС‹Р±СЂР°РЅРЅРѕРіРѕ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ: {selected_image.dict() if hasattr(selected_image, 'dict') else selected_image}")
                 is_external_image = selected_image.source in ["unsplash", "pexels", "openverse"]
                 if is_external_image:
-                    logger.info(f"Обнаружено внешнее изображение с источником {selected_image.source}")
+                    logger.info(f"РћР±РЅР°СЂСѓР¶РµРЅРѕ РІРЅРµС€РЅРµРµ РёР·РѕР±СЂР°Р¶РµРЅРёРµ СЃ РёСЃС‚РѕС‡РЅРёРєРѕРј {selected_image.source}")
                     try:
                         external_image_result = await download_and_save_external_image(selected_image, int(telegram_user_id))
                         saved_image_id = external_image_result["id"]
@@ -108,10 +108,10 @@ async def create_post(request: Request, post_data):
                             if external_image_result.get("preview_url"):
                                 selected_image.preview_url = external_image_result["preview_url"]
                             selected_image.source = f"{selected_image.source}_saved"
-                        logger.info(f"Внешнее изображение успешно обработано, saved_image_id: {saved_image_id}")
+                        logger.info(f"Р’РЅРµС€РЅРµРµ РёР·РѕР±СЂР°Р¶РµРЅРёРµ СѓСЃРїРµС€РЅРѕ РѕР±СЂР°Р±РѕС‚Р°РЅРѕ, saved_image_id: {saved_image_id}")
                     except Exception as ext_img_err:
-                        logger.error(f"Ошибка при обработке внешнего изображения: {ext_img_err}")
-                        raise HTTPException(status_code=500, detail=f"Не удалось обработать внешнее изображение: {str(ext_img_err)}")
+                        logger.error(f"РћС€РёР±РєР° РїСЂРё РѕР±СЂР°Р±РѕС‚РєРµ РІРЅРµС€РЅРµРіРѕ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ: {ext_img_err}")
+                        raise HTTPException(status_code=500, detail=f"РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±СЂР°Р±РѕС‚Р°С‚СЊ РІРЅРµС€РЅРµРµ РёР·РѕР±СЂР°Р¶РµРЅРёРµ: {str(ext_img_err)}")
                 else:
                     image_check = None
                     if selected_image.url:
@@ -120,7 +120,7 @@ async def create_post(request: Request, post_data):
                             image_check = image_check_result.data[0]
                     if image_check:
                         saved_image_id = image_check["id"]
-                        logger.info(f"Используем существующее изображение {saved_image_id} (URL: {selected_image.url}) для поста")
+                        logger.info(f"РСЃРїРѕР»СЊР·СѓРµРј СЃСѓС‰РµСЃС‚РІСѓСЋС‰РµРµ РёР·РѕР±СЂР°Р¶РµРЅРёРµ {saved_image_id} (URL: {selected_image.url}) РґР»СЏ РїРѕСЃС‚Р°")
                     else:
                         new_internal_id = str(uuid.uuid4())
                         image_data_to_save = {
@@ -136,58 +136,58 @@ async def create_post(request: Request, post_data):
                         image_result = supabase.table("saved_images").insert(image_data_to_save).execute()
                         if hasattr(image_result, 'data') and len(image_result.data) > 0:
                             saved_image_id = new_internal_id
-                            logger.info(f"Сохранено новое изображение {saved_image_id} для поста")
+                            logger.info(f"РЎРѕС…СЂР°РЅРµРЅРѕ РЅРѕРІРѕРµ РёР·РѕР±СЂР°Р¶РµРЅРёРµ {saved_image_id} РґР»СЏ РїРѕСЃС‚Р°")
                         else:
-                            logger.error(f"Ошибка при сохранении нового изображения: {image_result}")
-                            raise HTTPException(status_code=500, detail=f"Ошибка при сохранении нового изображения: {getattr(image_result, 'error', 'Unknown error')}")
+                            logger.error(f"РћС€РёР±РєР° РїСЂРё СЃРѕС…СЂР°РЅРµРЅРёРё РЅРѕРІРѕРіРѕ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ: {image_result}")
+                            raise HTTPException(status_code=500, detail=f"РћС€РёР±РєР° РїСЂРё СЃРѕС…СЂР°РЅРµРЅРёРё РЅРѕРІРѕРіРѕ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ: {getattr(image_result, 'error', 'Unknown error')}")
             except Exception as img_err:
-                logger.error(f"Ошибка при обработке/сохранении изображения: {img_err}")
-                raise HTTPException(status_code=500, detail=f"Ошибка при обработке/сохранении изображения: {str(img_err)}")
+                logger.error(f"РћС€РёР±РєР° РїСЂРё РѕР±СЂР°Р±РѕС‚РєРµ/СЃРѕС…СЂР°РЅРµРЅРёРё РёР·РѕР±СЂР°Р¶РµРЅРёСЏ: {img_err}")
+                raise HTTPException(status_code=500, detail=f"РћС€РёР±РєР° РїСЂРё РѕР±СЂР°Р±РѕС‚РєРµ/СЃРѕС…СЂР°РЅРµРЅРёРё РёР·РѕР±СЂР°Р¶РµРЅРёСЏ: {str(img_err)}")
         post_to_save.pop('image_url', None)
         post_to_save.pop('images_ids', None)
         post_to_save["saved_image_id"] = saved_image_id
-        logger.info(f"Подготовлены данные для сохранения в saved_posts: {post_to_save}")
+        logger.info(f"РџРѕРґРіРѕС‚РѕРІР»РµРЅС‹ РґР°РЅРЅС‹Рµ РґР»СЏ СЃРѕС…СЂР°РЅРµРЅРёСЏ РІ saved_posts: {post_to_save}")
         try:
-            logger.info(f"Выполняем insert в saved_posts для ID {post_to_save['id']}...")
+            logger.info(f"Р’С‹РїРѕР»РЅСЏРµРј insert РІ saved_posts РґР»СЏ ID {post_to_save['id']}...")
             result = supabase.table("saved_posts").insert(post_to_save).execute()
             if hasattr(result, 'data') and len(result.data) > 0:
-                logger.info(f"Пост успешно создан: {post_to_save['id']}")
+                logger.info(f"РџРѕСЃС‚ СѓСЃРїРµС€РЅРѕ СЃРѕР·РґР°РЅ: {post_to_save['id']}")
                 return result.data[0]
             else:
-                logger.error(f"Ошибка при сохранении поста: {result}")
-                raise HTTPException(status_code=500, detail="Ошибка при сохранении поста")
+                logger.error(f"РћС€РёР±РєР° РїСЂРё СЃРѕС…СЂР°РЅРµРЅРёРё РїРѕСЃС‚Р°: {result}")
+                raise HTTPException(status_code=500, detail="РћС€РёР±РєР° РїСЂРё СЃРѕС…СЂР°РЅРµРЅРёРё РїРѕСЃС‚Р°")
         except Exception as e:
-            logger.error(f"Ошибка при сохранении поста: {e}")
-            raise HTTPException(status_code=500, detail=f"Ошибка при сохранении поста: {str(e)}")
+            logger.error(f"РћС€РёР±РєР° РїСЂРё СЃРѕС…СЂР°РЅРµРЅРёРё РїРѕСЃС‚Р°: {e}")
+            raise HTTPException(status_code=500, detail=f"РћС€РёР±РєР° РїСЂРё СЃРѕС…СЂР°РЅРµРЅРёРё РїРѕСЃС‚Р°: {str(e)}")
     except Exception as e:
-        logger.error(f"Ошибка при создании поста: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка при создании поста: {str(e)}")
+        logger.error(f"РћС€РёР±РєР° РїСЂРё СЃРѕР·РґР°РЅРёРё РїРѕСЃС‚Р°: {e}")
+        raise HTTPException(status_code=500, detail=f"РћС€РёР±РєР° РїСЂРё СЃРѕР·РґР°РЅРёРё РїРѕСЃС‚Р°: {str(e)}")
 
 async def update_post(post_id: str, request: Request, post_data):
     try:
         from backend.main import fix_schema, download_and_save_external_image
         try:
-            logger.info(f"Вызов fix_schema перед обновлением поста {post_id}...")
+            logger.info(f"Р’С‹Р·РѕРІ fix_schema РїРµСЂРµРґ РѕР±РЅРѕРІР»РµРЅРёРµРј РїРѕСЃС‚Р° {post_id}...")
             fix_result = await fix_schema()
             if not fix_result.get("success"):
-                logger.warning(f"Не удалось обновить/проверить схему перед обновлением поста {post_id}: {fix_result}")
+                logger.warning(f"РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ/РїСЂРѕРІРµСЂРёС‚СЊ СЃС…РµРјСѓ РїРµСЂРµРґ РѕР±РЅРѕРІР»РµРЅРёРµРј РїРѕСЃС‚Р° {post_id}: {fix_result}")
             else:
-                logger.info(f"Проверка/обновление схемы перед обновлением поста {post_id} завершена успешно.")
+                logger.info(f"РџСЂРѕРІРµСЂРєР°/РѕР±РЅРѕРІР»РµРЅРёРµ СЃС…РµРјС‹ РїРµСЂРµРґ РѕР±РЅРѕРІР»РµРЅРёРµРј РїРѕСЃС‚Р° {post_id} Р·Р°РІРµСЂС€РµРЅР° СѓСЃРїРµС€РЅРѕ.")
         except Exception as pre_update_fix_err:
-            logger.error(f"Ошибка при вызове fix_schema перед обновлением поста {post_id}: {pre_update_fix_err}", exc_info=True)
-        logger.info(f"Небольшая пауза после fix_schema для поста {post_id}, чтобы дать PostgREST время...")
+            logger.error(f"РћС€РёР±РєР° РїСЂРё РІС‹Р·РѕРІРµ fix_schema РїРµСЂРµРґ РѕР±РЅРѕРІР»РµРЅРёРµРј РїРѕСЃС‚Р° {post_id}: {pre_update_fix_err}", exc_info=True)
+        logger.info(f"РќРµР±РѕР»СЊС€Р°СЏ РїР°СѓР·Р° РїРѕСЃР»Рµ fix_schema РґР»СЏ РїРѕСЃС‚Р° {post_id}, С‡С‚РѕР±С‹ РґР°С‚СЊ PostgREST РІСЂРµРјСЏ...")
         await asyncio.sleep(0.7)
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
         if not telegram_user_id:
-            logger.warning("Запрос обновления поста без идентификации пользователя Telegram")
-            raise HTTPException(status_code=401, detail="Для обновления поста необходимо авторизоваться через Telegram")
+            logger.warning("Р—Р°РїСЂРѕСЃ РѕР±РЅРѕРІР»РµРЅРёСЏ РїРѕСЃС‚Р° Р±РµР· РёРґРµРЅС‚РёС„РёРєР°С†РёРё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Telegram")
+            raise HTTPException(status_code=401, detail="Р”Р»СЏ РѕР±РЅРѕРІР»РµРЅРёСЏ РїРѕСЃС‚Р° РЅРµРѕР±С…РѕРґРёРјРѕ Р°РІС‚РѕСЂРёР·РѕРІР°С‚СЊСЃСЏ С‡РµСЂРµР· Telegram")
         if not supabase:
-            logger.error("Клиент Supabase не инициализирован")
-            raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
+            logger.error("РљР»РёРµРЅС‚ Supabase РЅРµ РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅ")
+            raise HTTPException(status_code=500, detail="РћС€РёР±РєР°: РЅРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ Рє Р±Р°Р·Рµ РґР°РЅРЅС‹С…")
         post_check = supabase.table("saved_posts").select("id").eq("id", post_id).eq("user_id", int(telegram_user_id)).execute()
         if not hasattr(post_check, 'data') or len(post_check.data) == 0:
-            logger.warning(f"Попытка обновить чужой или несуществующий пост: {post_id}")
-            raise HTTPException(status_code=404, detail="Пост не найден или нет прав на его редактирование")
+            logger.warning(f"РџРѕРїС‹С‚РєР° РѕР±РЅРѕРІРёС‚СЊ С‡СѓР¶РѕР№ РёР»Рё РЅРµСЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№ РїРѕСЃС‚: {post_id}")
+            raise HTTPException(status_code=404, detail="РџРѕСЃС‚ РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РЅРµС‚ РїСЂР°РІ РЅР° РµРіРѕ СЂРµРґР°РєС‚РёСЂРѕРІР°РЅРёРµ")
         selected_image = getattr(post_data, 'selected_image_data', None)
         image_field_provided_in_request = hasattr(post_data, 'selected_image_data')
         image_id_to_set_in_post = None
@@ -198,7 +198,7 @@ async def update_post(post_id: str, request: Request, post_data):
                 try:
                     is_external_image = selected_image.source in ["unsplash", "pexels", "openverse"]
                     if is_external_image:
-                        logger.info(f"Обнаружено внешнее изображение с источником {selected_image.source} при обновлении поста {post_id}")
+                        logger.info(f"РћР±РЅР°СЂСѓР¶РµРЅРѕ РІРЅРµС€РЅРµРµ РёР·РѕР±СЂР°Р¶РµРЅРёРµ СЃ РёСЃС‚РѕС‡РЅРёРєРѕРј {selected_image.source} РїСЂРё РѕР±РЅРѕРІР»РµРЅРёРё РїРѕСЃС‚Р° {post_id}")
                         try:
                             external_image_result = await download_and_save_external_image(selected_image, int(telegram_user_id))
                             image_id_to_set_in_post = external_image_result["id"]
@@ -207,10 +207,10 @@ async def update_post(post_id: str, request: Request, post_data):
                                 if external_image_result.get("preview_url"):
                                     selected_image.preview_url = external_image_result["preview_url"]
                                 selected_image.source = f"{selected_image.source}_saved"
-                            logger.info(f"Внешнее изображение успешно обработано при обновлении поста {post_id}, saved_image_id: {image_id_to_set_in_post}")
+                            logger.info(f"Р’РЅРµС€РЅРµРµ РёР·РѕР±СЂР°Р¶РµРЅРёРµ СѓСЃРїРµС€РЅРѕ РѕР±СЂР°Р±РѕС‚Р°РЅРѕ РїСЂРё РѕР±РЅРѕРІР»РµРЅРёРё РїРѕСЃС‚Р° {post_id}, saved_image_id: {image_id_to_set_in_post}")
                         except Exception as ext_img_err:
-                            logger.error(f"Ошибка при обработке внешнего изображения при обновлении поста {post_id}: {ext_img_err}")
-                            raise HTTPException(status_code=500, detail=f"Не удалось обработать внешнее изображение: {str(ext_img_err)}")
+                            logger.error(f"РћС€РёР±РєР° РїСЂРё РѕР±СЂР°Р±РѕС‚РєРµ РІРЅРµС€РЅРµРіРѕ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ РїСЂРё РѕР±РЅРѕРІР»РµРЅРёРё РїРѕСЃС‚Р° {post_id}: {ext_img_err}")
+                            raise HTTPException(status_code=500, detail=f"РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±СЂР°Р±РѕС‚Р°С‚СЊ РІРЅРµС€РЅРµРµ РёР·РѕР±СЂР°Р¶РµРЅРёРµ: {str(ext_img_err)}")
                     else:
                         image_check = None
                         if selected_image.url:
@@ -219,7 +219,7 @@ async def update_post(post_id: str, request: Request, post_data):
                                 image_check = image_check_result.data[0]
                         if image_check:
                             image_id_to_set_in_post = image_check["id"]
-                            logger.info(f"Используем существующее изображение {image_id_to_set_in_post} для обновления поста {post_id}")
+                            logger.info(f"РСЃРїРѕР»СЊР·СѓРµРј СЃСѓС‰РµСЃС‚РІСѓСЋС‰РµРµ РёР·РѕР±СЂР°Р¶РµРЅРёРµ {image_id_to_set_in_post} РґР»СЏ РѕР±РЅРѕРІР»РµРЅРёСЏ РїРѕСЃС‚Р° {post_id}")
                         else:
                             new_internal_id = str(uuid.uuid4())
                             image_data_to_save = {
@@ -235,48 +235,48 @@ async def update_post(post_id: str, request: Request, post_data):
                             image_result = supabase.table("saved_images").insert(image_data_to_save).execute()
                             if hasattr(image_result, 'data') and len(image_result.data) > 0:
                                 image_id_to_set_in_post = new_internal_id
-                                logger.info(f"Сохранено новое изображение {image_id_to_set_in_post} для обновления поста {post_id}")
+                                logger.info(f"РЎРѕС…СЂР°РЅРµРЅРѕ РЅРѕРІРѕРµ РёР·РѕР±СЂР°Р¶РµРЅРёРµ {image_id_to_set_in_post} РґР»СЏ РѕР±РЅРѕРІР»РµРЅРёСЏ РїРѕСЃС‚Р° {post_id}")
                             else:
-                                logger.error(f"Ошибка при сохранении нового изображения при обновлении поста: {image_result}")
-                                raise HTTPException(status_code=500, detail=f"Ошибка при сохранении нового изображения: {getattr(image_result, 'error', 'Unknown error')}")
+                                logger.error(f"РћС€РёР±РєР° РїСЂРё СЃРѕС…СЂР°РЅРµРЅРёРё РЅРѕРІРѕРіРѕ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ РїСЂРё РѕР±РЅРѕРІР»РµРЅРёРё РїРѕСЃС‚Р°: {image_result}")
+                                raise HTTPException(status_code=500, detail=f"РћС€РёР±РєР° РїСЂРё СЃРѕС…СЂР°РЅРµРЅРёРё РЅРѕРІРѕРіРѕ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ: {getattr(image_result, 'error', 'Unknown error')}")
                 except Exception as img_err:
-                    logger.error(f"Ошибка при обработке/сохранении изображения при обновлении поста: {img_err}")
-                    raise HTTPException(status_code=500, detail=f"Ошибка при обработке/сохранении изображения: {str(img_err)}")
+                    logger.error(f"РћС€РёР±РєР° РїСЂРё РѕР±СЂР°Р±РѕС‚РєРµ/СЃРѕС…СЂР°РЅРµРЅРёРё РёР·РѕР±СЂР°Р¶РµРЅРёСЏ РїСЂРё РѕР±РЅРѕРІР»РµРЅРёРё РїРѕСЃС‚Р°: {img_err}")
+                    raise HTTPException(status_code=500, detail=f"РћС€РёР±РєР° РїСЂРё РѕР±СЂР°Р±РѕС‚РєРµ/СЃРѕС…СЂР°РЅРµРЅРёРё РёР·РѕР±СЂР°Р¶РµРЅРёСЏ: {str(img_err)}")
             else:
                 image_id_to_set_in_post = None
-                logger.info(f"В запросе на обновление поста {post_id} передано пустое изображение (None/null). Связь будет очищена.")
+                logger.info(f"Р’ Р·Р°РїСЂРѕСЃРµ РЅР° РѕР±РЅРѕРІР»РµРЅРёРµ РїРѕСЃС‚Р° {post_id} РїРµСЂРµРґР°РЅРѕ РїСѓСЃС‚РѕРµ РёР·РѕР±СЂР°Р¶РµРЅРёРµ (None/null). РЎРІСЏР·СЊ Р±СѓРґРµС‚ РѕС‡РёС‰РµРЅР°.")
         post_to_update = post_data.dict(exclude={"selected_image_data", "image_url", "images_ids"})
         post_to_update["updated_at"] = datetime.now().isoformat()
         if "target_date" in post_to_update and not post_to_update.get("target_date"):
-            logger.warning(f"Получена пустая target_date при обновлении поста {post_id}, устанавливаем в NULL.")
+            logger.warning(f"РџРѕР»СѓС‡РµРЅР° РїСѓСЃС‚Р°СЏ target_date РїСЂРё РѕР±РЅРѕРІР»РµРЅРёРё РїРѕСЃС‚Р° {post_id}, СѓСЃС‚Р°РЅР°РІР»РёРІР°РµРј РІ NULL.")
             post_to_update["target_date"] = None
         elif post_to_update.get("target_date"):
             try:
                 datetime.strptime(post_to_update["target_date"], '%Y-%m-%d')
             except ValueError:
-                logger.error(f"Некорректный формат target_date: {post_to_update['target_date']} при обновлении поста {post_id}. Устанавливаем в NULL.")
+                logger.error(f"РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚ target_date: {post_to_update['target_date']} РїСЂРё РѕР±РЅРѕРІР»РµРЅРёРё РїРѕСЃС‚Р° {post_id}. РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј РІ NULL.")
                 post_to_update["target_date"] = None
         if image_processed:
             post_to_update["saved_image_id"] = image_id_to_set_in_post
-            logger.info(f"Поле saved_image_id для поста {post_id} будет обновлено на: {image_id_to_set_in_post}")
+            logger.info(f"РџРѕР»Рµ saved_image_id РґР»СЏ РїРѕСЃС‚Р° {post_id} Р±СѓРґРµС‚ РѕР±РЅРѕРІР»РµРЅРѕ РЅР°: {image_id_to_set_in_post}")
         else:
             post_to_update.pop("saved_image_id", None)
-            logger.info(f"Поле selected_image_data не предоставлено в запросе на обновление поста {post_id}. Поле saved_image_id не будет изменено.")
-        logger.info(f"Подготовлены данные для обновления в saved_posts: {post_to_update}")
+            logger.info(f"РџРѕР»Рµ selected_image_data РЅРµ РїСЂРµРґРѕСЃС‚Р°РІР»РµРЅРѕ РІ Р·Р°РїСЂРѕСЃРµ РЅР° РѕР±РЅРѕРІР»РµРЅРёРµ РїРѕСЃС‚Р° {post_id}. РџРѕР»Рµ saved_image_id РЅРµ Р±СѓРґРµС‚ РёР·РјРµРЅРµРЅРѕ.")
+        logger.info(f"РџРѕРґРіРѕС‚РѕРІР»РµРЅС‹ РґР°РЅРЅС‹Рµ РґР»СЏ РѕР±РЅРѕРІР»РµРЅРёСЏ РІ saved_posts: {post_to_update}")
         try:
-            logger.info(f"Выполняем update в saved_posts для ID {post_id}...")
+            logger.info(f"Р’С‹РїРѕР»РЅСЏРµРј update РІ saved_posts РґР»СЏ ID {post_id}...")
             result = supabase.table("saved_posts").update(post_to_update).eq("id", post_id).eq("user_id", int(telegram_user_id)).execute()
-            logger.info(f"Update выполнен. Status: {result.status_code if hasattr(result, 'status_code') else 'N/A'}")
+            logger.info(f"Update РІС‹РїРѕР»РЅРµРЅ. Status: {result.status_code if hasattr(result, 'status_code') else 'N/A'}")
         except Exception as e:
-            logger.error(f"Ошибка при update в saved_posts для ID {post_id}: {e}")
-            raise HTTPException(status_code=500, detail=f"Ошибка БД при обновлении поста: {str(e)}")
+            logger.error(f"РћС€РёР±РєР° РїСЂРё update РІ saved_posts РґР»СЏ ID {post_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"РћС€РёР±РєР° Р‘Р” РїСЂРё РѕР±РЅРѕРІР»РµРЅРёРё РїРѕСЃС‚Р°: {str(e)}")
         if not hasattr(result, 'data') or len(result.data) == 0:
-            logger.error(f"Ошибка при обновлении поста {post_id}: Ответ Supabase пуст или не содержит данных.")
+            logger.error(f"РћС€РёР±РєР° РїСЂРё РѕР±РЅРѕРІР»РµРЅРёРё РїРѕСЃС‚Р° {post_id}: РћС‚РІРµС‚ Supabase РїСѓСЃС‚ РёР»Рё РЅРµ СЃРѕРґРµСЂР¶РёС‚ РґР°РЅРЅС‹С….")
             last_error_details = f"Status: {result.status_code if hasattr(result, 'status_code') else 'N/A'}"
-            raise HTTPException(status_code=500, detail=f"Не удалось обновить пост. {last_error_details}")
+            raise HTTPException(status_code=500, detail=f"РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ РїРѕСЃС‚. {last_error_details}")
         updated_post = result.data[0]
-        logger.info(f"Пользователь {telegram_user_id} обновил пост: {post_id}")
-        response_data = updated_post  # Здесь должен быть SavedPostResponse(**updated_post), если модель импортирована
+        logger.info(f"РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ {telegram_user_id} РѕР±РЅРѕРІРёР» РїРѕСЃС‚: {post_id}")
+        response_data = updated_post  # Р—РґРµСЃСЊ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ SavedPostResponse(**updated_post), РµСЃР»Рё РјРѕРґРµР»СЊ РёРјРїРѕСЂС‚РёСЂРѕРІР°РЅР°
         final_image_id = updated_post.get("saved_image_id")
         if final_image_id:
             img_data_res = supabase.table("saved_images").select("id, url, preview_url, alt, author, author_url, source").eq("id", final_image_id).maybe_single().execute()
@@ -293,10 +293,10 @@ async def update_post(post_id: str, request: Request, post_data):
                         "source": img_data_res.data.get("source")
                     }
                 except Exception as mapping_err:
-                    logger.error(f"Ошибка при маппинге данных изображения из БД для обновленного поста {post_id}: {mapping_err}")
+                    logger.error(f"РћС€РёР±РєР° РїСЂРё РјР°РїРїРёРЅРіРµ РґР°РЅРЅС‹С… РёР·РѕР±СЂР°Р¶РµРЅРёСЏ РёР· Р‘Р” РґР»СЏ РѕР±РЅРѕРІР»РµРЅРЅРѕРіРѕ РїРѕСЃС‚Р° {post_id}: {mapping_err}")
                     response_data["selected_image_data"] = None
             else:
-                logger.warning(f"Не удалось получить данные изображения {final_image_id} из БД для ответа на обновление поста {post_id}")
+                logger.warning(f"РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ РґР°РЅРЅС‹Рµ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ {final_image_id} РёР· Р‘Р” РґР»СЏ РѕС‚РІРµС‚Р° РЅР° РѕР±РЅРѕРІР»РµРЅРёРµ РїРѕСЃС‚Р° {post_id}")
                 response_data["selected_image_data"] = None
         else:
             response_data["selected_image_data"] = None
@@ -304,38 +304,38 @@ async def update_post(post_id: str, request: Request, post_data):
     except HTTPException as http_err:
         raise http_err
     except Exception as e:
-        logger.error(f"Ошибка при обновлении поста {post_id}: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера при обновлении поста: {str(e)}")
+        logger.error(f"РћС€РёР±РєР° РїСЂРё РѕР±РЅРѕРІР»РµРЅРёРё РїРѕСЃС‚Р° {post_id}: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР° СЃРµСЂРІРµСЂР° РїСЂРё РѕР±РЅРѕРІР»РµРЅРёРё РїРѕСЃС‚Р°: {str(e)}")
 
 async def delete_post(post_id: str, request: Request):
     try:
         if not supabase:
-            logger.error("Клиент Supabase не инициализирован")
-            raise HTTPException(status_code=500, detail="Ошибка: не удалось подключиться к базе данных")
+            logger.error("РљР»РёРµРЅС‚ Supabase РЅРµ РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅ")
+            raise HTTPException(status_code=500, detail="РћС€РёР±РєР°: РЅРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ Рє Р±Р°Р·Рµ РґР°РЅРЅС‹С…")
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
         if not telegram_user_id:
-            logger.warning("Запрос удаления поста без идентификации пользователя Telegram")
-            raise HTTPException(status_code=401, detail="Для удаления поста необходимо авторизоваться через Telegram")
+            logger.warning("Р—Р°РїСЂРѕСЃ СѓРґР°Р»РµРЅРёСЏ РїРѕСЃС‚Р° Р±РµР· РёРґРµРЅС‚РёС„РёРєР°С†РёРё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Telegram")
+            raise HTTPException(status_code=401, detail="Р”Р»СЏ СѓРґР°Р»РµРЅРёСЏ РїРѕСЃС‚Р° РЅРµРѕР±С…РѕРґРёРјРѕ Р°РІС‚РѕСЂРёР·РѕРІР°С‚СЊСЃСЏ С‡РµСЂРµР· Telegram")
         post_check = supabase.table("saved_posts").select("id").eq("id", post_id).eq("user_id", int(telegram_user_id)).execute()
         if not hasattr(post_check, 'data') or len(post_check.data) == 0:
-            logger.warning(f"Попытка удалить чужой или несуществующий пост: {post_id}")
-            raise HTTPException(status_code=404, detail="Пост не найден или нет прав на его удаление")
+            logger.warning(f"РџРѕРїС‹С‚РєР° СѓРґР°Р»РёС‚СЊ С‡СѓР¶РѕР№ РёР»Рё РЅРµСЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№ РїРѕСЃС‚: {post_id}")
+            raise HTTPException(status_code=404, detail="РџРѕСЃС‚ РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РЅРµС‚ РїСЂР°РІ РЅР° РµРіРѕ СѓРґР°Р»РµРЅРёРµ")
         try:
             delete_links_res = supabase.table("post_images").delete().eq("post_id", post_id).execute()
-            logger.info(f"Удалено {len(delete_links_res.data) if hasattr(delete_links_res, 'data') else 0} связей для удаляемого поста {post_id}")
+            logger.info(f"РЈРґР°Р»РµРЅРѕ {len(delete_links_res.data) if hasattr(delete_links_res, 'data') else 0} СЃРІСЏР·РµР№ РґР»СЏ СѓРґР°Р»СЏРµРјРѕРіРѕ РїРѕСЃС‚Р° {post_id}")
         except Exception as del_link_err:
-            logger.error(f"Ошибка при удалении связей post_images для поста {post_id} перед удалением поста: {del_link_err}")
+            logger.error(f"РћС€РёР±РєР° РїСЂРё СѓРґР°Р»РµРЅРёРё СЃРІСЏР·РµР№ post_images РґР»СЏ РїРѕСЃС‚Р° {post_id} РїРµСЂРµРґ СѓРґР°Р»РµРЅРёРµРј РїРѕСЃС‚Р°: {del_link_err}")
         result = supabase.table("saved_posts").delete().eq("id", post_id).execute()
         if not hasattr(result, 'data'):
-            logger.error(f"Ошибка при удалении поста: {result}")
-            raise HTTPException(status_code=500, detail="Ошибка при удалении поста")
-        logger.info(f"Пользователь {telegram_user_id} удалил пост {post_id}")
-        return {"success": True, "message": "Пост успешно удален"}
+            logger.error(f"РћС€РёР±РєР° РїСЂРё СѓРґР°Р»РµРЅРёРё РїРѕСЃС‚Р°: {result}")
+            raise HTTPException(status_code=500, detail="РћС€РёР±РєР° РїСЂРё СѓРґР°Р»РµРЅРёРё РїРѕСЃС‚Р°")
+        logger.info(f"РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ {telegram_user_id} СѓРґР°Р»РёР» РїРѕСЃС‚ {post_id}")
+        return {"success": True, "message": "РџРѕСЃС‚ СѓСЃРїРµС€РЅРѕ СѓРґР°Р»РµРЅ"}
     except HTTPException as http_err:
         raise http_err
     except Exception as e:
-        logger.error(f"Ошибка при удалении поста {post_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера при удалении поста: {str(e)}")
+        logger.error(f"РћС€РёР±РєР° РїСЂРё СѓРґР°Р»РµРЅРёРё РїРѕСЃС‚Р° {post_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР° СЃРµСЂРІРµСЂР° РїСЂРё СѓРґР°Р»РµРЅРёРё РїРѕСЃС‚Р°: {str(e)}")
 
 async def generate_post_details(request: Request, req):
     import traceback
@@ -352,10 +352,10 @@ async def generate_post_details(request: Request, req):
             if not can_generate:
                 usage = await subscription_service.get_user_usage(int(telegram_user_id))
                 reset_at = usage.get("reset_at")
-                raise HTTPException(status_code=403, detail=f"Достигнут лимит в 2 генерации постов для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Лимиты обновляются каждые 3 дня. Оформите подписку для снятия ограничений.")
+                raise HTTPException(status_code=403, detail=f"Р”РѕСЃС‚РёРіРЅСѓС‚ Р»РёРјРёС‚ РІ 2 РіРµРЅРµСЂР°С†РёРё РїРѕСЃС‚РѕРІ РґР»СЏ Р±РµСЃРїР»Р°С‚РЅРѕР№ РїРѕРґРїРёСЃРєРё. РЎР»РµРґСѓСЋС‰Р°СЏ РїРѕРїС‹С‚РєР° Р±СѓРґРµС‚ РґРѕСЃС‚СѓРїРЅР° РїРѕСЃР»Рµ: {reset_at}. Р›РёРјРёС‚С‹ РѕР±РЅРѕРІР»СЏСЋС‚СЃСЏ РєР°Р¶РґС‹Рµ 3 РґРЅСЏ. РћС„РѕСЂРјРёС‚Рµ РїРѕРґРїРёСЃРєСѓ РґР»СЏ СЃРЅСЏС‚РёСЏ РѕРіСЂР°РЅРёС‡РµРЅРёР№.")
         if not telegram_user_id:
-            logger.warning("Запрос генерации поста без идентификации пользователя Telegram")
-            raise HTTPException(status_code=401, detail="Для генерации постов необходимо авторизоваться через Telegram")
+            logger.warning("Р—Р°РїСЂРѕСЃ РіРµРЅРµСЂР°С†РёРё РїРѕСЃС‚Р° Р±РµР· РёРґРµРЅС‚РёС„РёРєР°С†РёРё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Telegram")
+            raise HTTPException(status_code=401, detail="Р”Р»СЏ РіРµРЅРµСЂР°С†РёРё РїРѕСЃС‚РѕРІ РЅРµРѕР±С…РѕРґРёРјРѕ Р°РІС‚РѕСЂРёР·РѕРІР°С‚СЊСЃСЏ С‡РµСЂРµР· Telegram")
         topic_idea = req.get("topic_idea")
         format_style = req.get("format_style")
         channel_name = req.get("channel_name", "")
@@ -365,90 +365,90 @@ async def generate_post_details(request: Request, req):
                 channel_data = await get_channel_analysis(request, channel_name)
                 if channel_data and "analyzed_posts_sample" in channel_data:
                     post_samples = channel_data["analyzed_posts_sample"]
-                    logger.info(f"Получено {len(post_samples)} примеров постов для канала @{channel_name}")
+                    logger.info(f"РџРѕР»СѓС‡РµРЅРѕ {len(post_samples)} РїСЂРёРјРµСЂРѕРІ РїРѕСЃС‚РѕРІ РґР»СЏ РєР°РЅР°Р»Р° @{channel_name}")
             except Exception as e:
-                logger.warning(f"Не удалось получить примеры постов для канала @{channel_name}: {e}")
+                logger.warning(f"РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ РїСЂРёРјРµСЂС‹ РїРѕСЃС‚РѕРІ РґР»СЏ РєР°РЅР°Р»Р° @{channel_name}: {e}")
         
-        # Проверка наличия хотя бы одного API ключа
+        # РџСЂРѕРІРµСЂРєР° РЅР°Р»РёС‡РёСЏ С…РѕС‚СЏ Р±С‹ РѕРґРЅРѕРіРѕ API РєР»СЋС‡Р°
         if not OPENROUTER_API_KEY and not OPENAI_API_KEY:
-            logger.warning("Генерация деталей поста невозможна: отсутствуют OPENROUTER_API_KEY и OPENAI_API_KEY")
-            raise HTTPException(status_code=503, detail="API для генерации текста недоступен")
+            logger.warning("Р“РµРЅРµСЂР°С†РёСЏ РґРµС‚Р°Р»РµР№ РїРѕСЃС‚Р° РЅРµРІРѕР·РјРѕР¶РЅР°: РѕС‚СЃСѓС‚СЃС‚РІСѓСЋС‚ OPENROUTER_API_KEY Рё OPENAI_API_KEY")
+            raise HTTPException(status_code=503, detail="API РґР»СЏ РіРµРЅРµСЂР°С†РёРё С‚РµРєСЃС‚Р° РЅРµРґРѕСЃС‚СѓРїРµРЅ")
             
-        system_prompt = """Ты — опытный контент-маркетолог для Telegram-каналов.
-Твоя задача — сгенерировать текст поста на основе идеи и формата, который будет готов к публикации.
+        system_prompt = """РўС‹ вЂ” РѕРїС‹С‚РЅС‹Р№ РєРѕРЅС‚РµРЅС‚-РјР°СЂРєРµС‚РѕР»РѕРі РґР»СЏ Telegram-РєР°РЅР°Р»РѕРІ.
+РўРІРѕСЏ Р·РґР°С‡Р° вЂ” СЃРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ С‚РµРєСЃС‚ РїРѕСЃС‚Р° РЅР° РѕСЃРЅРѕРІРµ РёРґРµРё Рё С„РѕСЂРјР°С‚Р°, РєРѕС‚РѕСЂС‹Р№ Р±СѓРґРµС‚ РіРѕС‚РѕРІ Рє РїСѓР±Р»РёРєР°С†РёРё.
 
-Пост должен быть:
-1. Хорошо структурированным и легко читаемым.
-2. Соответствовать указанной теме/идее.
-3. Соответствовать указанному формату/стилю.
-4. Иметь правильное форматирование для Telegram (если нужно — с эмодзи, абзацами, списками).
-5. НЕ использовать никаких шаблонов, placeholder-ов ([Название], [Ссылка], [Начать сейчас], "...", "[текст]" и т.д.) — текст должен быть полностью готов к публикации, без мест для ручного заполнения.
-6. **Критически важно**: Максимально точно копируй стиль, тон, манеру изложения, использование эмодзи (включая их количество и расположение), длину предложений и абзацев, использование заглавных букв, пунктуацию и другие характерные особенности из предоставленных примеров постов. Текст должен выглядеть так, как будто его написал автор оригинального канала. Обрати внимание на частоту использования определенных слов или фраз.
+РџРѕСЃС‚ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ:
+1. РҐРѕСЂРѕС€Рѕ СЃС‚СЂСѓРєС‚СѓСЂРёСЂРѕРІР°РЅРЅС‹Рј Рё Р»РµРіРєРѕ С‡РёС‚Р°РµРјС‹Рј.
+2. РЎРѕРѕС‚РІРµС‚СЃС‚РІРѕРІР°С‚СЊ СѓРєР°Р·Р°РЅРЅРѕР№ С‚РµРјРµ/РёРґРµРµ.
+3. РЎРѕРѕС‚РІРµС‚СЃС‚РІРѕРІР°С‚СЊ СѓРєР°Р·Р°РЅРЅРѕРјСѓ С„РѕСЂРјР°С‚Сѓ/СЃС‚РёР»СЋ.
+4. РРјРµС‚СЊ РїСЂР°РІРёР»СЊРЅРѕРµ С„РѕСЂРјР°С‚РёСЂРѕРІР°РЅРёРµ РґР»СЏ Telegram (РµСЃР»Рё РЅСѓР¶РЅРѕ вЂ” СЃ СЌРјРѕРґР·Рё, Р°Р±Р·Р°С†Р°РјРё, СЃРїРёСЃРєР°РјРё).
+5. РќР• РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РЅРёРєР°РєРёС… С€Р°Р±Р»РѕРЅРѕРІ, placeholder-РѕРІ ([РќР°Р·РІР°РЅРёРµ], [РЎСЃС‹Р»РєР°], [РќР°С‡Р°С‚СЊ СЃРµР№С‡Р°СЃ], "...", "[С‚РµРєСЃС‚]" Рё С‚.Рґ.) вЂ” С‚РµРєСЃС‚ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РїРѕР»РЅРѕСЃС‚СЊСЋ РіРѕС‚РѕРІ Рє РїСѓР±Р»РёРєР°С†РёРё, Р±РµР· РјРµСЃС‚ РґР»СЏ СЂСѓС‡РЅРѕРіРѕ Р·Р°РїРѕР»РЅРµРЅРёСЏ.
+6. **РљСЂРёС‚РёС‡РµСЃРєРё РІР°Р¶РЅРѕ**: РњР°РєСЃРёРјР°Р»СЊРЅРѕ С‚РѕС‡РЅРѕ РєРѕРїРёСЂСѓР№ СЃС‚РёР»СЊ, С‚РѕРЅ, РјР°РЅРµСЂСѓ РёР·Р»РѕР¶РµРЅРёСЏ, РёСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ СЌРјРѕРґР·Рё (РІРєР»СЋС‡Р°СЏ РёС… РєРѕР»РёС‡РµСЃС‚РІРѕ Рё СЂР°СЃРїРѕР»РѕР¶РµРЅРёРµ), РґР»РёРЅСѓ РїСЂРµРґР»РѕР¶РµРЅРёР№ Рё Р°Р±Р·Р°С†РµРІ, РёСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ Р·Р°РіР»Р°РІРЅС‹С… Р±СѓРєРІ, РїСѓРЅРєС‚СѓР°С†РёСЋ Рё РґСЂСѓРіРёРµ С…Р°СЂР°РєС‚РµСЂРЅС‹Рµ РѕСЃРѕР±РµРЅРЅРѕСЃС‚Рё РёР· РїСЂРµРґРѕСЃС‚Р°РІР»РµРЅРЅС‹С… РїСЂРёРјРµСЂРѕРІ РїРѕСЃС‚РѕРІ. РўРµРєСЃС‚ РґРѕР»Р¶РµРЅ РІС‹РіР»СЏРґРµС‚СЊ С‚Р°Рє, РєР°Рє Р±СѓРґС‚Рѕ РµРіРѕ РЅР°РїРёСЃР°Р» Р°РІС‚РѕСЂ РѕСЂРёРіРёРЅР°Р»СЊРЅРѕРіРѕ РєР°РЅР°Р»Р°. РћР±СЂР°С‚Рё РІРЅРёРјР°РЅРёРµ РЅР° С‡Р°СЃС‚РѕС‚Сѓ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ РѕРїСЂРµРґРµР»РµРЅРЅС‹С… СЃР»РѕРІ РёР»Рё С„СЂР°Р·.
 
-Не используй хэштеги, если это не является частью формата или их нет в примерах.
-Сделай пост уникальным и интересным, но приоритет — на точном следовании стилю канала.
-Используй примеры постов канала, если они предоставлены, чтобы сохранить стиль. Если примеры не предоставлены, создай качественный пост в указанном формате."""
-        user_prompt = f"""Создай пост для Telegram-канала \\\"@{channel_name}\\\" на тему:\\n\\\"{topic_idea}\\\"\\n\\nФормат поста: {format_style}\\n\\nНапиши полный текст поста, который будет готов к публикации.\\n"""
+РќРµ РёСЃРїРѕР»СЊР·СѓР№ С…СЌС€С‚РµРіРё, РµСЃР»Рё СЌС‚Рѕ РЅРµ СЏРІР»СЏРµС‚СЃСЏ С‡Р°СЃС‚СЊСЋ С„РѕСЂРјР°С‚Р° РёР»Рё РёС… РЅРµС‚ РІ РїСЂРёРјРµСЂР°С….
+РЎРґРµР»Р°Р№ РїРѕСЃС‚ СѓРЅРёРєР°Р»СЊРЅС‹Рј Рё РёРЅС‚РµСЂРµСЃРЅС‹Рј, РЅРѕ РїСЂРёРѕСЂРёС‚РµС‚ вЂ” РЅР° С‚РѕС‡РЅРѕРј СЃР»РµРґРѕРІР°РЅРёРё СЃС‚РёР»СЋ РєР°РЅР°Р»Р°.
+РСЃРїРѕР»СЊР·СѓР№ РїСЂРёРјРµСЂС‹ РїРѕСЃС‚РѕРІ РєР°РЅР°Р»Р°, РµСЃР»Рё РѕРЅРё РїСЂРµРґРѕСЃС‚Р°РІР»РµРЅС‹, С‡С‚РѕР±С‹ СЃРѕС…СЂР°РЅРёС‚СЊ СЃС‚РёР»СЊ. Р•СЃР»Рё РїСЂРёРјРµСЂС‹ РЅРµ РїСЂРµРґРѕСЃС‚Р°РІР»РµРЅС‹, СЃРѕР·РґР°Р№ РєР°С‡РµСЃС‚РІРµРЅРЅС‹Р№ РїРѕСЃС‚ РІ СѓРєР°Р·Р°РЅРЅРѕРј С„РѕСЂРјР°С‚Рµ."""
+        user_prompt = f"""РЎРѕР·РґР°Р№ РїРѕСЃС‚ РґР»СЏ Telegram-РєР°РЅР°Р»Р° \\\"@{channel_name}\\\" РЅР° С‚РµРјСѓ:\\n\\\"{topic_idea}\\\"\\n\\nР¤РѕСЂРјР°С‚ РїРѕСЃС‚Р°: {format_style}\\n\\nРќР°РїРёС€Рё РїРѕР»РЅС‹Р№ С‚РµРєСЃС‚ РїРѕСЃС‚Р°, РєРѕС‚РѕСЂС‹Р№ Р±СѓРґРµС‚ РіРѕС‚РѕРІ Рє РїСѓР±Р»РёРєР°С†РёРё.\\n"""
         if post_samples:
-            sample_text = "\\n\\n---\\n\\n".join(post_samples[:10]) # Увеличено количество примеров до 10
-            user_prompt += f"""\\n\\nВот несколько примеров постов из этого канала для точного копирования стиля и подачи (проанализируй их очень внимательно):\\n\\n{sample_text}\\n\\nУбедись, что твой ответ строго следует их манере."""
+            sample_text = "\\n\\n---\\n\\n".join(post_samples[:10]) # РЈРІРµР»РёС‡РµРЅРѕ РєРѕР»РёС‡РµСЃС‚РІРѕ РїСЂРёРјРµСЂРѕРІ РґРѕ 10
+            user_prompt += f"""\\n\\nР’РѕС‚ РЅРµСЃРєРѕР»СЊРєРѕ РїСЂРёРјРµСЂРѕРІ РїРѕСЃС‚РѕРІ РёР· СЌС‚РѕРіРѕ РєР°РЅР°Р»Р° РґР»СЏ С‚РѕС‡РЅРѕРіРѕ РєРѕРїРёСЂРѕРІР°РЅРёСЏ СЃС‚РёР»СЏ Рё РїРѕРґР°С‡Рё (РїСЂРѕР°РЅР°Р»РёР·РёСЂСѓР№ РёС… РѕС‡РµРЅСЊ РІРЅРёРјР°С‚РµР»СЊРЅРѕ):\\n\\n{sample_text}\\n\\nРЈР±РµРґРёСЃСЊ, С‡С‚Рѕ С‚РІРѕР№ РѕС‚РІРµС‚ СЃС‚СЂРѕРіРѕ СЃР»РµРґСѓРµС‚ РёС… РјР°РЅРµСЂРµ."""
         
-        # Сначала пробуем OpenRouter API, если он доступен
+        # РЎРЅР°С‡Р°Р»Р° РїСЂРѕР±СѓРµРј OpenRouter API, РµСЃР»Рё РѕРЅ РґРѕСЃС‚СѓРїРµРЅ
         post_text = ""
         used_backup_api = False
         
         if OPENROUTER_API_KEY:
             try:
-                logger.info(f"Отправка запроса на генерацию поста по идее через OpenRouter API: {topic_idea}")
-        client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=OPENROUTER_API_KEY
-        )
+                logger.info(f"РћС‚РїСЂР°РІРєР° Р·Р°РїСЂРѕСЃР° РЅР° РіРµРЅРµСЂР°С†РёСЋ РїРѕСЃС‚Р° РїРѕ РёРґРµРµ С‡РµСЂРµР· OpenRouter API: {topic_idea}")
+                client = AsyncOpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=OPENROUTER_API_KEY
+                )
                 
-            response = await client.chat.completions.create(
+                response = await client.chat.completions.create(
                     model="meta-llama/llama-4-maverick:free",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.7,
-                max_tokens=850,
-                timeout=60,
-                extra_headers={
-                    "HTTP-Referer": "https://content-manager.onrender.com",
-                    "X-Title": "Smart Content Assistant"
-                }
-            )
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=850,
+                    timeout=60,
+                    extra_headers={
+                        "HTTP-Referer": "https://content-manager.onrender.com",
+                        "X-Title": "Smart Content Assistant"
+                    }
+                )
                 
-            if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-                post_text = response.choices[0].message.content.strip()
-                    logger.info(f"Получен текст поста через OpenRouter API ({len(post_text)} символов)")
-            elif response and hasattr(response, 'error') and response.error:
-                err_details = response.error
-                api_error_message = getattr(err_details, 'message', str(err_details))
-                logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
-                    # Ошибка OpenRouter API - пробуем запасной вариант
-                    raise Exception(f"OpenRouter API вернул ошибку: {api_error_message}")
+                if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+                    post_text = response.choices[0].message.content.strip()
+                    logger.info(f"РџРѕР»СѓС‡РµРЅ С‚РµРєСЃС‚ РїРѕСЃС‚Р° С‡РµСЂРµР· OpenRouter API ({len(post_text)} СЃРёРјРІРѕР»РѕРІ)")
+                elif response and hasattr(response, 'error') and response.error:
+                    err_details = response.error
+                    api_error_message = getattr(err_details, 'message', str(err_details))
+                    logger.error(f"OpenRouter API РІРµСЂРЅСѓР» РѕС€РёР±РєСѓ: {api_error_message}")
+                    # РћС€РёР±РєР° OpenRouter API - РїСЂРѕР±СѓРµРј Р·Р°РїР°СЃРЅРѕР№ РІР°СЂРёР°РЅС‚
+                    raise Exception(f"OpenRouter API РІРµСЂРЅСѓР» РѕС€РёР±РєСѓ: {api_error_message}")
                 else:
-                    api_error_message = "OpenRouter API вернул некорректный или пустой ответ"
-                    logger.error(f"Некорректный или пустой ответ от OpenRouter API. Ответ: {response}")
-                    # Ошибка OpenRouter API - пробуем запасной вариант
-                    raise Exception("Некорректный или пустой ответ от OpenRouter API")
+                    api_error_message = "OpenRouter API РІРµСЂРЅСѓР» РЅРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РёР»Рё РїСѓСЃС‚РѕР№ РѕС‚РІРµС‚"
+                    logger.error(f"РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РёР»Рё РїСѓСЃС‚РѕР№ РѕС‚РІРµС‚ РѕС‚ OpenRouter API. РћС‚РІРµС‚: {response}")
+                    # РћС€РёР±РєР° OpenRouter API - РїСЂРѕР±СѓРµРј Р·Р°РїР°СЃРЅРѕР№ РІР°СЂРёР°РЅС‚
+                    raise Exception("РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РёР»Рё РїСѓСЃС‚РѕР№ РѕС‚РІРµС‚ РѕС‚ OpenRouter API")
                     
             except Exception as api_error:
-                # В случае ошибки с OpenRouter API, проверяем наличие запасного ключа
-                api_error_message = f"Ошибка соединения с OpenRouter API: {str(api_error)}"
-                logger.error(f"Ошибка при запросе к OpenRouter API: {api_error}", exc_info=True)
+                # Р’ СЃР»СѓС‡Р°Рµ РѕС€РёР±РєРё СЃ OpenRouter API, РїСЂРѕРІРµСЂСЏРµРј РЅР°Р»РёС‡РёРµ Р·Р°РїР°СЃРЅРѕРіРѕ РєР»СЋС‡Р°
+                api_error_message = f"РћС€РёР±РєР° СЃРѕРµРґРёРЅРµРЅРёСЏ СЃ OpenRouter API: {str(api_error)}"
+                logger.error(f"РћС€РёР±РєР° РїСЂРё Р·Р°РїСЂРѕСЃРµ Рє OpenRouter API: {api_error}", exc_info=True)
                 
-                # Пробуем использовать OpenAI API как запасной вариант
+                # РџСЂРѕР±СѓРµРј РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ OpenAI API РєР°Рє Р·Р°РїР°СЃРЅРѕР№ РІР°СЂРёР°РЅС‚
                 if OPENAI_API_KEY:
                     used_backup_api = True
-                    logger.info(f"Попытка использования OpenAI API как запасного варианта для идеи: {topic_idea}")
+                    logger.info(f"РџРѕРїС‹С‚РєР° РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ OpenAI API РєР°Рє Р·Р°РїР°СЃРЅРѕРіРѕ РІР°СЂРёР°РЅС‚Р° РґР»СЏ РёРґРµРё: {topic_idea}")
                     try:
                         openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
                         
                         openai_response = await openai_client.chat.completions.create(
-                            model="gpt-3.5-turbo",  # Используем GPT-3.5 Turbo как запасной вариант
+                            model="gpt-3.5-turbo",  # РСЃРїРѕР»СЊР·СѓРµРј GPT-3.5 Turbo РєР°Рє Р·Р°РїР°СЃРЅРѕР№ РІР°СЂРёР°РЅС‚
                             messages=[
                                 {"role": "system", "content": system_prompt},
                                 {"role": "user", "content": user_prompt}
@@ -459,28 +459,26 @@ async def generate_post_details(request: Request, req):
                         
                         if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
                             post_text = openai_response.choices[0].message.content.strip()
-                            logger.info(f"Получен текст поста через запасной OpenAI API ({len(post_text)} символов)")
-                            # Сбрасываем сообщение об ошибке, так как запасной вариант сработал
-                            api_error_message = None
+                            logger.info(f"РџРѕР»СѓС‡РµРЅ С‚РµРєСЃС‚ РїРѕСЃС‚Р° С‡РµСЂРµР· Р·Р°РїР°СЃРЅРѕР№ OpenAI API ({len(post_text)} СЃРёРјРІРѕР»РѕРІ)")
                         else:
-                            logger.error(f"Некорректный или пустой ответ от запасного OpenAI API")
-                            post_text = "[Текст не сгенерирован из-за ошибок API]"
+                            logger.error(f"Некорректный или пустой ответ от OpenAI API")
+                            post_text = "[Текст не сгенерирован из-за ошибки API]"
                     except Exception as openai_error:
-                        logger.error(f"Ошибка при использовании запасного OpenAI API: {openai_error}", exc_info=True)
-                        post_text = "[Текст не сгенерирован из-за ошибок API]"
+                        logger.error(f"РћС€РёР±РєР° РїСЂРё РёСЃРїРѕР»СЊР·РѕРІР°РЅРёРё Р·Р°РїР°СЃРЅРѕРіРѕ OpenAI API: {openai_error}", exc_info=True)
+                        post_text = "[Текст не сгенерирован из-за ошибки API]"
                 else:
-                    logger.error("Запасной OPENAI_API_KEY не настроен, невозможно использовать альтернативный API")
+                    logger.error("Р—Р°РїР°СЃРЅРѕР№ OPENAI_API_KEY РЅРµ РЅР°СЃС‚СЂРѕРµРЅ, РЅРµРІРѕР·РјРѕР¶РЅРѕ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ Р°Р»СЊС‚РµСЂРЅР°С‚РёРІРЅС‹Р№ API")
                 post_text = "[Текст не сгенерирован из-за ошибки API]"
         
-        # Если нет OPENROUTER_API_KEY, но есть OPENAI_API_KEY, используем его напрямую
+        # Р•СЃР»Рё РЅРµС‚ OPENROUTER_API_KEY, РЅРѕ РµСЃС‚СЊ OPENAI_API_KEY, РёСЃРїРѕР»СЊР·СѓРµРј РµРіРѕ РЅР°РїСЂСЏРјСѓСЋ
         elif OPENAI_API_KEY:
             used_backup_api = True
-            logger.info(f"OPENROUTER_API_KEY отсутствует, используем OpenAI API напрямую для идеи: {topic_idea}")
+            logger.info(f"OPENROUTER_API_KEY РѕС‚СЃСѓС‚СЃС‚РІСѓРµС‚, РёСЃРїРѕР»СЊР·СѓРµРј OpenAI API РЅР°РїСЂСЏРјСѓСЋ РґР»СЏ РёРґРµРё: {topic_idea}")
             try:
                 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
                 
                 openai_response = await openai_client.chat.completions.create(
-                    model="gpt-3.5-turbo",  # Используем GPT-3.5 Turbo
+                    model="gpt-3.5-turbo",  # РСЃРїРѕР»СЊР·СѓРµРј GPT-3.5 Turbo
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
@@ -491,20 +489,20 @@ async def generate_post_details(request: Request, req):
                 
                 if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
                     post_text = openai_response.choices[0].message.content.strip()
-                    logger.info(f"Получен текст поста через OpenAI API ({len(post_text)} символов)")
-            else:
+                    logger.info(f"РџРѕР»СѓС‡РµРЅ С‚РµРєСЃС‚ РїРѕСЃС‚Р° С‡РµСЂРµР· OpenAI API ({len(post_text)} СЃРёРјРІРѕР»РѕРІ)")
+                else:
                     logger.error(f"Некорректный или пустой ответ от OpenAI API")
                     post_text = "[Текст не сгенерирован из-за ошибки API]"
             except Exception as openai_error:
-                api_error_message = f"Ошибка соединения с OpenAI API: {str(openai_error)}"
-                logger.error(f"Ошибка при запросе к OpenAI API: {openai_error}", exc_info=True)
+                api_error_message = f"РћС€РёР±РєР° СЃРѕРµРґРёРЅРµРЅРёСЏ СЃ OpenAI API: {str(openai_error)}"
+                logger.error(f"РћС€РёР±РєР° РїСЂРё Р·Р°РїСЂРѕСЃРµ Рє OpenAI API: {openai_error}", exc_info=True)
                 post_text = "[Текст не сгенерирован из-за ошибки API]"
         
-        # Генерация ключевых слов для поиска изображений
+        # Р“РµРЅРµСЂР°С†РёСЏ РєР»СЋС‡РµРІС‹С… СЃР»РѕРІ РґР»СЏ РїРѕРёСЃРєР° РёР·РѕР±СЂР°Р¶РµРЅРёР№
         image_keywords = await generate_image_keywords(post_text, topic_idea, format_style)
-        logger.info(f"Сгенерированы ключевые слова для поиска изображений: {image_keywords}")
+        logger.info(f"РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅС‹ РєР»СЋС‡РµРІС‹Рµ СЃР»РѕРІР° РґР»СЏ РїРѕРёСЃРєР° РёР·РѕР±СЂР°Р¶РµРЅРёР№: {image_keywords}")
         
-        # Поиск изображений
+        # РџРѕРёСЃРє РёР·РѕР±СЂР°Р¶РµРЅРёР№
         for keyword in image_keywords[:3]:
             try:
                 image_count = min(5 - len(found_images), 3)
@@ -517,29 +515,29 @@ async def generate_post_details(request: Request, req):
                 if len(found_images) >= 5:
                     found_images = found_images[:5]
                     break
-                logger.info(f"Найдено {len(unique_images)} уникальных изображений по ключевому слову '{keyword}'")
+                logger.info(f"РќР°Р№РґРµРЅРѕ {len(unique_images)} СѓРЅРёРєР°Р»СЊРЅС‹С… РёР·РѕР±СЂР°Р¶РµРЅРёР№ РїРѕ РєР»СЋС‡РµРІРѕРјСѓ СЃР»РѕРІСѓ '{keyword}'")
             except Exception as e:
-                logger.error(f"Ошибка при поиске изображений для ключевого слова '{keyword}': {e}")
+                logger.error(f"РћС€РёР±РєР° РїСЂРё РїРѕРёСЃРєРµ РёР·РѕР±СЂР°Р¶РµРЅРёР№ РґР»СЏ РєР»СЋС‡РµРІРѕРіРѕ СЃР»РѕРІР° '{keyword}': {e}")
                 continue
                 
         if not found_images:
             try:
                 found_images = await search_unsplash_images(topic_idea, count=5, topic=topic_idea, format_style=format_style)
-                logger.info(f"Найдено {len(found_images)} изображений по основной теме")
+                logger.info(f"РќР°Р№РґРµРЅРѕ {len(found_images)} РёР·РѕР±СЂР°Р¶РµРЅРёР№ РїРѕ РѕСЃРЅРѕРІРЅРѕР№ С‚РµРјРµ")
             except Exception as e:
-                logger.error(f"Ошибка при поиске изображений по основной теме: {e}")
+                logger.error(f"РћС€РёР±РєР° РїСЂРё РїРѕРёСЃРєРµ РёР·РѕР±СЂР°Р¶РµРЅРёР№ РїРѕ РѕСЃРЅРѕРІРЅРѕР№ С‚РµРјРµ: {e}")
                 found_images = []
                 
-        logger.info(f"Подготовлено {len(found_images)} предложенных изображений")
+        logger.info(f"РџРѕРґРіРѕС‚РѕРІР»РµРЅРѕ {len(found_images)} РїСЂРµРґР»РѕР¶РµРЅРЅС‹С… РёР·РѕР±СЂР°Р¶РµРЅРёР№")
         
-        # Формирование сообщения ответа с учетом использования запасного API
-        response_message = f"Сгенерирован пост с {len(found_images[:IMAGE_RESULTS_COUNT])} предложенными изображениями"
+        # Р¤РѕСЂРјРёСЂРѕРІР°РЅРёРµ СЃРѕРѕР±С‰РµРЅРёСЏ РѕС‚РІРµС‚Р° СЃ СѓС‡РµС‚РѕРј РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ Р·Р°РїР°СЃРЅРѕРіРѕ API
+        response_message = f"РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅ РїРѕСЃС‚ СЃ {len(found_images[:IMAGE_RESULTS_COUNT])} РїСЂРµРґР»РѕР¶РµРЅРЅС‹РјРё РёР·РѕР±СЂР°Р¶РµРЅРёСЏРјРё"
         if used_backup_api:
-            response_message = f"Использован резервный API (OpenAI). Сгенерирован пост с {len(found_images[:IMAGE_RESULTS_COUNT])} предложенными изображениями"
+            response_message = f"РСЃРїРѕР»СЊР·РѕРІР°РЅ СЂРµР·РµСЂРІРЅС‹Р№ API (OpenAI). РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅ РїРѕСЃС‚ СЃ {len(found_images[:IMAGE_RESULTS_COUNT])} РїСЂРµРґР»РѕР¶РµРЅРЅС‹РјРё РёР·РѕР±СЂР°Р¶РµРЅРёСЏРјРё"
         if api_error_message:
-            response_message = f"Ошибка генерации текста: {api_error_message}. Изображений найдено: {len(found_images[:IMAGE_RESULTS_COUNT])}"
+            response_message = f"РћС€РёР±РєР° РіРµРЅРµСЂР°С†РёРё С‚РµРєСЃС‚Р°: {api_error_message}. РР·РѕР±СЂР°Р¶РµРЅРёР№ РЅР°Р№РґРµРЅРѕ: {len(found_images[:IMAGE_RESULTS_COUNT])}"
             
-        # После успешной генерации поста увеличиваем счетчик использования
+        # РџРѕСЃР»Рµ СѓСЃРїРµС€РЅРѕР№ РіРµРЅРµСЂР°С†РёРё РїРѕСЃС‚Р° СѓРІРµР»РёС‡РёРІР°РµРј СЃС‡РµС‚С‡РёРє РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ
         if telegram_user_id:
             has_subscription = await subscription_service.has_active_subscription(int(telegram_user_id))
             if not has_subscription:
@@ -560,6 +558,6 @@ async def generate_post_details(request: Request, req):
             } if found_images else None
         }
     except Exception as e:
-        logger.error(f"Ошибка при генерации деталей поста: {e}")
+        logger.error(f"РћС€РёР±РєР° РїСЂРё РіРµРЅРµСЂР°С†РёРё РґРµС‚Р°Р»РµР№ РїРѕСЃС‚Р°: {e}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера при генерации деталей поста: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР° СЃРµСЂРІРµСЂР° РїСЂРё РіРµРЅРµСЂР°С†РёРё РґРµС‚Р°Р»РµР№ РїРѕСЃС‚Р°: {str(e)}") 
