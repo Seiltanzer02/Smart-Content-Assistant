@@ -1,7 +1,10 @@
+# stdlib & deps
 import os
 import httpx
-from fastapi import HTTPException
-from backend.main import logger, supabase
+import logging
+
+# локальный логгер, чтобы избежать циклического импорта
+logger = logging.getLogger("channel_subscription_checker")
 
 # ENVIRONMENT VARIABLES
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -62,8 +65,10 @@ async def check_subscription_and_prompt(user_id: int) -> bool:
         logger.error(f"Unexpected error while checking subscription: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Cache to Supabase user_settings for convenience (non-critical)
+    # Cache flag в user_settings (опционально). Импортируем supabase лениво, чтобы избежать циклического импорта.
     try:
+        from backend.main import supabase  # type: ignore
+
         if supabase:
             existing = supabase.table("user_settings").select("id").eq("user_id", user_id).maybe_single().execute()
             if existing.data:
@@ -73,6 +78,9 @@ async def check_subscription_and_prompt(user_id: int) -> bool:
                     "user_id": user_id,
                     "is_subscribed_to_channel": subscribed,
                 }).execute()
+    except ImportError:
+        # backend.main ещё не инициализирован – пропускаем кэширование
+        pass
     except Exception as db_err:
         logger.warning(f"Cannot update is_subscribed_to_channel flag: {db_err}")
 
