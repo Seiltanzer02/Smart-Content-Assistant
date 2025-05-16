@@ -119,9 +119,9 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
             # Пробуем сначала использовать OpenRouter API
             try:
                 logger.info(f"Анализируем посты канала @{username} с использованием OpenRouter API")
-                analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
-                themes = analysis_result.get("themes", [])
-                styles = analysis_result.get("styles", [])
+        analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
+        themes = analysis_result.get("themes", [])
+        styles = analysis_result.get("styles", [])
                 
                 if not themes and not styles:
                     # Если не получены результаты, пробуем запасной API
@@ -317,29 +317,18 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
             logger.error(f"Ошибка при сохранении результатов анализа в БД: {db_error}")
         # 6. Увеличиваем счетчик использования
         try:
-            await subscription_service.increment_analyze_usage(int(telegram_user_id))
-        except Exception as count_error:
-            logger.error(f"Ошибка при увеличении счетчика использований: {count_error}")
-        # 7. Возвращаем результат 
+            await subscription_service.increment_analysis_usage(int(telegram_user_id))
+        except Exception as counter_error:
+            logger.error(f"Ошибка при увеличении счетчика анализа: {counter_error}")
+        # 7. Возвращаем результат
         return AnalyzeResponse(
             themes=themes,
             styles=styles,
-            analyzed_posts_sample=[p.get("text", "") for p in posts[:5]],
-            best_posting_time="18:00-20:00",  # Можно доработать по алгоритму
+            analyzed_posts_sample=[post.get("text", "") for post in posts[:10]],
+            best_posting_time="18:00-20:00",
             analyzed_posts_count=len(posts),
             message=error_message
         )
-    except HTTPException as http_exc:
-        # Пробрасываем HTTPException дальше
-        raise http_exc
     except Exception as e:
-        # Обработка других ошибок
-        logger.error(f"Ошибка при анализе канала: {e}")
-        return AnalyzeResponse(
-            themes=[],
-            styles=[],
-            analyzed_posts_sample=[],
-            best_posting_time="",
-            analyzed_posts_count=0,
-            error=f"Ошибка при анализе канала: {str(e)}"
-        ) 
+        logger.error(f"Ошибка при анализе канала для пользователя {telegram_user_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера: {str(e)}") 

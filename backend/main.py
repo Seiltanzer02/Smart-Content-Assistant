@@ -13,12 +13,6 @@ from pydantic import BaseModel, Field
 import re
 import random
 
-# --- ПЕРЕМЕЩАЕМ Логгирование В НАЧАЛО --- 
-# === ИЗМЕНЕНО: Уровень логирования на DEBUG ===
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
-# === КОНЕЦ ИЗМЕНЕНИЯ ===
-logger = logging.getLogger(__name__)
-
 # FastAPI компоненты
 from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends, Form
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse, RedirectResponse
@@ -67,7 +61,12 @@ from unsplash import Api as UnsplashApi # <-- ИМПОРТИРУЕМ ИЗ ПРА
 from unsplash import Auth as UnsplashAuth # <-- ИМПОРТИРУЕМ ИЗ ПРАВИЛЬНОГО МОДУЛЯ
 # ---------------------------------------
 
-# Логирование уже настроено в начале файла
+# --- ПЕРЕМЕЩАЕМ Логгирование В НАЧАЛО --- 
+# === ИЗМЕНЕНО: Уровень логирования на DEBUG ===
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+# === КОНЕЦ ИЗМЕНЕНИЯ ===
+logger = logging.getLogger(__name__)
+# --- КОНЕЦ ПЕРЕМЕЩЕНИЯ --- 
 
 # --- Загрузка переменных окружения (оставляем для других ключей) --- 
 # Убираем отладочные print для load_dotenv
@@ -188,9 +187,6 @@ async def _execute_sql_direct(sql_query: str) -> Dict[str, Any]:
         return {"status_code": 500, "error": str(e)}
 # -------------------------------------------------------------------
 
-# Импорт маршрутизатора для subscription_check до создания приложения
-from backend.routes import subscription_check
-
 # --- Инициализация FastAPI --- 
 app = FastAPI(
     title="Smart Content Assistant API",
@@ -220,15 +216,12 @@ app.add_middleware(
 # --- Подключение роутеров ---
 from backend.routes import user_limits, analysis, ideas, posts, user_settings, images
 
-# Подключаем основные роутеры
-app.include_router(subscription_check.router)  # Регистрируем subscription_check первым
 app.include_router(user_limits.router)
 app.include_router(analysis.router)
 app.include_router(ideas.router)
 app.include_router(posts.router)
 app.include_router(user_settings.router, prefix="/api/user", tags=["User Settings"])
 app.include_router(images.router, prefix="/api", tags=["Images"])
-
 # --- Конец подключения роутеров ---
 
 # --- ВАЖНО: API-эндпоинты для проверки подписки ПЕРЕД SPA-маршрутами ---
@@ -3578,13 +3571,12 @@ if SHOULD_MOUNT_STATIC:
             # Исключаем API пути, чтобы избежать конфликтов (на всякий случай)
             # Проверяем, не начинается ли путь с /api/, /docs, /openapi.json или /uploads/
             if rest_of_path.startswith("api/") or \
-               rest_of_path == "api" or \
                rest_of_path.startswith("docs") or \
                rest_of_path.startswith("openapi.json") or \
                rest_of_path.startswith("uploads/"):
                  # Этот код не должен выполняться, т.к. роуты API/docs/uploads определены выше, но для надежности
                  # Логируем попытку доступа к API через SPA catch-all
-                 logger.info(f"Запрос к '{rest_of_path}' перехвачен SPA catch-all, но проигнорирован (API/Docs/Uploads). Передаем управление API обработчикам.")
+                 logger.debug(f"Запрос к '{rest_of_path}' перехвачен SPA catch-all, но проигнорирован (API/Docs/Uploads).")
                  # Важно вернуть 404, чтобы FastAPI мог найти правильный обработчик, если он есть
                  raise HTTPException(status_code=404, detail="Not Found (SPA Catch-all exclusion)")
 
@@ -4197,35 +4189,17 @@ async def send_image_to_chat(request: Request):
     except Exception as e:
         return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
 
-# Эти эндпоинты перенесены в backend/routes/subscription_check.py
-# @app.get("/api/check-channel-subscription")
-# async def check_channel_subscription(request: Request):
-#     telegram_user_id = request.headers.get("X-Telegram-User-Id")
-#     if not telegram_user_id or not telegram_user_id.isdigit():
-#         return {"subscribed": False, "error": "Не удалось определить Telegram ID"}
-#     user_id = int(telegram_user_id)
-#     try:
-#         is_subscribed = await check_user_channel_subscription(user_id)
-#         if not is_subscribed:
-#             await send_subscription_prompt(user_id)
-#         return {"subscribed": is_subscribed}
-#     except Exception as e:
-#         return {"subscribed": False, "error": str(e)}
-# 
-# @app.post("/api/check-channel-subscription")
-# async def check_channel_subscription_post(request: Request):
-#     from backend.services.telegram_subscription_check import check_user_channel_subscription, send_subscription_prompt
-#     
-#     telegram_user_id = request.headers.get("X-Telegram-User-Id")
-#     if not telegram_user_id or not telegram_user_id.isdigit():
-#         return {"subscribed": False, "error": "Не удалось определить Telegram ID"}
-#     user_id = int(telegram_user_id)
-#     try:
-#         is_subscribed = await check_user_channel_subscription(user_id)
-#         if not is_subscribed:
-#             await send_subscription_prompt(user_id)
-#         return {"subscribed": is_subscribed}
-#     except Exception as e:
-#         logger.error(f"Ошибка при проверке подписки на канал: {e}")
-#         return {"subscribed": False, "error": str(e)}
+@app.get("/api/check-channel-subscription")
+async def check_channel_subscription(request: Request):
+    telegram_user_id = request.headers.get("X-Telegram-User-Id")
+    if not telegram_user_id or not telegram_user_id.isdigit():
+        return {"subscribed": False, "error": "Не удалось определить Telegram ID"}
+    user_id = int(telegram_user_id)
+    try:
+        is_subscribed = await check_user_channel_subscription(user_id)
+        if not is_subscribed:
+            await send_subscription_prompt(user_id)
+        return {"subscribed": is_subscribed}
+    except Exception as e:
+        return {"subscribed": False, "error": str(e)}
 
