@@ -400,32 +400,32 @@ async def generate_post_details(request: Request, req):
         if OPENROUTER_API_KEY:
             try:
                 logger.info(f"РћС‚РїСЂР°РІРєР° Р·Р°РїСЂРѕСЃР° РЅР° РіРµРЅРµСЂР°С†РёСЋ РїРѕСЃС‚Р° РїРѕ РёРґРµРµ С‡РµСЂРµР· OpenRouter API: {topic_idea}")
-                client = AsyncOpenAI(
-                    base_url="https://openrouter.ai/api/v1",
-                    api_key=OPENROUTER_API_KEY
-                )
+        client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY
+        )
                 
-                response = await client.chat.completions.create(
+            response = await client.chat.completions.create(
                     model="meta-llama/llama-4-maverick:free",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=850,
-                    timeout=60,
-                    extra_headers={
-                        "HTTP-Referer": "https://content-manager.onrender.com",
-                        "X-Title": "Smart Content Assistant"
-                    }
-                )
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=850,
+                timeout=60,
+                extra_headers={
+                    "HTTP-Referer": "https://content-manager.onrender.com",
+                    "X-Title": "Smart Content Assistant"
+                }
+            )
                 
-                if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-                    post_text = response.choices[0].message.content.strip()
+            if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+                post_text = response.choices[0].message.content.strip()
                     logger.info(f"РџРѕР»СѓС‡РµРЅ С‚РµРєСЃС‚ РїРѕСЃС‚Р° С‡РµСЂРµР· OpenRouter API ({len(post_text)} СЃРёРјРІРѕР»РѕРІ)")
-                elif response and hasattr(response, 'error') and response.error:
-                    err_details = response.error
-                    api_error_message = getattr(err_details, 'message', str(err_details))
+            elif response and hasattr(response, 'error') and response.error:
+                err_details = response.error
+                api_error_message = getattr(err_details, 'message', str(err_details))
                     logger.error(f"OpenRouter API РІРµСЂРЅСѓР» РѕС€РёР±РєСѓ: {api_error_message}")
                     # РћС€РёР±РєР° OpenRouter API - РїСЂРѕР±СѓРµРј Р·Р°РїР°СЃРЅРѕР№ РІР°СЂРёР°РЅС‚
                     raise Exception(f"OpenRouter API РІРµСЂРЅСѓР» РѕС€РёР±РєСѓ: {api_error_message}")
@@ -490,7 +490,7 @@ async def generate_post_details(request: Request, req):
                 if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
                     post_text = openai_response.choices[0].message.content.strip()
                     logger.info(f"РџРѕР»СѓС‡РµРЅ С‚РµРєСЃС‚ РїРѕСЃС‚Р° С‡РµСЂРµР· OpenAI API ({len(post_text)} СЃРёРјРІРѕР»РѕРІ)")
-                else:
+            else:
                     logger.error(f"Некорректный или пустой ответ от OpenAI API")
                     post_text = "[Текст не сгенерирован из-за ошибки API]"
             except Exception as openai_error:
