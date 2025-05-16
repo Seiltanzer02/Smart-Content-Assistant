@@ -4203,3 +4203,17 @@ async def check_channel_subscription(request: Request):
     except Exception as e:
         return {"subscribed": False, "error": str(e)}
 
+@app.post("/api/check-channel-subscription")
+async def check_channel_subscription_post(request: Request):
+    telegram_user_id = request.headers.get("X-Telegram-User-Id")
+    if not telegram_user_id or not telegram_user_id.isdigit():
+        return {"subscribed": False, "error": "Не удалось определить Telegram ID"}
+    user_id = int(telegram_user_id)
+    try:
+        is_subscribed = await check_user_channel_subscription(user_id)
+        if not is_subscribed:
+            await send_subscription_prompt(user_id)
+        return {"subscribed": is_subscribed}
+    except Exception as e:
+        return {"subscribed": False, "error": str(e)}
+

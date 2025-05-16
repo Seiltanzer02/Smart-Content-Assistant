@@ -121,27 +121,27 @@ async def generate_content_plan(request: Request, req):
         if OPENROUTER_API_KEY:
             try:
                 logger.info(f"Отправка запроса на генерацию плана через OpenRouter API для канала {channel_name}")
-                client = AsyncOpenAI(
-                    base_url="https://openrouter.ai/api/v1",
-                    api_key=OPENROUTER_API_KEY
-                )
+        client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY
+        )
                 
-                response = await client.chat.completions.create(
+        response = await client.chat.completions.create(
                     model="meta-llama/llama-4-maverick:free",
-                    messages=[
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=150 * period_days,
-                    timeout=120,
-                    extra_headers={
-                        "HTTP-Referer": "https://content-manager.onrender.com",
-                        "X-Title": "Smart Content Assistant"
-                    }
-                )
+            messages=[
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7,
+            max_tokens=150 * period_days,
+            timeout=120,
+            extra_headers={
+                "HTTP-Referer": "https://content-manager.onrender.com",
+                "X-Title": "Smart Content Assistant"
+            }
+        )
                 
-                if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-                    plan_text = response.choices[0].message.content.strip()
+        if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+            plan_text = response.choices[0].message.content.strip()
                     logger.info(f"Получен ответ с планом публикаций через OpenRouter API (первые 100 символов): {plan_text[:100]}...")
                 elif response and hasattr(response, 'error') and response.error:
                     err_details = response.error
@@ -149,13 +149,13 @@ async def generate_content_plan(request: Request, req):
                     logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
                     # Ошибка OpenRouter API - пробуем запасной вариант
                     raise Exception(f"OpenRouter API вернул ошибку: {api_error_message}")
-                else:
-                    logger.error(f"Некорректный или пустой ответ от OpenRouter API при генерации плана. Status: {response.response.status_code if hasattr(response, 'response') else 'N/A'}")
-                    try:
-                        raw_response_content = await response.response.text() if hasattr(response, 'response') and hasattr(response.response, 'text') else str(response)
-                        logger.error(f"Полный ответ API (или его представление): {raw_response_content}")
-                    except Exception as log_err:
-                        logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
+        else:
+            logger.error(f"Некорректный или пустой ответ от OpenRouter API при генерации плана. Status: {response.response.status_code if hasattr(response, 'response') else 'N/A'}")
+            try:
+                raw_response_content = await response.response.text() if hasattr(response, 'response') and hasattr(response.response, 'text') else str(response)
+                logger.error(f"Полный ответ API (или его представление): {raw_response_content}")
+            except Exception as log_err:
+                logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
                     # Ошибка OpenRouter API - пробуем запасной вариант
                     raise Exception("Некорректный или пустой ответ от OpenRouter API")
                 
@@ -278,7 +278,7 @@ async def generate_content_plan(request: Request, req):
             result_message = "План сгенерирован с использованием резервного API (OpenAI)"
         
         # После успешной генерации идей увеличиваем счетчик использования
-        await subscription_service.increment_idea_usage(int(telegram_user_id))
+            await subscription_service.increment_idea_usage(int(telegram_user_id))
             
         return {"plan": plan_items, "message": result_message}
     except Exception as e:
