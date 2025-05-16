@@ -98,26 +98,9 @@ class SimpleErrorBoundary extends React.Component<
 // Типы для typescript
 declare global {
   interface Window {
-    Telegram?: {
-      WebApp: {
-        ready: () => void;
-        initData: string;
-        initDataUnsafe: {
-          user?: {
-            id?: number | undefined;
-            first_name?: string | undefined;
-            last_name?: string | undefined;
-            username?: string | undefined;
-          } | undefined;
-          query_id?: string | undefined;
-        };
-      };
-    };
+    Telegram?: any; // Simpler, should resolve linter
   }
 }
-
-// Константа для базового URL API - используем относительный путь
-const backendUrl = '';
 
 // Инициализируем Telegram WebApp сразу
 try {
@@ -1673,184 +1656,75 @@ function App() {
     };
   }, []);
 
-  // --- Функция для получения userId только для проверки подписки на канал ---
-  function getUserIdForChannelSubscription() {
-    return window.Telegram?.WebApp?.initDataUnsafe?.user?.id
-      ? String(window.Telegram.WebApp.initDataUnsafe.user.id)
-      : null;
-  }
-
   // --- Функция для проверки подписки на канал ---
   const handleCheckSubscription = async () => {
-    const channelUserId = getUserIdForChannelSubscription();
-    console.log('Вызов handleCheckSubscription, channelUserId:', channelUserId);
-    if (!channelUserId) {
-      console.error('handleCheckSubscription: userId не определен через Telegram WebApp!');
-      toast.error('Не удалось определить ваш Telegram ID. Откройте приложение внутри Telegram.');
+    console.log('Вызов handleCheckSubscription, userId:', userId);
+    if (!userId) {
+      console.error('handleCheckSubscription: userId не определен!');
       return;
     }
     setCheckingSubscription(true);
     try {
-      // Используем абсолютный URL-адрес для обхода проблем с маршрутизацией
-      // window.location.origin возвращает протокол + хост текущей страницы
-      const fullApiUrl = `${window.location.origin}/api/check-channel-subscription`;
-      console.log(`Отправка POST запроса на ${fullApiUrl}`);
-      
-      const resp = await axios.post(fullApiUrl, 
-        { user_id: channelUserId }, // Передаем user_id в теле запроса
-        {
-          headers: {
-            'X-Telegram-User-Id': channelUserId,
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-            'Accept': 'application/json',
-            'X-Requested-With': 'XMLHttpRequest',
-            'Cache-Control': 'no-cache, no-store'
-          }
-        }
-      );
-      
-      console.log('Ответ от POST /api/check-channel-subscription (данные):', resp.data);
-
+      console.log('Отправка POST-запроса на /api/check-channel-subscription');
+      const resp = await axios.post('/api/check-channel-subscription', {}, {
+        headers: { 'X-Telegram-User-Id': userId }
+      });
+      console.log('Ответ от /api/check-channel-subscription:', resp.data);
       if (resp.data && resp.data.subscribed) {
         setSubscriptionModalOpen(false);
         toast.success('Подписка подтверждена!');
       } else {
-        // Получаем имя канала из переменных окружения или ответа API
-        const channelUsername = resp.data?.channel || 'smart_content_helper';
-        
-        console.log('Пользователь не подписан на канал:', channelUsername);
-        console.log('Полный ответ API:', resp.data);
-        
-        // Формируем URL канала, убирая символ @ если он есть
-        const formattedChannelName = channelUsername.replace(/^@/, '');
-        const channelLink = `https://t.me/${formattedChannelName}`;
-        console.log('Установка channelUrl:', channelLink);
-        
-        setChannelUrl(channelLink);
-        setSubscriptionModalOpen(true);
-        
-        // Показываем сообщение об ошибке, если оно есть в ответе
-        if (resp.data && resp.data.error) {
-          toast.error(resp.data.error);
-        } else {
-          toast.error('Вы ещё не подписаны на канал!');
+        // Убеждаемся, что channelUrl установлен
+        if (!channelUrl) {
+          const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
+          console.log('Установка channelUrl для канала:', channelUsername);
+          setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
         }
+        setSubscriptionModalOpen(true);
+        toast.error('Вы ещё не подписаны на канал!');
       }
     } catch (e) {
       console.error('Ошибка при проверке подписки:', e);
-      
-      // Если ответ содержит HTML вместо JSON, пробуем альтернативный эндпоинт
-      if (e.response && typeof e.response.data === 'string' && e.response.data.includes('<!doctype html>')) {
-        try {
-          console.log('Получен HTML-ответ вместо JSON, пробуем альтернативный путь...');
-          // Используем другой путь, который не будет конфликтовать с маршрутизацией фронтенда
-          const alternativeUrl = `${window.location.origin}/subscription_check`;
-          const altResp = await axios.post(alternativeUrl, { user_id: channelUserId });
-          
-          if (altResp.data && altResp.data.subscribed) {
-            setSubscriptionModalOpen(false);
-            toast.success('Подписка подтверждена!');
-            return;
-          }
-        } catch (altError) {
-          console.error('Ошибка при использовании альтернативного эндпоинта:', altError);
-        }
+      if (!channelUrl) {
+        const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
+        console.log('Установка channelUrl при ошибке для канала:', channelUsername);
+        setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
       }
-      
-      // Получаем детали ошибки
-      let errorMessage = 'Ошибка проверки подписки';
-      if (e.response && e.response.data && e.response.data.error) {
-        errorMessage = e.response.data.error;
-        console.error('Детали ошибки от API:', e.response.data);
-      }
-      
-      // Все равно показываем модальное окно подписки
-      const channelUsername = 'smart_content_helper';
-      console.log('Установка channelUrl при ошибке для канала:', channelUsername);
-      setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
       setSubscriptionModalOpen(true);
-      
-      toast.error(errorMessage);
+      toast.error('Ошибка проверки подписки');
     } finally {
       setCheckingSubscription(false);
     }
   };
-
+  
   // --- Проверка подписки на канал при запуске ---
   useEffect(() => {
     console.log('useEffect для проверки подписки запущен, isAuthenticated:', isAuthenticated, 'userId:', userId);
     
     const checkSubscription = async () => {
-      // Используем только userId из Telegram WebApp для проверки подписки на канал
-      const channelUserId = getUserIdForChannelSubscription();
-      console.log('Функция checkSubscription запущена, channelUserId:', channelUserId);
-      if (!channelUserId || !isAuthenticated) {
-        console.log('Выход из checkSubscription: !channelUserId || !isAuthenticated');
+      console.log('Функция checkSubscription запущена');
+      if (!userId || !isAuthenticated) {
+        console.log('Выход из checkSubscription: !userId || !isAuthenticated');
         return;
       }
       setCheckingSubscription(true);
       try {
-        // Используем абсолютный URL-адрес для обхода проблем с маршрутизацией
-        const fullApiUrl = `${window.location.origin}/api/check-channel-subscription`;
-        console.log(`Отправка POST запроса на ${fullApiUrl} внутри useEffect`);
-        
-        const resp = await axios.post(fullApiUrl,
-          { user_id: channelUserId }, // Передаем user_id в теле запроса
-          {
-            headers: { 
-              'X-Telegram-User-Id': channelUserId,
-              'Authorization': `Bearer ${localStorage.getItem('token')}`,
-              'Accept': 'application/json',
-              'X-Requested-With': 'XMLHttpRequest',
-              'Cache-Control': 'no-cache, no-store'
-            }
-          }
-        );
-        
-        console.log('Ответ от POST /api/check-channel-subscription внутри useEffect:', resp.data);
-        
+        console.log('Отправка POST-запроса на /api/check-channel-subscription внутри useEffect');
+        const resp = await axios.post('/api/check-channel-subscription', {}, {
+          headers: { 'X-Telegram-User-Id': userId }
+        });
+        console.log('Ответ от /api/check-channel-subscription внутри useEffect:', resp.data);
         if (resp.data && resp.data.subscribed) {
           setSubscriptionModalOpen(false);
         } else {
-          const channelUsernameFromServer = resp.data?.channel;
-          const defaultChannel = 'smart_content_helper';
-          
-          const channelUsername = channelUsernameFromServer || defaultChannel;
-
+          const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
           console.log('Установка channelUrl внутри useEffect для канала:', channelUsername);
           setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
           setSubscriptionModalOpen(true);
-          if (resp.data && resp.data.error) {
-            toast.error(resp.data.error);
-          }
         }
       } catch (e) {
         console.error('Ошибка при первоначальной проверке подписки:', e);
-        
-        // Если ответ содержит HTML вместо JSON, пробуем альтернативный эндпоинт
-        if (e.response && typeof e.response.data === 'string' && e.response.data.includes('<!doctype html>')) {
-          try {
-            console.log('Получен HTML-ответ вместо JSON в useEffect, пробуем альтернативный путь...');
-            const alternativeUrl = `${window.location.origin}/subscription_check`;
-            const altResp = await axios.post(alternativeUrl, { user_id: channelUserId });
-            
-            if (altResp.data && altResp.data.subscribed) {
-              setSubscriptionModalOpen(false);
-              return;
-            }
-          } catch (altError) {
-            console.error('Ошибка при использовании альтернативного эндпоинта в useEffect:', altError);
-          }
-        }
-        
-        // Получаем детали ошибки
-        let errorMessage = 'Ошибка проверки подписки (useEffect)';
-        if (e.response && e.response.data && e.response.data.error) {
-            errorMessage = e.response.data.error;
-            console.error('Детали ошибки от API (useEffect):', e.response.data);
-        }
-
-        const channelUsername = 'smart_content_helper';
+        const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
         console.log('Установка channelUrl при ошибке внутри useEffect для канала:', channelUsername);
         setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
         setSubscriptionModalOpen(true);
@@ -1858,12 +1732,14 @@ function App() {
         setCheckingSubscription(false);
       }
     };
-
-    if (isAuthenticated) { // Добавил проверку isAuthenticated перед вызовом
-        checkSubscription();
+    
+    if (isAuthenticated && userId) {
+      console.log('Вызов checkSubscription, так как isAuthenticated && userId');
+      checkSubscription();
+    } else {
+      console.log('checkSubscription не вызван: !isAuthenticated || !userId');
     }
-    // eslint-disable-next-line
-  }, [isAuthenticated]);
+  }, [isAuthenticated, userId]);
   
   // Компонент загрузки
   if (loading) {
@@ -1872,7 +1748,7 @@ function App() {
       <div className="loading-container">
         <div className="loading-spinner"></div>
         <p>Загрузка приложения...</p>
-            </div>
+                                      </div>
                                   );
   }
 

@@ -328,7 +328,7 @@ class SupabaseSubscriptionService:
             return usage
         except Exception as e:
             logger.error(f"Ошибка при увеличении счетчика генерации идей: {e}")
-            return {"user_id": user_id, "ideas_generation_count": 0}
+            return {"user_id": user_id, "ideas_generation_count": 0} 
 
     async def send_subscription_expiry_notification(self, user_id: int) -> bool:
         """Отправляет уведомление о том, что подписка закончилась."""

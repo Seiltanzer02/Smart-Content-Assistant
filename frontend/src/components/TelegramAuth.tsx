@@ -74,7 +74,7 @@ export const TelegramAuth: React.FC<TelegramAuthProps> = ({ onAuthSuccess, onAut
       // Успешная авторизация - вызываем колбэк
       const userId = String(user.id);
       console.log('Успешно получен User ID:', userId);
-      onAuthSuccess(userId);
+          onAuthSuccess(userId);
     };
 
     // Вызываем функцию инициализации с небольшой задержкой,
@@ -90,12 +90,12 @@ export const TelegramAuth: React.FC<TelegramAuthProps> = ({ onAuthSuccess, onAut
   }, [onAuthSuccess, onAuthError]);
 
   // Отображаем экран загрузки, пока идет авторизация
-  return (
+    return (
     <div className="telegram-auth-container">
       <div className="loading-spinner"></div>
       <p>Авторизация в Telegram...</p>
-    </div>
-  );
-};
+      </div>
+    );
+}; 
 
 export default TelegramAuth; 

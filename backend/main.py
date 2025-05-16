@@ -198,8 +198,10 @@ origins = [
     "http://localhost", 
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://smart-content.online",
-    "*"
+    "http://localhost:3000",
+    "https://*.onrender.com",  # Для Render
+    "https://t.me",            # Для Telegram
+    "*"                        # Временно разрешаем все
 ]
 
 app.add_middleware(
@@ -208,18 +210,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Telegram-User-Id"]  # Позволяем читать этот заголовок
 )
-
-# --- Подключаем маршрутизаторы ---
-# Импортируем и подключаем маршрутизатор для проверки подписки
-try:
-    from backend.routes.subscription_check import router as subscription_router
-    app.include_router(subscription_router)
-    logger.info("Маршрутизатор проверки подписки успешно подключен")
-except Exception as e:
-    logger.error(f"Ошибка при подключении маршрутизатора проверки подписки: {e}")
-
-# --- Конец подключения маршрутизаторов ---
 
 # --- Подключение роутеров ---
 from backend.routes import user_limits, analysis, ideas, posts, user_settings, images
@@ -4199,343 +4191,29 @@ async def send_image_to_chat(request: Request):
 
 @app.get("/api/check-channel-subscription")
 async def check_channel_subscription(request: Request):
-    from backend.services.telegram_subscription_check import check_user_channel_subscription, send_subscription_prompt
-    import logging
-    
-    logger = logging.getLogger("channel_subscription")
-    
-    # Получаем ID пользователя из заголовков
     telegram_user_id = request.headers.get("X-Telegram-User-Id")
-    logger.info(f"Запрос на проверку подписки на канал для user_id: {telegram_user_id}")
-    
-    # Проверяем валидность ID
     if not telegram_user_id or not telegram_user_id.isdigit():
-        error_msg = "Не удалось определить Telegram ID (отсутствует или невалидный формат)"
-        logger.error(error_msg)
-        return {"subscribed": False, "error": error_msg, "requested_user_id": telegram_user_id}
-    
+        return {"subscribed": False, "error": "Не удалось определить Telegram ID"}
     user_id = int(telegram_user_id)
-    logger.info(f"Проверка подписки на канал для user_id: {user_id}")
-    
-    # Проверяем переменные окружения перед запросом
-    import os
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    channel_username = os.getenv("TARGET_CHANNEL_USERNAME")
-    
-    if not bot_token or not channel_username:
-        error_msg = "Отсутствуют необходимые переменные окружения (TELEGRAM_BOT_TOKEN или TARGET_CHANNEL_USERNAME)"
-        logger.error(error_msg)
-        return {
-            "subscribed": False, 
-            "error": error_msg,
-            "env_check": {
-                "bot_token_exists": bool(bot_token),
-                "channel_username_exists": bool(channel_username),
-                "channel_username": channel_username
-            }
-        }
-    
     try:
-        # Добавляем дополнительное логирование и диагностику
-        logger.info(f"Используемый токен бота: {bot_token[:5]}...{bot_token[-5:] if len(bot_token) > 10 else ''}")
-        logger.info(f"Имя канала для проверки: {channel_username}")
-        
-        # Проверка корректности имени канала
-        formatted_channel = channel_username.lstrip("@")
-        if not formatted_channel:
-            error_msg = "Некорректное имя канала (пустое после удаления символа @)"
-            logger.error(error_msg)
-            return {"subscribed": False, "error": error_msg}
-        
-        # Проверяем подписку на канал
         is_subscribed = await check_user_channel_subscription(user_id)
-        logger.info(f"Результат проверки подписки для {user_id}: {is_subscribed}")
-        
         if not is_subscribed:
-            # Отправляем уведомление пользователю, если не подписан
-            logger.info(f"Пользователь {user_id} не подписан на канал, отправляем уведомление")
-            try:
-                await send_subscription_prompt(user_id)
-            except Exception as prompt_error:
-                logger.error(f"Ошибка при отправке напоминания о подписке: {prompt_error}")
-        
-        return {
-            "subscribed": is_subscribed,
-            "user_id": user_id,
-            "channel": formatted_channel,
-            "timestamp": datetime.now().isoformat()
-        }
+            await send_subscription_prompt(user_id)
+        return {"subscribed": is_subscribed}
     except Exception as e:
-        logger.exception(f"Ошибка при проверке подписки: {e}")
-        
-        # Добавляем расширенную диагностическую информацию
-        import traceback
-        trace = traceback.format_exc()
-        error_message = str(e)
-        
-        # Добавляем пользовательское сообщение об ошибке в зависимости от типа ошибки
-        user_friendly_error = "Ошибка при проверке подписки на канал"
-        
-        if "getaddrinfo failed" in error_message or "Connection refused" in error_message:
-            user_friendly_error = "Не удалось подключиться к API Telegram. Проверьте интернет-соединение."
-        elif "Not Found" in error_message or "404" in error_message:
-            user_friendly_error = "Ошибка в настройках Telegram бота. Возможно, неверный токен."
-        elif "Forbidden" in error_message or "403" in error_message:
-            user_friendly_error = "Нет доступа к каналу. Убедитесь, что бот имеет права администратора."
-        elif "user not found" in error_message.lower():
-            user_friendly_error = "Вы ещё не подписаны на канал!"
-        
-        return {
-            "subscribed": False, 
-            "error": user_friendly_error,
-            "technical_error": error_message if error_message else None,
-            "user_id": user_id,
-            "channel": channel_username.lstrip("@") if channel_username else None,
-            "traceback": trace[:500] if trace else None  # Ограничиваем длину трейсбека
-        }
+        return {"subscribed": False, "error": str(e)}
 
-# Добавляем POST эндпоинт для проверки подписки на канал (дублирует GET)
-# Это делается специально для обхода проблем с маршрутизацией
 @app.post("/api/check-channel-subscription")
 async def check_channel_subscription_post(request: Request):
-    """
-    POST версия эндпоинта для проверки подписки на канал.
-    Полностью дублирует функциональность GET эндпоинта для обхода проблем маршрутизации.
-    """
-    from backend.services.telegram_subscription_check import check_user_channel_subscription, send_subscription_prompt
-    import logging
-    
-    logger = logging.getLogger("channel_subscription")
-    logger.info("POST запрос на проверку подписки на канал")
-    
-    # Получаем ID пользователя из заголовков или тела запроса
     telegram_user_id = request.headers.get("X-Telegram-User-Id")
-    
-    # Если ID нет в заголовках, пробуем получить из тела запроса
-    if not telegram_user_id:
-        try:
-            body = await request.json()
-            telegram_user_id = body.get("user_id")
-            logger.info(f"ID из тела запроса: {telegram_user_id}")
-        except:
-            logger.warning("Не удалось прочитать тело запроса как JSON")
-    
-    logger.info(f"POST запрос на проверку подписки для user_id: {telegram_user_id}")
-    
-    # Проверяем валидность ID
-    if not telegram_user_id or (isinstance(telegram_user_id, str) and not telegram_user_id.isdigit()):
-        error_msg = "Не удалось определить Telegram ID (отсутствует или невалидный формат)"
-        logger.error(error_msg)
-        return {"subscribed": False, "error": error_msg, "requested_user_id": telegram_user_id}
-    
+    if not telegram_user_id or not telegram_user_id.isdigit():
+        return {"subscribed": False, "error": "Не удалось определить Telegram ID"}
     user_id = int(telegram_user_id)
-    logger.info(f"POST проверка подписки на канал для user_id: {user_id}")
-    
-    # Проверяем переменные окружения перед запросом
-    import os
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    channel_username = os.getenv("TARGET_CHANNEL_USERNAME")
-    
-    if not bot_token or not channel_username:
-        error_msg = "Отсутствуют необходимые переменные окружения (TELEGRAM_BOT_TOKEN или TARGET_CHANNEL_USERNAME)"
-        logger.error(error_msg)
-        return {
-            "subscribed": False, 
-            "error": error_msg,
-            "env_check": {
-                "bot_token_exists": bool(bot_token),
-                "channel_username_exists": bool(channel_username),
-                "channel_username": channel_username
-            }
-        }
-    
     try:
-        # Добавляем дополнительное логирование и диагностику
-        logger.info(f"POST запрос: Используемый токен бота: {bot_token[:5]}...{bot_token[-5:] if len(bot_token) > 10 else ''}")
-        logger.info(f"POST запрос: Имя канала для проверки: {channel_username}")
-        
-        # Проверка корректности имени канала
-        formatted_channel = channel_username.lstrip("@")
-        if not formatted_channel:
-            error_msg = "Некорректное имя канала (пустое после удаления символа @)"
-            logger.error(error_msg)
-            return {"subscribed": False, "error": error_msg}
-        
-        # Проверяем подписку на канал
         is_subscribed = await check_user_channel_subscription(user_id)
-        logger.info(f"POST запрос: Результат проверки подписки для {user_id}: {is_subscribed}")
-        
         if not is_subscribed:
-            # Отправляем уведомление пользователю, если не подписан
-            logger.info(f"POST запрос: Пользователь {user_id} не подписан на канал, отправляем уведомление")
-            try:
-                await send_subscription_prompt(user_id)
-            except Exception as prompt_error:
-                logger.error(f"POST запрос: Ошибка при отправке напоминания о подписке: {prompt_error}")
-        
-        return {
-            "subscribed": is_subscribed,
-            "user_id": user_id,
-            "channel": formatted_channel,
-            "timestamp": datetime.now().isoformat(),
-            "method": "POST"  # Указываем метод для отладки
-        }
+            await send_subscription_prompt(user_id)
+        return {"subscribed": is_subscribed}
     except Exception as e:
-        logger.exception(f"POST запрос: Ошибка при проверке подписки: {e}")
-        
-        # Добавляем расширенную диагностическую информацию
-        import traceback
-        trace = traceback.format_exc()
-        error_message = str(e)
-        
-        # Добавляем пользовательское сообщение об ошибке в зависимости от типа ошибки
-        user_friendly_error = "Ошибка при проверке подписки на канал"
-        
-        if "getaddrinfo failed" in error_message or "Connection refused" in error_message:
-            user_friendly_error = "Не удалось подключиться к API Telegram. Проверьте интернет-соединение."
-        elif "Not Found" in error_message or "404" in error_message:
-            user_friendly_error = "Ошибка в настройках Telegram бота. Возможно, неверный токен."
-        elif "Forbidden" in error_message or "403" in error_message:
-            user_friendly_error = "Нет доступа к каналу. Убедитесь, что бот имеет права администратора."
-        elif "user not found" in error_message.lower():
-            user_friendly_error = "Вы ещё не подписаны на канал!"
-        
-        return {
-            "subscribed": False, 
-            "error": user_friendly_error,
-            "technical_error": error_message if error_message else None,
-            "user_id": user_id,
-            "channel": channel_username.lstrip("@") if channel_username else None,
-            "traceback": trace[:500] if trace else None,  # Ограничиваем длину трейсбека
-            "method": "POST"  # Указываем метод для отладки
-        }
-
-# Эндпоинт для прямой диагностики проблем с подпиской на канал
-@app.get("/api/subscription/channel-debug/{user_id}")
-async def debug_channel_subscription(user_id: str):
-    """
-    Диагностический эндпоинт для проверки подписки на канал Telegram.
-    Показывает полную информацию о запросе к API Telegram.
-    """
-    import os
-    import httpx
-    import logging
-    from datetime import datetime, timezone
-    
-    logger = logging.getLogger("channel_debug")
-    
-    result = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "user_id": user_id,
-        "bot_check": {
-            "telegram_bot_token_exists": False,
-            "telegram_bot_token_length": 0,
-            "telegram_bot_info": None,
-            "bot_has_webhook": False, 
-            "bot_has_admin_rights": False
-        },
-        "channel_check": {
-            "target_channel_username_exists": False,
-            "target_channel_username": None,
-            "channel_info": None, 
-            "can_get_channel_info": False
-        },
-        "subscription_check": {
-            "can_check_subscription": False,
-            "get_chat_member_result": None,
-            "is_subscribed": False,
-            "status": None
-        },
-        "errors": []
-    }
-    
-    # 1. Проверяем переменные окружения
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    channel_username = os.getenv("TARGET_CHANNEL_USERNAME")
-    
-    if not bot_token:
-        result["errors"].append("TELEGRAM_BOT_TOKEN не задан в переменных окружения")
-    else:
-        result["bot_check"]["telegram_bot_token_exists"] = True
-        result["bot_check"]["telegram_bot_token_length"] = len(bot_token)
-    
-    if not channel_username:
-        result["errors"].append("TARGET_CHANNEL_USERNAME не задан в переменных окружения")
-    else:
-        result["channel_check"]["target_channel_username_exists"] = True
-        result["channel_check"]["target_channel_username"] = channel_username
-    
-    # Если не заданы необходимые переменные окружения, не выполняем проверки API
-    if not bot_token or not channel_username:
-        return result
-    
-    TELEGRAM_API_URL = f"https://api.telegram.org/bot{bot_token}"
-    
-    # 2. Проверяем информацию о боте
-    try:
-        async with httpx.AsyncClient() as client:
-            bot_info_resp = await client.get(f"{TELEGRAM_API_URL}/getMe")
-            bot_info = bot_info_resp.json()
-            result["bot_check"]["telegram_bot_info"] = bot_info
-            
-            # Проверяем наличие вебхука
-            webhook_info_resp = await client.get(f"{TELEGRAM_API_URL}/getWebhookInfo")
-            webhook_info = webhook_info_resp.json()
-            if webhook_info.get("ok") and webhook_info.get("result", {}).get("url"):
-                result["bot_check"]["bot_has_webhook"] = True
-    except Exception as e:
-        result["errors"].append(f"Ошибка при получении информации о боте: {str(e)}")
-    
-    # 3. Проверяем информацию о канале и пробуем получить статус подписки
-    try:
-        # Форматируем имя канала правильно для API (с @ в начале)
-        channel = channel_username.lstrip("@")
-        chat_id = f"@{channel}"
-        
-        async with httpx.AsyncClient() as client:
-            # Сначала пробуем получить информацию о канале
-            try:
-                chat_info_resp = await client.get(f"{TELEGRAM_API_URL}/getChat", params={"chat_id": chat_id})
-                chat_info = chat_info_resp.json()
-                result["channel_check"]["channel_info"] = chat_info
-                result["channel_check"]["can_get_channel_info"] = chat_info.get("ok", False)
-                
-                # Проверяем, есть ли у бота права администратора
-                if chat_info.get("ok", False):
-                    admins_resp = await client.get(f"{TELEGRAM_API_URL}/getChatAdministrators", params={"chat_id": chat_id})
-                    admins_info = admins_resp.json()
-                    
-                    if admins_info.get("ok", False):
-                        # Проверяем, есть ли наш бот среди администраторов
-                        bot_username = result["bot_check"]["telegram_bot_info"].get("result", {}).get("username")
-                        if bot_username:
-                            for admin in admins_info.get("result", []):
-                                if admin.get("user", {}).get("username") == bot_username:
-                                    result["bot_check"]["bot_has_admin_rights"] = True
-                                    break
-            except Exception as channel_err:
-                result["errors"].append(f"Ошибка при получении информации о канале: {str(channel_err)}")
-            
-            # Теперь пробуем проверить подписку
-            try:
-                # Проверяем, что user_id можно преобразовать в число
-                user_id_int = int(user_id)
-                
-                member_resp = await client.get(f"{TELEGRAM_API_URL}/getChatMember", 
-                                               params={"chat_id": chat_id, "user_id": user_id_int})
-                member_info = member_resp.json()
-                
-                result["subscription_check"]["get_chat_member_result"] = member_info
-                result["subscription_check"]["can_check_subscription"] = member_info.get("ok", False)
-                
-                if member_info.get("ok", False):
-                    status = member_info.get("result", {}).get("status")
-                    result["subscription_check"]["status"] = status
-                    result["subscription_check"]["is_subscribed"] = status in ("member", "administrator", "creator")
-            except Exception as subscription_err:
-                result["errors"].append(f"Ошибка при проверке подписки: {str(subscription_err)}")
-    except Exception as e:
-        result["errors"].append(f"Общая ошибка при проверке канала: {str(e)}")
-    
-    return result
+        return {"subscribed": False, "error": str(e)}
 
