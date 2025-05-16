@@ -1665,8 +1665,8 @@ function App() {
     }
     setCheckingSubscription(true);
     try {
-      console.log('Отправка POST-запроса на /api/check-channel-subscription');
-      const resp = await axios.post('/api/check-channel-subscription', {}, {
+      console.log('Отправка запроса на /api/check-channel-subscription');
+      const resp = await axios.get('/api/check-channel-subscription', {
         headers: { 'X-Telegram-User-Id': userId }
       });
       console.log('Ответ от /api/check-channel-subscription:', resp.data);
@@ -1709,8 +1709,8 @@ function App() {
       }
       setCheckingSubscription(true);
       try {
-        console.log('Отправка POST-запроса на /api/check-channel-subscription внутри useEffect');
-        const resp = await axios.post('/api/check-channel-subscription', {}, {
+        console.log('Отправка запроса на /api/check-channel-subscription внутри useEffect');
+        const resp = await axios.get('/api/check-channel-subscription', {
           headers: { 'X-Telegram-User-Id': userId }
         });
         console.log('Ответ от /api/check-channel-subscription внутри useEffect:', resp.data);
