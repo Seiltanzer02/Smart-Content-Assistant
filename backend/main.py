@@ -214,14 +214,18 @@ app.add_middleware(
 )
 
 # --- Подключение роутеров ---
-from backend.routes import user_limits, analysis, ideas, posts, user_settings, images, subscription_check
+from backend.routes import user_limits, analysis, ideas, posts, user_settings, images
 
+# Подключаем основные роутеры
 app.include_router(user_limits.router)
 app.include_router(analysis.router)
 app.include_router(ideas.router)
 app.include_router(posts.router)
 app.include_router(user_settings.router, prefix="/api/user", tags=["User Settings"])
 app.include_router(images.router, prefix="/api", tags=["Images"])
+
+# Импорт subscription_check после всех других импортов для избежания циклических зависимостей
+from backend.routes import subscription_check
 app.include_router(subscription_check.router)
 # --- Конец подключения роутеров ---
 
