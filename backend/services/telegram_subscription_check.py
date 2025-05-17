@@ -12,7 +12,7 @@ TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 async def check_user_channel_subscription(user_id: int) -> bool:
     """
-    Проверяет, подписан ли пользователь на канал.
+    Проверяет, подписан ли пользователь на канал. Если бот не админ — возвращает False.
     """
     channel = TARGET_CHANNEL_USERNAME.lstrip("@")
     url = f"{TELEGRAM_API_URL}/getChatMember"
@@ -20,30 +20,38 @@ async def check_user_channel_subscription(user_id: int) -> bool:
         "chat_id": f"@{channel}",
         "user_id": user_id
     }
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(url, params=params)
-        data = resp.json()
-        if not data.get("ok"):
-            # Если бот не админ в канале — будет ошибка
-            raise HTTPException(status_code=500, detail=f"Ошибка Telegram API: {data.get('description')}")
-        status = data["result"]["status"]
-        # Подписан, если статус member, administrator, creator
-        return status in ("member", "administrator", "creator")
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, params=params)
+            data = resp.json()
+            if not data.get("ok"):
+                # Если бот не админ или канал не найден — не падаем, просто считаем, что не подписан
+                return False
+            status = data["result"]["status"]
+            # Подписан, если статус member, administrator, creator
+            return status in ("member", "administrator", "creator")
+    except Exception:
+        # Любая ошибка — считаем, что не подписан
+        return False
 
 async def send_subscription_prompt(user_id: int):
     """
-    Отправляет пользователю сообщение с просьбой подписаться на канал.
+    Отправляет пользователю сообщение с красивой кнопкой для подписки на канал.
     """
     channel = TARGET_CHANNEL_USERNAME.lstrip("@")
     url = f"{TELEGRAM_API_URL}/sendMessage"
     text = (
-        f"Чтобы пользоваться приложением, подпишитесь на наш канал: "
-        f"https://t.me/{channel}\n\n"
-        f"После подписки вернитесь в приложение и нажмите 'Проверить подписку'."
+        f"Чтобы пользоваться приложением, подпишитесь на наш канал:"
     )
+    reply_markup = {
+        "inline_keyboard": [[
+            {"text": "Перейти в канал", "url": f"https://t.me/{channel}"}
+        ]]
+    }
     payload = {
         "chat_id": user_id,
         "text": text,
+        "reply_markup": reply_markup,
         "disable_web_page_preview": True
     }
     async with httpx.AsyncClient() as client:
