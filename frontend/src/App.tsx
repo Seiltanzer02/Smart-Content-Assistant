@@ -1624,14 +1624,6 @@ function App() {
     return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
   }
 
-  // Получаем userId из Telegram WebApp или localStorage
-  let userId: string | null = null;
-  if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
-    userId = String(window.Telegram.WebApp.initDataUnsafe.user.id);
-  } else if (localStorage.getItem('contenthelper_user_id')) {
-    userId = localStorage.getItem('contenthelper_user_id');
-  }
-
   // Показываем SubscriptionWidget до загрузки приложения, если нет подписки
   return (
     <SimpleErrorBoundary>
