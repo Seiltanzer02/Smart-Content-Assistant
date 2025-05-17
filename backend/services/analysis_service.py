@@ -21,65 +21,65 @@ class AnalyzeResponse(BaseModel):
 
 async def analyze_channel(request: Request, req: AnalyzeRequest):
     telegram_user_id = request.headers.get("X-Telegram-User-Id")
-    logger.info(f"Начинаем анализ канала от пользователя: {telegram_user_id}")
     if not telegram_user_id or not telegram_user_id.isdigit():
-        raise HTTPException(status_code=401, detail="Ошибка авторизации: не удалось получить корректный Telegram ID. Откройте приложение внутри Telegram.")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    username = req.username.strip().lower()
+    if username.startswith('@'):
+        username = username[1:]
+    
+    error_message = None
+    sample_data_used = False
+    
     try:
-        subscription_service = SupabaseSubscriptionService(supabase)
-        can_analyze = await subscription_service.can_analyze_channel(int(telegram_user_id))
-        if not can_analyze:
-            usage = await subscription_service.get_user_usage(int(telegram_user_id))
-            reset_at = usage.get("reset_at")
-            raise HTTPException(status_code=403, detail=f"Достигнут лимит в 5 анализов каналов для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Лимиты обновляются каждые 3 дня. Оформите подписку для снятия ограничений.")
-        username = req.username.replace("@", "").strip()
-        posts = []
+        # 1. Пробуем получить посты через HTTP (публичный метод)
         errors_list = []
         error_message = None
-        # 1. HTTP парсер
+        posts = []
         try:
-            logger.info(f"Пытаемся получить посты канала @{username} через HTTP парсинг")
+            logger.info(f"Попытка получить посты канала @{username} через HTTP")
             http_posts = await get_telegram_posts_via_http(username)
-            if http_posts and len(http_posts) > 0:
+            if http_posts:
                 posts = [{"text": post} for post in http_posts]
-                logger.info(f"Успешно получено {len(posts)} постов через HTTP парсинг")
+                logger.info(f"Получили {len(posts)} постов через HTTP")
             else:
-                logger.warning(f"HTTP парсинг не вернул постов для канала @{username}, пробуем Telethon")
                 errors_list.append("HTTP: Не получены посты, пробуем Telethon")
         except Exception as http_error:
             logger.error(f"Ошибка при HTTP парсинге для канала @{username}: {http_error}")
             errors_list.append(f"HTTP: {str(http_error)}")
-        # 2. Telethon
+        
+        # 2. Если HTTP не сработал, пробуем через Telethon
         if not posts:
             try:
-                logger.info(f"Пытаемся получить посты канала @{username} через Telethon")
                 telethon_posts, telethon_error = await get_telegram_posts_via_telethon(username)
                 if telethon_error:
                     logger.warning(f"Ошибка Telethon для канала @{username}: {telethon_error}")
                     errors_list.append(f"Telethon: {telethon_error}")
                 else:
                     posts = telethon_posts
-                    logger.info(f"Успешно получено {len(posts)} постов через Telethon")
+                    logger.info(f"Получили {len(posts)} постов через Telethon")
             except Exception as e:
                 logger.error(f"Непредвиденная ошибка при получении постов канала @{username} через Telethon: {e}")
                 errors_list.append(f"Ошибка Telethon: {str(e)}")
-        # 3. Примеры
-        sample_data_used = False
+        
+        # 3. Если не удалось получить посты ни одним способом, используем образцы
         if not posts:
-            logger.warning(f"Не удалось получить посты канала {username}")
+            logger.warning(f"Не удалось получить посты для канала @{username}, используем образцы")
             
-            # Проверяем наличие явных ошибок доступа, чтобы определить тип проблемы
+            # Анализируем ошибки для более информативного сообщения
             channel_not_exists = False
             channel_is_private = False
             
             for error in errors_list:
                 if "No user has" in error or "not found" in error.lower() or "does not exist" in error.lower():
                     channel_not_exists = True
-                    break
+                    
                 if "private" in error.lower() or "not accessible" in error.lower() or "access" in error.lower():
                     channel_is_private = True
-                    break
             
+            # Определяем тип ошибки
             if channel_not_exists:
+                # Канал не существует
                 return AnalyzeResponse(
                     themes=[],
                     styles=[],
@@ -89,6 +89,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                     error=f"Канал @{username} не существует или закрытый. Пожалуйста, проверьте правильность написания имени канала."
                 )
             elif channel_is_private:
+                # Канал закрытый
                 return AnalyzeResponse(
                     themes=[],
                     styles=[],
@@ -98,6 +99,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                     error=f"Канал @{username} является закрытым и недоступен для анализа. Выберите публичный канал."
                 )
             else:
+                # Общая ошибка
                 return AnalyzeResponse(
                     themes=[],
                     styles=[],
@@ -106,7 +108,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                     analyzed_posts_count=0,
                     error=f"Не удалось получить доступ к каналу @{username}. Возможно, канал не существует, является закрытым или превышен лимит запросов."
                 )
-                
+        
         # 4. Анализируем первые 20 постов
         posts = posts[:20]
         logger.info(f"Анализируем {len(posts)} постов")
@@ -119,9 +121,9 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
             # Пробуем сначала использовать OpenRouter API
             try:
                 logger.info(f"Анализируем посты канала @{username} с использованием OpenRouter API")
-        analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
-        themes = analysis_result.get("themes", [])
-        styles = analysis_result.get("styles", [])
+                analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
+                themes = analysis_result.get("themes", [])
+                styles = analysis_result.get("styles", [])
                 
                 if not themes and not styles:
                     # Если не получены результаты, пробуем запасной API
@@ -317,18 +319,28 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
             logger.error(f"Ошибка при сохранении результатов анализа в БД: {db_error}")
         # 6. Увеличиваем счетчик использования
         try:
-            await subscription_service.increment_analysis_usage(int(telegram_user_id))
+            subscription_service = SupabaseSubscriptionService(supabase)
+            await subscription_service.increment_analysis_counter(telegram_user_id)
         except Exception as counter_error:
             logger.error(f"Ошибка при увеличении счетчика анализа: {counter_error}")
+        
         # 7. Возвращаем результат
         return AnalyzeResponse(
             themes=themes,
             styles=styles,
+            analyzed_posts_count=len(posts),
             analyzed_posts_sample=[post.get("text", "") for post in posts[:10]],
             best_posting_time="18:00-20:00",
-            analyzed_posts_count=len(posts),
             message=error_message
         )
+        
     except Exception as e:
         logger.error(f"Ошибка при анализе канала для пользователя {telegram_user_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера: {str(e)}") 
+        return AnalyzeResponse(
+            themes=[],
+            styles=[],
+            analyzed_posts_sample=[],
+            best_posting_time="",
+            analyzed_posts_count=0,
+            error=f"Внутренняя ошибка сервера при анализе канала. Пожалуйста, попробуйте позже."
+        ) 
