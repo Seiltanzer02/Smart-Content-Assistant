@@ -1,7 +1,15 @@
 import httpx
 import os
 import json
-from backend.main import logger # Предполагается, что logger уже настроен в main
+import logging
+
+# Инициализируем logger для этого модуля, если его нет
+try:
+    from backend.main import logger
+except ImportError:
+    # Создаем собственный logger если не удалось импортировать из main
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+    logger = logging.getLogger(__name__)
 
 async def send_telegram_message(chat_id: int, text: str, reply_markup: dict = None):
     """
