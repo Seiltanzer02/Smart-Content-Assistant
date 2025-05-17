@@ -22,6 +22,8 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from dateutil.relativedelta import relativedelta
 
+print("=== ДИАГНОСТИКА: Файл main_fixed.py запускается ===")
+
 # Загружаем переменные окружения
 load_dotenv()  # Загружаем переменные окружения из .env файла
 
