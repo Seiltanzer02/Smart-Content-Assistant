@@ -4216,12 +4216,11 @@ async def check_channel_subscription(request: Request):
 
 @app.get("/channel-subscription-check/{user_id}", status_code=200)
 async def channel_subscription_check(user_id: int, request: Request):
-    """
-    Проверяет, подписан ли пользователь на канал. Возвращает JSON с результатом.
-    """
+    logger.info(f"[CHANNEL-SUBSCRIPTION-CHECK] Проверка подписки для пользователя: {user_id}")
     try:
         is_subscribed = await check_user_channel_subscription(int(user_id))
     except Exception as e:
+        logger.error(f"[CHANNEL-SUBSCRIPTION-CHECK] Ошибка: {e}")
         return {"subscribed": False, "message": f"Ошибка проверки подписки: {str(e)}"}
     if is_subscribed:
         return {"subscribed": True, "message": "Вы подписаны на канал!"}
