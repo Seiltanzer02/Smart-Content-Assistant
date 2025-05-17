@@ -4231,3 +4231,14 @@ async def channel_subscription_check(user_id: int, request: Request):
             "message": "Чтобы пользоваться приложением, подпишитесь на наш канал и нажмите 'Проверить подписку'!"
         }
 
+# В начало файла, сразу после импортов
+print("=== ЗАПУЩЕН ФАЙЛ main.py ===")
+
+# После создания app, но до определения первого эндпоинта, добавим:
+try:
+    from backend.routers.channel_subscription import router as channel_subscription_router
+    app.include_router(channel_subscription_router)
+    print("=== Роутер проверки подписки на канал успешно подключен ===")
+except Exception as e:
+    print(f"=== ОШИБКА при подключении роутера проверки подписки: {e} ===")
+
