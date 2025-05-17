@@ -1508,7 +1508,7 @@ function App() {
       if (interval) clearInterval(interval);
     };
   }, [isAnalyzing, isGeneratingPostDetails, isGeneratingIdeas]);
-  
+
   // === ДОБАВЛЯЮ: Эффект для смены сообщений в прогресс-баре генерации деталей поста ===
   useEffect(() => {
     let messageInterval: number | null = null;
@@ -1611,12 +1611,12 @@ function App() {
 
   // Компонент загрузки
   if (loading) {
-    return (
+                                  return (
       <div className="loading-container">
         <div className="loading-spinner"></div>
         <p>Загрузка приложения...</p>
-    </div>
-  );
+                                      </div>
+                                  );
   }
 
   // Компонент авторизации
