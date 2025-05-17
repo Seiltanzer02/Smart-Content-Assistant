@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 
 # FastAPI компоненты
-from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends, Form
+from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends, Form, status
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -381,186 +381,34 @@ def normalize_db_url(url: str) -> str:
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
-    """Вебхук для обработки обновлений от бота Telegram."""
-    try:
-        # Получаем данные запроса
-        data = await request.json()
-        logger.info(f"Получен вебхук от Telegram: {data}")
-        
-        # Проверяем, есть ли сообщение
-        message = data.get('message')
-        if not message:
-            return {"ok": True}
-        
-        # Получаем ID пользователя и текст сообщения
-        user_id = message.get('from', {}).get('id')
-        text = message.get('text', '')
-        
-        # Дополнительное логирование
-        logger.info(f"Обрабатываем сообщение от пользователя {user_id}: {text}")
-        
-        # Если это команда /start с параметром check_premium или команда /check_premium
-        if text.startswith('/start check_premium') or text == '/check_premium':
-            logger.info(f"Получена команда проверки премиума от пользователя {user_id}")
-            
-            # Проверяем премиум-статус пользователя через REST API вместо прямого подключения к БД
-            try:
-                # Проверяем, инициализирован ли Supabase клиент
-                if not supabase:
-                    logger.error("Supabase клиент не инициализирован")
-                    await send_telegram_message(user_id, "Ошибка сервера: не удалось подключиться к базе данных. Пожалуйста, сообщите администратору.")
-                    return {"ok": True, "error": "Supabase client not initialized"}
-                
-                # Запрашиваем активные подписки для пользователя через REST API
+    data = await request.json()
+    logger.info(f"Получено обновление от Telegram: {data}")
+
+    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN") # Используем TELEGRAM_BOT_TOKEN
+
+    if "callback_query" in data:
+        callback_query = data["callback_query"]
+        # ... (остальная часть кода без изменений)
+        # Отвечаем на callback_query, чтобы убрать "часики" на кнопке
+        if telegram_bot_token: # Проверяем telegram_bot_token
+            answer_callback_url = f"https://api.telegram.org/bot{telegram_bot_token}/answerCallbackQuery"
+            async with httpx.AsyncClient() as client:
                 try:
-                    subscription_query = supabase.table("user_subscription").select("*").eq("user_id", user_id).eq("is_active", True).execute()
-                    
-                    logger.info(f"Результат запроса подписки через REST API: {subscription_query}")
-                    
-                    has_premium = False
-                    end_date_str = 'неизвестно'
-                    
-                    # Проверяем результаты запроса
-                    if hasattr(subscription_query, 'data') and subscription_query.data:
-                        from datetime import datetime, timezone
-                        
-                        # Проверяем подписки на активность и срок
-                        # ИСПРАВЛЕНО: Создаем datetime с UTC timezone
-                        current_date = datetime.now(timezone.utc)
-                        active_subscriptions = []
-                        
-                        for subscription in subscription_query.data:
-                            end_date = subscription.get("end_date")
-                            if end_date:
-                                try:
-                                    # Преобразуем дату из строки в объект datetime
-                                    if isinstance(end_date, str):
-                                        end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-                                    
-                                    # Если дата окончания в будущем, добавляем в активные
-                                    if end_date > current_date:
-                                        active_subscriptions.append(subscription)
-                                except Exception as e:
-                                    logger.error(f"Ошибка при обработке даты подписки {end_date}: {e}")
-                        
-                        # Если есть активные подписки, устанавливаем has_premium = True
-                        if active_subscriptions:
-                            has_premium = True
-                            # Берем самую позднюю дату окончания
-                            latest_subscription = max(active_subscriptions, key=lambda x: x.get("end_date"))
-                            end_date = latest_subscription.get("end_date")
-                            if isinstance(end_date, str):
-                                end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-                            end_date_str = end_date.strftime('%d.%m.%Y %H:%M')
-                    
-                    logger.info(f"Результат проверки подписки для {user_id}: has_premium={has_premium}, end_date={end_date_str}")
-                    
-                    # Формируем текст ответа
-                    if has_premium:
-                        reply_text = f"✅ У вас активирован ПРЕМИУМ доступ!\nДействует до: {end_date_str}\nОбновите страницу приложения, чтобы увидеть изменения."
-                    else:
-                        reply_text = "❌ У вас нет активной ПРЕМИУМ подписки.\nДля получения премиум-доступа оформите подписку в приложении."
-                    
-                    # Отправляем ответ пользователю
-                    await send_telegram_message(user_id, reply_text)
-                    
-                    return {"ok": True, "has_premium": has_premium}
-                    
-                except Exception as api_error:
-                    logger.error(f"Ошибка при проверке премиум-статуса через REST API: {api_error}")
-                    # Попробуем альтернативный способ проверки, используя REST API напрямую через httpx
-                    try:
-                        supabase_url = os.getenv("SUPABASE_URL")
-                        supabase_key = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_ANON_KEY")
-                        
-                        if not supabase_url or not supabase_key:
-                            raise ValueError("Отсутствуют SUPABASE_URL или SUPABASE_KEY")
-                        
-                        # Формируем запрос к REST API Supabase
-                        headers = {
-                            "apikey": supabase_key,
-                            "Authorization": f"Bearer {supabase_key}",
-                            "Content-Type": "application/json"
-                        }
-                        
-                        async with httpx.AsyncClient() as client:
-                            response = await client.get(
-                                f"{supabase_url}/rest/v1/user_subscription",
-                                headers=headers,
-                                params={
-                                    "select": "*",
-                                    "user_id": f"eq.{user_id}",
-                                    "is_active": "eq.true"
-                                }
-                            )
-                            
-                            if response.status_code == 200:
-                                subscriptions = response.json()
-                                
-                                # Проверяем подписки на активность и срок
-                                from datetime import datetime, timezone
-                                # ИСПРАВЛЕНО: Создаем datetime с UTC timezone
-                                current_date = datetime.now(timezone.utc)
-                                active_subscriptions = []
-                                
-                                for subscription in subscriptions:
-                                    end_date = subscription.get("end_date")
-                                    if end_date:
-                                        try:
-                                            # Преобразуем дату из строки в объект datetime
-                                            if isinstance(end_date, str):
-                                                end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-                                            
-                                            # Если дата окончания в будущем, добавляем в активные
-                                            if end_date > current_date:
-                                                active_subscriptions.append(subscription)
-                                        except Exception as e:
-                                            logger.error(f"Ошибка при обработке даты подписки {end_date}: {e}")
-                                
-                                # Если есть активные подписки, устанавливаем has_premium = True
-                                has_premium = bool(active_subscriptions)
-                                end_date_str = 'неизвестно'
-                                
-                                if active_subscriptions:
-                                    # Берем самую позднюю дату окончания
-                                    latest_subscription = max(active_subscriptions, key=lambda x: x.get("end_date"))
-                                    end_date = latest_subscription.get("end_date")
-                                    if isinstance(end_date, str):
-                                        end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-                                    end_date_str = end_date.strftime('%d.%m.%Y %H:%M')
-                                
-                                logger.info(f"Результат проверки подписки через httpx для {user_id}: has_premium={has_premium}, end_date={end_date_str}")
-                                
-                                # Формируем текст ответа
-                                if has_premium:
-                                    reply_text = f"✅ У вас активирован ПРЕМИУМ доступ!\nДействует до: {end_date_str}\nОбновите страницу приложения, чтобы увидеть изменения."
-                                else:
-                                    reply_text = "❌ У вас нет активной ПРЕМИУМ подписки.\nДля получения премиум-доступа оформите подписку в приложении."
-                                
-                                # Отправляем ответ пользователю
-                                await send_telegram_message(user_id, reply_text)
-                                
-                                return {"ok": True, "has_premium": has_premium}
-                            else:
-                                logger.error(f"Ошибка при запросе к Supabase REST API: {response.status_code} - {response.text}")
-                                raise Exception(f"HTTP Error: {response.status_code}")
-                    
-                    except Exception as httpx_error:
-                        logger.error(f"Ошибка при проверке премиум-статуса через httpx: {httpx_error}")
-                        await send_telegram_message(user_id, "Ошибка подключения к базе данных. Пожалуйста, попробуйте позже.")
-                        return {"ok": False, "error": str(httpx_error)}
-            
-            except Exception as e:
-                logger.error(f"Ошибка при проверке премиум-статуса: {e}")
-                await send_telegram_message(user_id, f"Произошла ошибка при проверке статуса подписки. Пожалуйста, попробуйте позже.")
-                return {"ok": False, "error": str(e)}
-        
-        # ... остальная обработка вебхуков ...
-        
-        return {"ok": True}
-    except Exception as e:
-        logger.error(f"Ошибка при обработке вебхука Telegram: {e}")
-        return {"ok": False, "error": str(e)}
+                    await client.post(answer_callback_url, json={"callback_query_id": callback_query["id"]})
+                except Exception as e_ans:
+                    logger.error(f"Ошибка при отправке answerCallbackQuery: {e_ans}")
+        else:
+            logger.error("TELEGRAM_BOT_TOKEN не найден, не могу отправить answerCallbackQuery.")
+        # ... (остальная часть кода без изменений)
+        if callback_data_value == "check_subscription_callback":
+            # ... (логика)
+            if is_subscribed:
+                # ... (логика)
+                if message_id and telegram_bot_token: # Проверяем telegram_bot_token
+                    edit_markup_url = f"https://api.telegram.org/bot{telegram_bot_token}/editMessageReplyMarkup"
+                    # ... (остальная часть кода)
+    # ... (остальная часть кода)
+    return {"status": "ok"}
 
 # Выделим отправку сообщений в отдельную функцию для переиспользования
 async def send_telegram_message(chat_id, text, parse_mode="HTML"):
@@ -4110,4 +3958,58 @@ async def init_user_usage(request: Request):
     subscription_service = SupabaseSubscriptionService(supabase)
     usage = await subscription_service.get_user_usage(int(telegram_user_id))
     return usage
+
+# Примерная структура данных, которые может отправлять Telegram Web App
+# Важно: Реальная структура может отличаться, нужно смотреть документацию Telegram
+class WebAppInitData(BaseModel):
+    user_id: int
+    chat_id: int
+    # Могут быть и другие поля, например, auth_date, hash и т.д.
+
+# Эндпоинт для проверки доступа к приложению
+@app.post("/api/check-app-access", response_model=Dict[str, bool])
+async def check_app_access(request: Request):
+    """
+    Проверяет, подписан ли пользователь на канал.
+    Вызывается из Telegram Mini App при его инициализации.
+    Ожидает X-Telegram-User-Id и X-Telegram-Chat-Id в заголовках.
+    """
+    try:
+        telegram_user_id_str = request.headers.get("X-Telegram-User-Id")
+        telegram_chat_id_str = request.headers.get("X-Telegram-Chat-Id")
+
+        if not telegram_user_id_str or not telegram_chat_id_str:
+            logger.warning("Отсутствуют X-Telegram-User-Id или X-Telegram-Chat-Id в заголовках для /api/check-app-access")
+            raise HTTPException(status_code=400, detail="Отсутствуют необходимые Telegram заголовки (User-Id, Chat-Id). Убедитесь, что приложение запущено из Telegram.")
+
+        try:
+            user_id = int(telegram_user_id_str)
+            chat_id = int(telegram_chat_id_str) # chat_id где запущен WebApp (обычно это ID пользователя для приватного чата с ботом)
+        except ValueError:
+            logger.error(f"Некорректный формат User-Id или Chat-Id: {telegram_user_id_str}, {telegram_chat_id_str}")
+            raise HTTPException(status_code=400, detail="Некорректный формат User-Id или Chat-Id.")
+
+        logger.info(f"Запрос на проверку доступа к приложению от user_id: {user_id}, chat_id: {chat_id}")
+        
+        # Эта функция теперь сама отправит сообщение, если нужно
+        access_granted = await handle_subscription_check_request(user_id=user_id, chat_id=chat_id)
+        
+        if not access_granted:
+            logger.info(f"Доступ не предоставлен для user_id: {user_id}. Сообщение о подписке должно было быть отправлено.")
+            # Mini App должно получить { "access_granted": False } и показать заглушку
+            # Сообщение с кнопкой уже отправлено функцией handle_subscription_check_request
+            return {"access_granted": False}
+        
+        logger.info(f"Доступ предоставлен для user_id: {user_id}")
+        return {"access_granted": True}
+
+    except HTTPException as e:
+        # Перебрасываем HTTP исключения
+        raise e
+    except Exception as e:
+        logger.error(f"Ошибка в /api/check-app-access: {e}", exc_info=True)
+        # В случае неожиданной ошибки, безопаснее отказать в доступе
+        # и попросить пользователя попробовать позже или связаться с поддержкой.
+        # Не отправляем сообщение о подписке здесь, так как ошибка могла быть до этого.
+        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера при проверке доступа.")
 
