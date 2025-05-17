@@ -1,4 +1,3 @@
-import os
 from fastapi import Request, HTTPException
 from typing import List, Dict, Any, Optional
 from backend.telegram_utils import get_telegram_posts_via_http, get_telegram_posts_via_telethon, get_sample_posts
@@ -120,9 +119,9 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
             # Пробуем сначала использовать OpenRouter API
             try:
                 logger.info(f"Анализируем посты канала @{username} с использованием OpenRouter API")
-                analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
-                themes = analysis_result.get("themes", [])
-                styles = analysis_result.get("styles", [])
+        analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
+        themes = analysis_result.get("themes", [])
+        styles = analysis_result.get("styles", [])
                 
                 if not themes and not styles:
                     # Если не получены результаты, пробуем запасной API
@@ -136,34 +135,34 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                 if OPENAI_API_KEY:
                     used_backup_api = True
                     try:
-                        logger.info(f"Анализируем посты канала @{username} с использованием OpenAI API")
+                        logger.info(f"Пробуем анализировать посты канала @{username} с использованием запасного OpenAI API")
                         
-                        # Пробуем использовать OpenAI API как запасной вариант
+                        # Импортируем локально, чтобы избежать циклических импортов
                         from openai import AsyncOpenAI
                         
                         openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
                         
-                        # Пробуем использовать OpenAI API как запасной вариант
-                        sample_texts = [text[:2000] for text in texts[:10]]  # Пробуем использовать OpenAI API как запасной вариант
+                        # Подготавливаем короткую выборку текстов для GPT
+                        sample_texts = [text[:2000] for text in texts[:10]]  # Ограничиваем размер и количество текстов
                         combined_texts = "\n\n---\n\n".join(sample_texts)
                         
-                        prompt = f"""Анализируем посты канала @{username} и выделяем темы и стили:
-1. Опишите основные темы и стили, которые вы видите в текстах (5-7 слов)
-2. Опишите, как вы это чувствуете (5-7 слов)
+                        prompt = f"""Проанализируй следующие посты из Telegram-канала и определи:
+1. Основные темы канала (5-7 тем)
+2. Стили/форматы постов (5-7 стилей)
 
-Ответ в формате JSON:
+Выдай ответ в JSON-формате:
 {{
-  "themes": ["Тема1", "Тема2", ...],
-  "styles": ["Стиль1", "Стиль2", ...]
+  "themes": ["тема1", "тема2", ...],
+  "styles": ["стиль1", "стиль2", ...]
 }}
 
-Тексты для анализа:
+Тексты постов:
 {combined_texts}"""
                         
                         response = await openai_client.chat.completions.create(
                             model="gpt-3.5-turbo",
                             messages=[
-                                {"role": "system", "content": "Ты - анальщик крутости и красоты. Ты помогаешь людям выделять основные темы и стили в текстах."},
+                                {"role": "system", "content": "Ты - аналитик контента для Telegram-каналов."},
                                 {"role": "user", "content": prompt}
                             ],
                             temperature=0.7,
@@ -172,7 +171,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                         
                         analysis_text = response.choices[0].message.content.strip()
                         
-                        # Пробуем использовать OpenAI API как запасной вариант
+                        # Извлекаем JSON из ответа
                         import json
                         import re
                         
@@ -184,39 +183,110 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                             backup_analysis = json.loads(analysis_text)
                             themes = backup_analysis.get("themes", [])
                             styles = backup_analysis.get("styles", [])
-                            logger.info(f"Успешно получено {len(themes)} тем и {len(styles)} стилей через OpenAI API")
+                            logger.info(f"Успешно получены результаты анализа через запасной OpenAI API: темы:{len(themes)}, стили:{len(styles)}")
                             
                             if error_message:
-                                error_message += " Использование запасного API OpenAI API привело к получению результатов анализа."
+                                error_message += " Использован запасной API для анализа."
                             else:
-                                error_message = "Использование запасного API OpenAI API привело к получению результатов анализа."
+                                error_message = "Использован запасной API для анализа."
                                 
                         except json.JSONDecodeError as json_err:
-                            logger.error(f"Ошибка при обработке ответа OpenAI: {json_err}, ответ: {analysis_text}")
+                            logger.error(f"Не удалось распарсить JSON из ответа OpenAI: {json_err}, ответ: {analysis_text}")
                             themes = []
                             styles = []
-                            error_message = "Ошибка при обработке ответа OpenAI. Пожалуйста, попробуйте позже или обратитесь к администратору."
+                            error_message = "Ошибка при анализе контента (ошибка парсинга JSON)."
                             
                     except Exception as openai_err:
-                        logger.error(f"Ошибка при использовании OpenAI API: {openai_err}")
+                        logger.error(f"Ошибка при использовании запасного OpenAI API: {openai_err}")
                         themes = []
                         styles = []
-                        error_message = "Ошибка при использовании OpenAI API. Пожалуйста, попробуйте позже или обратитесь к администратору."
+                        error_message = "Ошибка при анализе контента через оба API."
                 else:
-                    # Если не получены результаты, пробуем запасной API
-                    logger.error("Не получены результаты анализа (OPENROUTER_API_KEY и OPENAI_API_KEY)")
-                    themes = ["Темы не определены", "Стили не определены"]
-                    styles = ["Стиль не определен", "Тема не определена"]
-                    error_message = "Не получены результаты анализа. Пожалуйста, попробуйте позже или обратитесь к администратору."
+                    # Нет запасного API
+                    logger.error("Запасной API (OPENAI_API_KEY) не настроен, невозможно продолжить анализ")
+                    themes = []
+                    styles = []
+                    error_message = "Ошибка при анализе контента (запасной API не настроен)."
         
         elif OPENAI_API_KEY:
-            # Если не получены результаты, пробуем запасной API
-            logger.error("Не получены результаты анализа (OPENROUTER_API_KEY и OPENAI_API_KEY)")
-            themes = ["Темы не определены", "Стили не определены"]
-            styles = ["Стиль не определен", "Тема не определена"]
-            error_message = "Не получены результаты анализа. Пожалуйста, попробуйте позже или обратитесь к администратору."
+            # Если нет OPENROUTER_API_KEY, но есть OPENAI_API_KEY, используем его напрямую
+            used_backup_api = True
+            try:
+                logger.info(f"OPENROUTER_API_KEY отсутствует, используем OpenAI API напрямую для анализа канала @{username}")
+                
+                # Импортируем локально, чтобы избежать циклических импортов
+                from openai import AsyncOpenAI
+                
+                openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+                
+                # Подготавливаем короткую выборку текстов для GPT
+                sample_texts = [text[:2000] for text in texts[:10]]  # Ограничиваем размер и количество текстов
+                combined_texts = "\n\n---\n\n".join(sample_texts)
+                
+                prompt = f"""Проанализируй следующие посты из Telegram-канала и определи:
+1. Основные темы канала (5-7 тем)
+2. Стили/форматы постов (5-7 стилей)
+
+Выдай ответ в JSON-формате:
+{{
+  "themes": ["тема1", "тема2", ...],
+  "styles": ["стиль1", "стиль2", ...]
+}}
+
+Тексты постов:
+{combined_texts}"""
+                
+                response = await openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "Ты - аналитик контента для Telegram-каналов."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=500
+                )
+                
+                analysis_text = response.choices[0].message.content.strip()
+                
+                # Извлекаем JSON из ответа
+                import json
+                import re
+                
+                json_match = re.search(r'(\{.*\})', analysis_text, re.DOTALL)
+                if json_match:
+                    analysis_text = json_match.group(1)
+                
+                try:
+                    backup_analysis = json.loads(analysis_text)
+                    themes = backup_analysis.get("themes", [])
+                    styles = backup_analysis.get("styles", [])
+                    logger.info(f"Успешно получены результаты анализа через OpenAI API: темы:{len(themes)}, стили:{len(styles)}")
+                    
+                    if error_message:
+                        error_message += " Использован запасной API для анализа."
+                    else:
+                        error_message = "Использован запасной API для анализа."
+                        
+                except json.JSONDecodeError as json_err:
+                    logger.error(f"Не удалось распарсить JSON из ответа OpenAI: {json_err}, ответ: {analysis_text}")
+                    themes = []
+                    styles = []
+                    error_message = "Ошибка при анализе контента (ошибка парсинга JSON)."
+                    
+            except Exception as openai_err:
+                logger.error(f"Ошибка при использовании OpenAI API: {openai_err}")
+                themes = []
+                styles = []
+                error_message = "Ошибка при анализе контента через API."
+                
+        else:
+            # Нет ни одного API ключа
+            logger.error("Отсутствуют API ключи для анализа (OPENROUTER_API_KEY и OPENAI_API_KEY)")
+            themes = ["Технологии", "Маркетинг", "Бизнес", "Аналитика", "Новости"]
+            styles = ["Обзор", "Лайфхак", "Анонс", "Интервью", "Туториал"]
+            error_message = "API для анализа контента недоступны. Использованы темы и стили по умолчанию."
         
-        # 5. Считаем статистику
+        # 5. Сохраняем результат анализа в БД
         try:
             analysis_data = {
                 "user_id": int(telegram_user_id),
@@ -225,9 +295,9 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                 "styles": styles,
                 "analyzed_posts_count": len(posts),
                 "sample_posts": [p.get("text", "") for p in posts[:10]],
-                "best_posting_time": "18:00-20:00",  # По умолчанию
+                "best_posting_time": "18:00-20:00",  # Можно доработать
                 "is_sample_data": sample_data_used,
-                "used_backup_api": used_backup_api,  # "Использование запасного API"
+                "used_backup_api": used_backup_api,  # Добавляем информацию об использовании запасного API
                 "updated_at": datetime.now().isoformat()
             }
             analysis_check = supabase.table("channel_analysis").select("id").eq("user_id", telegram_user_id).eq("channel_name", username).execute()
@@ -235,7 +305,7 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                 supabase.table("channel_analysis").update(analysis_data).eq("user_id", telegram_user_id).eq("channel_name", username).execute()
             else:
                 supabase.table("channel_analysis").insert(analysis_data).execute()
-            # --- Обновляем все каналы пользователя ---
+            # --- Обновляем allChannels в user_settings ---
             user_settings_result = supabase.table("user_settings").select("allChannels").eq("user_id", telegram_user_id).maybe_single().execute()
             all_channels = []
             if hasattr(user_settings_result, 'data') and user_settings_result.data and user_settings_result.data.get("allChannels"):
@@ -244,13 +314,13 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                 all_channels.append(username)
                 supabase.table("user_settings").update({"allChannels": all_channels, "updated_at": datetime.now().isoformat()}).eq("user_id", telegram_user_id).execute()
         except Exception as db_error:
-            logger.error(f"Ошибка при обновлении статистики: {db_error}")
-        # 6. Обновляем счетчик анализа
+            logger.error(f"Ошибка при сохранении результатов анализа в БД: {db_error}")
+        # 6. Увеличиваем счетчик использования
         try:
             await subscription_service.increment_analysis_usage(int(telegram_user_id))
         except Exception as counter_error:
-            logger.error(f"Ошибка при обновлении счетчика анализа: {counter_error}")
-        # 7. Возвращаем результаты анализа
+            logger.error(f"Ошибка при увеличении счетчика анализа: {counter_error}")
+        # 7. Возвращаем результат
         return AnalyzeResponse(
             themes=themes,
             styles=styles,
@@ -260,5 +330,5 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
             message=error_message
         )
     except Exception as e:
-        logger.error(f"Ошибка при анализе канала {telegram_user_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка при анализе канала: {str(e)}") 
+        logger.error(f"Ошибка при анализе канала для пользователя {telegram_user_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера: {str(e)}") 
