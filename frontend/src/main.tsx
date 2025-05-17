@@ -5,12 +5,13 @@ import App from './App.tsx'
 import WebApp from '@twa-dev/sdk'
 import axios from 'axios'
 
+// Импортируем модуль проверки подписки на канал
+import './channelSubscriptionCheck'
+
 // Добавляем определение типов для Telegram
 declare global {
   interface Window {
-    Telegram?: {
-      WebApp?: any;
-    };
+    Telegram?: any;
   }
 }
 

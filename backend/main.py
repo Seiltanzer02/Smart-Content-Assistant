@@ -12,30 +12,39 @@ from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field
 import re
 import random
+import uuid
+import requests
 
 # FastAPI компоненты
 from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends, Form
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 
+# Для работы с БД
+from supabase import create_client, Client
+import asyncpg
+from urllib.parse import urlparse
+from postgrest.exceptions import APIError
+
 # Telethon
 from telethon import TelegramClient
 from telethon.errors import ChannelInvalidError, ChannelPrivateError, UsernameNotOccupiedError
 from dotenv import load_dotenv
+
+# Импорт сервиса для проверки подписки на канал
+from services.telegram_channel_service import check_channel_subscription, handle_subscription_check_request
 
 # Supabase
 from supabase import create_client, Client, AClient
 from postgrest.exceptions import APIError
 from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError, FloodWaitError, PhoneNumberInvalidError, AuthKeyError, ApiIdInvalidError
-import uuid
 import mimetypes
 from telethon.errors import RPCError
 import getpass
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 import time
-import requests
 from bs4 import BeautifulSoup
 import telethon
 import aiohttp
@@ -485,6 +494,64 @@ async def telegram_webhook(request: Request):
     try:
         data = await request.json()
         logger.info(f"Получен вебхук от Telegram: {data}")
+
+        # Обработка callback_query для проверки подписки на канал
+        if "callback_query" in data:
+            callback_query = data["callback_query"]
+            telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+            
+            # Обработка колбэка для проверки подписки на канал
+            if callback_query.get("data") == "check_subscription_callback":
+                user_id = callback_query.get("from", {}).get("id")
+                message = callback_query.get("message", {})
+                chat_id = message.get("chat", {}).get("id")
+                
+                if user_id and chat_id:
+                    logger.info(f"Получен запрос на проверку подписки от пользователя {user_id} в чате {chat_id}")
+                    
+                    # Проверяем подписку
+                    is_subscribed = await check_channel_subscription(user_id)
+                    
+                    # Отвечаем на callback_query, чтобы убрать "часики" на кнопке
+                    if telegram_bot_token:
+                        answer_callback_url = f"https://api.telegram.org/bot{telegram_bot_token}/answerCallbackQuery"
+                        async with httpx.AsyncClient() as client:
+                            try:
+                                await client.post(answer_callback_url, json={"callback_query_id": callback_query["id"]})
+                            except Exception as e_ans:
+                                logger.error(f"Ошибка при отправке answerCallbackQuery: {e_ans}")
+                    
+                    if is_subscribed:
+                        # Отправляем сообщение об успешной подписке
+                        message_text = "✅ Подписка на канал подтверждена! Теперь вы можете пользоваться приложением в полном объеме."
+                        await send_telegram_message(chat_id, message_text)
+                        return {"ok": True, "subscription_checked": True, "is_subscribed": True}
+                    else:
+                        # Отправляем сообщение о необходимости подписаться
+                        target_channel_username = os.getenv("TARGET_CHANNEL_USERNAME")
+                        channel_text = f"канал @{target_channel_username}" if target_channel_username else "наш канал"
+                        message_text = f"❌ Вы все еще не подписаны на {channel_text}. Пожалуйста, подпишитесь для доступа к приложению."
+                        
+                        # Создаем кнопки: одну для перехода в канал, другую для повторной проверки
+                        inline_keyboard = [[{"text": "✅ Проверить подписку снова", "callback_data": "check_subscription_callback"}]]
+                        
+                        # Добавляем кнопку перехода в канал, если есть username
+                        if target_channel_username:
+                            button_url = f"https://t.me/{target_channel_username.replace('@', '')}" if not target_channel_username.startswith("https://") else target_channel_username
+                            inline_keyboard.append([{"text": "Перейти к каналу", "url": button_url}])
+                        
+                        reply_markup = {"inline_keyboard": inline_keyboard}
+                        await send_telegram_message(chat_id, message_text, reply_markup)
+                        return {"ok": True, "subscription_checked": True, "is_subscribed": False}
+            
+            # Отвечаем на callback_query для других типов callback
+            if telegram_bot_token:
+                answer_callback_url = f"https://api.telegram.org/bot{telegram_bot_token}/answerCallbackQuery"
+                async with httpx.AsyncClient() as client:
+                    try:
+                        await client.post(answer_callback_url, json={"callback_query_id": callback_query["id"]})
+                    except Exception as e_ans:
+                        logger.error(f"Ошибка при отправке answerCallbackQuery: {e_ans}")
 
         # 1. Обработка pre_checkout_query
         pre_checkout_query = data.get("pre_checkout_query")
@@ -4159,6 +4226,68 @@ async def update_user_settings(
 
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_API_URL = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}' if TELEGRAM_BOT_TOKEN else None
+TARGET_CHANNEL_USERNAME = os.getenv("TARGET_CHANNEL_USERNAME") # Имя канала для проверки подписки
+
+# Примерная структура данных, которые может отправлять Telegram Web App
+# Важно: Реальная структура может отличаться, нужно смотреть документацию Telegram
+class WebAppInitData(BaseModel):
+    user_id: int
+    chat_id: int
+    # Могут быть и другие поля, например, auth_date, hash и т.д.
+
+# Эндпоинт для проверки доступа к приложению
+@app.post("/api/check-app-access")
+async def check_app_access(request: Request):
+    """
+    Проверяет, подписан ли пользователь на канал.
+    Вызывается из Telegram Mini App при его инициализации.
+    Ожидает X-Telegram-User-Id и X-Telegram-Chat-Id в заголовках.
+    """
+    try:
+        telegram_user_id_str = request.headers.get("X-Telegram-User-Id")
+        telegram_chat_id_str = request.headers.get("X-Telegram-Chat-Id")
+        
+        # Также поддерживаем получение данных из тела запроса для мобильных клиентов
+        if not telegram_user_id_str or not telegram_chat_id_str:
+            try:
+                data = await request.json()
+                if not telegram_user_id_str and "user_id" in data:
+                    telegram_user_id_str = str(data["user_id"])
+                if not telegram_chat_id_str and "chat_id" in data:
+                    telegram_chat_id_str = str(data["chat_id"])
+            except Exception:
+                # Если не удалось прочитать JSON, просто продолжаем с имеющимися данными
+                pass
+
+        if not telegram_user_id_str or not telegram_chat_id_str:
+            logger.warning("Отсутствуют X-Telegram-User-Id или X-Telegram-Chat-Id в заголовках для /api/check-app-access")
+            return {"access_granted": False, "error": "missing_telegram_ids"}
+
+        try:
+            user_id = int(telegram_user_id_str)
+            chat_id = int(telegram_chat_id_str) # chat_id где запущен WebApp (обычно это ID пользователя для приватного чата с ботом)
+        except ValueError:
+            logger.error(f"Некорректный формат User-Id или Chat-Id: {telegram_user_id_str}, {telegram_chat_id_str}")
+            return {"access_granted": False, "error": "invalid_telegram_ids_format"}
+
+        logger.info(f"Запрос на проверку доступа к приложению от user_id: {user_id}, chat_id: {chat_id}")
+        
+        # Используем функцию из сервиса telegram_channel_service для проверки подписки
+        is_subscribed = await check_channel_subscription(user_id)
+        
+        if not is_subscribed:
+            logger.info(f"Пользователь {user_id} не подписан на канал. Отправляем уведомление.")
+            # Отправляем сообщение с инструкциями и кнопками
+            await handle_subscription_check_request(user_id, chat_id)
+            return {"access_granted": False, "reason": "not_subscribed"}
+        
+        logger.info(f"Пользователь {user_id} подписан на канал. Доступ разрешен.")
+        return {"access_granted": True}
+
+    except Exception as e:
+        logger.error(f"Ошибка в /api/check-app-access: {e}", exc_info=True)
+        # В случае неожиданной ошибки, безопаснее отказать в доступе
+        return {"access_granted": False, "error": "server_error"}
 
 @app.post('/api/send-image-to-chat')
 async def send_image_to_chat(request: Request):
