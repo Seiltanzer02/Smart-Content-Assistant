@@ -119,15 +119,14 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
             # Пробуем сначала использовать OpenRouter API
             try:
                 logger.info(f"Анализируем посты канала @{username} с использованием OpenRouter API")
-        analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
-        themes = analysis_result.get("themes", [])
-        styles = analysis_result.get("styles", [])
+                analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
+                themes = analysis_result.get("themes", [])
+                styles = analysis_result.get("styles", [])
                 
                 if not themes and not styles:
                     # Если не получены результаты, пробуем запасной API
                     logger.warning(f"OpenRouter API не вернул результатов анализа для канала @{username}, пробуем использовать запасной API")
                     raise Exception("OpenRouter API не вернул результатов анализа")
-                    
             except Exception as api_error:
                 logger.error(f"Ошибка при анализе через OpenRouter API: {api_error}")
                 
