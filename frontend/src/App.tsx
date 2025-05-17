@@ -1758,32 +1758,27 @@ function App() {
     return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
   }
 
-  // Блокировка доступа, если пользователь не подписан
-  if (subscriptionModalOpen) {
-    console.log('Рендер: блокировка доступа - требуется подписка на канал');
-    return (
-      <div className="app-container">
-        <ChannelSubscriptionModal open={true} onCheck={handleCheckSubscription} channelUrl={channelUrl} />
-        <Toaster position="top-center" reverseOrder={false} />
-                                </div>
-    );
-  }
-
   console.log('Рендер: основной UI приложения, isAuthenticated:', isAuthenticated, 'userId:', userId, 'subscriptionModalOpen:', subscriptionModalOpen);
 
   // Основной интерфейс
   return (
     <div className="app-container">
-      <header className="app-header" style={{ minHeight: '36px', padding: '6px 0', fontSize: '1.1em' }}>
-        <h1 style={{ margin: 0, fontSize: '1.2em', fontWeight: 600 }}>Smart Content Assistant</h1>
-      </header>
-      {/* ... (остальной JSX вашего приложения: навигация, main, footer) ... */}
-      <main className="app-main">
-        {/* ... ваш контент ... */}
-      </main>
+      <ChannelSubscriptionModal open={subscriptionModalOpen} onCheck={handleCheckSubscription} channelUrl={channelUrl} />
+      {/* Основной контент приложения рендерится только если модальное окно не открыто или если проверка прошла */}
+      {!subscriptionModalOpen && (
+        <>
+          <header className="app-header" style={{ minHeight: '36px', padding: '6px 0', fontSize: '1.1em' }}>
+            <h1 style={{ margin: 0, fontSize: '1.2em', fontWeight: 600 }}>Smart Content Assistant</h1>
+          </header>
+          {/* ... (остальной JSX вашего приложения: навигация, main, footer) ... */}
+          <main className="app-main">
+            {/* ... ваш контент ... */}
+          </main>
       <footer className="app-footer">
         <p>© 2024 Smart Content Assistant</p>
       </footer>
+        </>
+      )}
       <Toaster position="top-center" reverseOrder={false} />
     </div>
   );
