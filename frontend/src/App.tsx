@@ -1765,7 +1765,7 @@ function App() {
       <div className="app-container">
         <ChannelSubscriptionModal open={true} onCheck={handleCheckSubscription} channelUrl={channelUrl} />
         <Toaster position="top-center" reverseOrder={false} />
-      </div>
+                                </div>
     );
   }
 
