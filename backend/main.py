@@ -32,7 +32,8 @@ from telethon.errors import ChannelInvalidError, ChannelPrivateError, UsernameNo
 from dotenv import load_dotenv
 
 # Импорт сервиса для проверки подписки на канал
-from services.telegram_channel_service import check_channel_subscription, handle_subscription_check_request
+# Исправляем относительный импорт функций из telegram_channel_service
+from backend.services.telegram_channel_service import check_channel_subscription, handle_subscription_check_request
 
 # Supabase
 from supabase import create_client, Client, AClient
