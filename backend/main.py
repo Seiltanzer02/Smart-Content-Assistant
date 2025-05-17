@@ -4242,3 +4242,27 @@ try:
 except Exception as e:
     print(f"=== ОШИБКА при подключении роутера проверки подписки: {e} ===")
 
+# --- Эндпоинт для проверки подписки на канал по аналогии с премиум ---
+@app.get("/bot-style-channel-check/{user_id}", status_code=200)
+async def bot_style_channel_check(user_id: int, request: Request):
+    from backend.services.telegram_subscription_check import check_user_channel_subscription, send_subscription_prompt
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"[BOT-STYLE-CHANNEL-CHECK] Проверка подписки для пользователя: {user_id}")
+    try:
+        is_subscribed = await check_user_channel_subscription(int(user_id))
+        logger.info(f"[BOT-STYLE-CHANNEL-CHECK] Результат проверки для {user_id}: {is_subscribed}")
+    except Exception as e:
+        logger.error(f"[BOT-STYLE-CHANNEL-CHECK] Ошибка: {e}")
+        return {"subscribed": False, "message": f"Ошибка проверки подписки: {str(e)}"}
+    if is_subscribed:
+        return {"subscribed": True, "message": "Вы подписаны на канал!"}
+    else:
+        await send_subscription_prompt(int(user_id))
+        return {
+            "subscribed": False,
+            "message": "Чтобы пользоваться приложением, подпишитесь на наш канал и нажмите 'Проверить подписку'!"
+        }
+
+# ... остальные роуты ...
+
