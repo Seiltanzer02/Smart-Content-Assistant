@@ -4199,20 +4199,18 @@ async def check_channel_subscription(request: Request):
     data = await request.json()
     user_id = data.get("user_id")
     if not user_id:
-        raise HTTPException(status_code=400, detail="user_id обязателен")
+        return {"subscribed": False, "message": "Не передан user_id"}
     try:
         is_subscribed = await check_user_channel_subscription(int(user_id))
-        if is_subscribed:
-            return {"subscribed": True, "message": "Вы подписаны на канал. Можете пользоваться приложением."}
-        else:
-            await send_subscription_prompt(int(user_id))
-            return {
-                "subscribed": False,
-                "message": "Вы не подписаны на канал. Мы отправили вам ссылку для подписки в Telegram. После подписки нажмите 'Проверить подписку' ещё раз."
-            }
-    except HTTPException as e:
-        raise e
     except Exception as e:
-        logger.error(f"Ошибка при проверке подписки: {e}")
-        raise HTTPException(status_code=500, detail="Ошибка при проверке подписки на канал")
+        return {"subscribed": False, "message": f"Ошибка проверки подписки: {str(e)}"}
+    if is_subscribed:
+        return {"subscribed": True, "message": "Вы подписаны на канал!"}
+    else:
+        # Отправляем пользователю сообщение с кнопкой на канал
+        await send_subscription_prompt(int(user_id))
+        return {
+            "subscribed": False,
+            "message": "Чтобы пользоваться приложением, подпишитесь на наш канал и нажмите 'Проверить подписку'!"
+        }
 
