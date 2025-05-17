@@ -2314,7 +2314,9 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
     can_generate_post = await subscription_service.can_generate_post(int(telegram_user_id))
     logger.info(f"Проверка лимита генерации постов для пользователя {telegram_user_id}: {can_generate_post}")
     if not can_generate_post:
-        return JSONResponse(status_code=403, content={"error": "Достигнут лимит генерации постов для бесплатной подписки. Оформите подписку для снятия ограничений."})
+        usage = await subscription_service.get_user_usage(int(telegram_user_id))
+        reset_at = usage.get("reset_at")
+        return JSONResponse(status_code=403, content={"error": f"Достигнут лимит в 2 генерации постов для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Лимиты обновляются каждые 3 дня. Оформите подписку для снятия ограничений."})
     await subscription_service.increment_post_usage(int(telegram_user_id))
         # Получение telegram_user_id из заголовков
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
@@ -2443,11 +2445,11 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
                         # Обновляем существующую запись
                         result = supabase.table("channel_analysis").update(analysis_data).eq("user_id", telegram_user_id).eq("channel_name", username).execute()
                         logger.info(f"Обновлен результат анализа для канала @{username} пользователя {telegram_user_id}")
-            else:
+                    else:
                         # Создаем новую запись
                         result = supabase.table("channel_analysis").insert(analysis_data).execute()
                         logger.info(f"Сохранен новый результат анализа для канала @{username} пользователя {telegram_user_id}")
-        except Exception as api_error:
+                except Exception as api_error:
                     logger.warning(f"Ошибка при сохранении через API: {api_error}. Пробуем прямой SQL запрос.")
                     
                     # Получаем URL и ключ Supabase
@@ -2501,7 +2503,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
         sample_texts = [post.get("text", "") for post in posts[:5] if post.get("text")]
         sample_posts = sample_texts
         
-            except Exception as e:
+    except Exception as e:
         logger.error(f"Ошибка при анализе контента: {e}")
         # Если произошла ошибка при анализе, возвращаем ошибку 500
         raise HTTPException(status_code=500, detail=f"Ошибка при анализе контента: {str(e)}")

@@ -418,53 +418,10 @@ const normalizeChannelName = (name: string) => name.replace(/^@/, '').toLowerCas
 
 // Код, который вызывал ошибки Cannot find name, перемещен внутрь функции App
 
-// --- ДОБАВЛЯЮ: Модалка для подписки ---
-const ChannelSubscriptionModal = ({ open, onCheck, channelUrl }: { open: boolean, onCheck: () => void, channelUrl: string }) => {
-  console.log('Рендер ChannelSubscriptionModal, состояние open:', open);
-  if (!open) return null;
-  return (
-    <div style={{
-      position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.85)', zIndex: 2000,
-      display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: '#fff',
-    }}>
-      <div style={{ background: '#222', padding: 32, borderRadius: 16, maxWidth: 400, textAlign: 'center', boxShadow: '0 2px 16px #0008' }}>
-        <h2 style={{ marginBottom: 16 }}>Подпишитесь на наш канал</h2>
-        <p style={{ marginBottom: 24 }}>
-          Чтобы пользоваться приложением, подпишитесь на наш Telegram-канал.<br />
-          <a href={channelUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#ffd600', fontWeight: 600, fontSize: 18, textDecoration: 'underline' }}>
-            Перейти в канал
-          </a>
-        </p>
-        <button className="action-button" onClick={onCheck} style={{ fontSize: 18, padding: '10px 28px', marginBottom: 8 }}>
-          Проверить подписку
-        </button>
-        <p style={{ fontSize: 13, color: '#bbb', marginTop: 12 }}>После подписки вернитесь и нажмите кнопку</p>
-      </div>
-    </div>
-  );
-};
-
-// --- ДОБАВЛЯЮ: Базовая функция для очистки текста поста (замена для cleanPostText) ---
-const cleanPostText = (text: string): string => {
-  if (!text) return '';
-  // Удаляем специальные символы и лишние пробелы
-  return text.replace(/\s+/g, ' ').trim();
-};
-
-// Глобальное объявление для process.env (CRA)
-declare var process: {
-  env: {
-    [key: string]: string | undefined;
-    REACT_APP_TARGET_CHANNEL_USERNAME?: string;
-  };
-};
-
 function App() {
-  console.log('Рендер приложения App');
-  
-  // === ВСЕ useState и другие хуки объявляются ЗДЕСЬ, ВНУТРИ App ===
+  // --- ВСЕ useState ТОЛЬКО ЗДЕСЬ ---
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [loading, setLoading] = useState(true); // Предполагается, что loading есть
+  const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<ViewType>('analyze');
   const [channelName, setChannelName] = useState<string>('');
@@ -504,9 +461,6 @@ function App() {
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   // Добавляю состояние для хранения времени сброса лимита
   const [ideasLimitResetTime, setIdeasLimitResetTime] = useState<string | null>(null);
-  const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
-  const [checkingSubscription, setCheckingSubscription] = useState(false);
-  const [channelUrl, setChannelUrl] = useState('');
   
   // === ДОБАВЛЯЮ: Массивы забавных сообщений для прогресс-баров ===
   const postDetailsMessages = [
@@ -1179,7 +1133,6 @@ function App() {
 
   // Обработчик успешной авторизации
   const handleAuthSuccess = (authUserId: string) => {
-    console.log('handleAuthSuccess вызван с userId:', authUserId);
     if (!authUserId || authUserId === '123456789') {
       console.error('Некорректный ID пользователя:', authUserId);
       setError('Ошибка авторизации: некорректный ID пользователя');
@@ -1187,7 +1140,7 @@ function App() {
       setUserId(null);
       return;
     }
-    console.log('Авторизация успешна, устанавливаем userId:', authUserId);
+    console.log('Авторизация успешна:', authUserId);
     setUserId(authUserId);
     // Устанавливаем глобальный заголовок для всех запросов axios
     axios.defaults.headers.common['X-Telegram-User-Id'] = authUserId;
@@ -1540,13 +1493,13 @@ function App() {
     if (isAnalyzing || isGeneratingPostDetails) {
       setProgress(0);
       interval = window.setInterval(() => {
-        setProgress(prev => (prev < 98 ? prev + Math.random() * 0.6 : prev)); // Уменьшаем скорость в 2.5 раза
+        setProgress(prev => (prev < 98 ? prev + Math.random() * 0.6 : prev)); // Было *1.5, стало *0.6 (в 2.5 раза медленнее)
       }, 100);
     } else if (isGeneratingIdeas) {
       setProgress(0);
       interval = window.setInterval(() => {
-        setProgress(prev => (prev < 98 ? prev + Math.random() * 1.25 : prev)); // Уменьшаем скорость в 2 раза
-      }, 150); // Настраиваем скорость
+        setProgress(prev => (prev < 98 ? prev + Math.random() * 1.25 : prev)); // Было *2.5, стало *1.25 (в 2 раза медленнее)
+      }, 150); // Можно подстроить скорость
     } else if (!isAnalyzing && !isGeneratingPostDetails && !isGeneratingIdeas) {
       setProgress(100);
       setTimeout(() => setProgress(0), 500);
@@ -1555,7 +1508,7 @@ function App() {
       if (interval) clearInterval(interval);
     };
   }, [isAnalyzing, isGeneratingPostDetails, isGeneratingIdeas]);
-
+  
   // === ДОБАВЛЯЮ: Эффект для смены сообщений в прогресс-баре генерации деталей поста ===
   useEffect(() => {
     let messageInterval: number | null = null;
@@ -1656,132 +1609,690 @@ function App() {
     };
   }, []);
 
-  // --- Функция для проверки подписки на канал ---
-  const handleCheckSubscription = async () => {
-    console.log('Вызов handleCheckSubscription, userId:', userId);
-    if (!userId) {
-      console.error('handleCheckSubscription: userId не определен!');
-      return;
-    }
-    setCheckingSubscription(true);
-    try {
-      console.log('Отправка запроса на /api/check-channel-subscription');
-      const resp = await axios.get('/api/check-channel-subscription', {
-        headers: { 'X-Telegram-User-Id': userId }
-      });
-      console.log('Ответ от /api/check-channel-subscription:', resp.data);
-      if (resp.data && resp.data.subscribed) {
-        setSubscriptionModalOpen(false);
-        toast.success('Подписка подтверждена!');
-      } else {
-        // Убеждаемся, что channelUrl установлен
-        if (!channelUrl) {
-          const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
-          console.log('Установка channelUrl для канала:', channelUsername);
-          setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
-        }
-        setSubscriptionModalOpen(true);
-        toast.error('Вы ещё не подписаны на канал!');
-      }
-    } catch (e) {
-      console.error('Ошибка при проверке подписки:', e);
-      if (!channelUrl) {
-        const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
-        console.log('Установка channelUrl при ошибке для канала:', channelUsername);
-        setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
-      }
-      setSubscriptionModalOpen(true);
-      toast.error('Ошибка проверки подписки');
-    } finally {
-      setCheckingSubscription(false);
-    }
-  };
-  
-  // --- Проверка подписки на канал при запуске ---
-  useEffect(() => {
-    console.log('useEffect для проверки подписки запущен, isAuthenticated:', isAuthenticated, 'userId:', userId);
-    
-    const checkSubscription = async () => {
-      console.log('Функция checkSubscription запущена');
-      if (!userId || !isAuthenticated) {
-        console.log('Выход из checkSubscription: !userId || !isAuthenticated');
-        return;
-      }
-      setCheckingSubscription(true);
-      try {
-        console.log('Отправка запроса на /api/check-channel-subscription внутри useEffect');
-        const resp = await axios.get('/api/check-channel-subscription', {
-          headers: { 'X-Telegram-User-Id': userId }
-        });
-        console.log('Ответ от /api/check-channel-subscription внутри useEffect:', resp.data);
-        if (resp.data && resp.data.subscribed) {
-          setSubscriptionModalOpen(false);
-        } else {
-          const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
-          console.log('Установка channelUrl внутри useEffect для канала:', channelUsername);
-          setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
-          setSubscriptionModalOpen(true);
-        }
-      } catch (e) {
-        console.error('Ошибка при первоначальной проверке подписки:', e);
-        const channelUsername = process.env.REACT_APP_TARGET_CHANNEL_USERNAME || 'smart_content_helper';
-        console.log('Установка channelUrl при ошибке внутри useEffect для канала:', channelUsername);
-        setChannelUrl(`https://t.me/${channelUsername.replace(/^@/, '')}`);
-        setSubscriptionModalOpen(true);
-      } finally {
-        setCheckingSubscription(false);
-      }
-    };
-    
-    if (isAuthenticated && userId) {
-      console.log('Вызов checkSubscription, так как isAuthenticated && userId');
-      checkSubscription();
-    } else {
-      console.log('checkSubscription не вызван: !isAuthenticated || !userId');
-    }
-  }, [isAuthenticated, userId]);
-  
   // Компонент загрузки
   if (loading) {
-    console.log('Рендер: loading === true, показываем индикатор загрузки');
-                                  return (
+    return (
       <div className="loading-container">
         <div className="loading-spinner"></div>
         <p>Загрузка приложения...</p>
-                                      </div>
-                                  );
+    </div>
+  );
   }
 
   // Компонент авторизации
   if (!isAuthenticated) {
-    console.log('Рендер: !isAuthenticated === true, показываем форму авторизации');
     return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
   }
-
-  console.log('Рендер: основной UI приложения, isAuthenticated:', isAuthenticated, 'userId:', userId, 'subscriptionModalOpen:', subscriptionModalOpen);
 
   // Основной интерфейс
   return (
     <div className="app-container">
-      <ChannelSubscriptionModal open={subscriptionModalOpen} onCheck={handleCheckSubscription} channelUrl={channelUrl} />
-      {/* Основной контент приложения рендерится только если модальное окно не открыто или если проверка прошла */}
-      {!subscriptionModalOpen && (
+      <header className="app-header" style={{ minHeight: '36px', padding: '6px 0', fontSize: '1.1em' }}>
+        <h1 style={{ margin: 0, fontSize: '1.2em', fontWeight: 600 }}>Smart Content Assistant</h1>
+      </header>
+      
+      {/* Блок подписки */}
+      {showSubscription && (
         <>
-          <header className="app-header" style={{ minHeight: '36px', padding: '6px 0', fontSize: '1.1em' }}>
-            <h1 style={{ margin: 0, fontSize: '1.2em', fontWeight: 600 }}>Smart Content Assistant</h1>
-          </header>
-          {/* ... (остальной JSX вашего приложения: навигация, main, footer) ... */}
-          <main className="app-main">
-            {/* ... ваш контент ... */}
-          </main>
+          <SubscriptionWidget userId={userId} isActive={true}/> {/* Передаем isActive в старый виджет */} 
+        </>
+      )}
+
+      <main className="app-main">
+        {/* Сообщения об ошибках и успешном выполнении */}
+        {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
+        {success && <SuccessMessage message={success} onClose={() => setSuccess(null)} />}
+
+        {/* Навигация */}
+    <div className="navigation-buttons">
+      <button 
+        onClick={() => setShowSubscription(true)} 
+        className="action-button"
+      >
+        {/* SVG звезды */}
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight: '8px'}}>
+          <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+        </svg>
+        <span>Подписка</span>
+      </button>
+      <button 
+        onClick={() => setCurrentView('analyze')} 
+        className={`action-button ${currentView === 'analyze' ? 'active' : ''}`}
+      >
+        {/* SVG анализ */}
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginRight: '8px'}}>
+          <path d="M10 20H14V4H10V20ZM4 20H8V12H4V20ZM16 9V20H20V9H16Z" fill="currentColor"/>
+        </svg>
+        <span>Анализ</span>
+      </button>
+      <button 
+        onClick={() => { setCurrentView('suggestions'); if (suggestedIdeas.length === 0) fetchSavedIdeas(); }} 
+        className={`action-button ${currentView === 'suggestions' ? 'active' : ''}`}
+        disabled={!channelName}
+      >
+        {/* SVG идея */}
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginRight: '8px'}}>
+          <path d="M12 22C6.477 22 2 17.523 2 12C2 6.477 6.477 2 12 2C17.523 2 22 6.477 22 12C22 17.523 17.523 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 7H13V9H11V7ZM11 11H13V17H11V11Z" fill="currentColor"/>
+        </svg>
+        <span>Идеи</span>
+      </button>
+      <button 
+        onClick={() => { setCurrentView('calendar'); fetchSavedPosts(); }} 
+        className={`action-button ${currentView === 'calendar' ? 'active' : ''}`}
+      >
+        {/* SVG календарь */}
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginRight: '8px'}}>
+          <path d="M17 3H21C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H7V1H9V3H15V1H17V3ZM4 9V19H20V9H4ZM4 5V7H20V5H4ZM6 11H8V13H6V11ZM10 11H12V13H10V11ZM14 11H16V13H14V11Z" fill="currentColor"/>
+        </svg>
+        <span>Календарь</span>
+      </button>
+      <button 
+        onClick={() => { setCurrentView('posts'); fetchSavedPosts(); }} 
+        className={`action-button ${currentView === 'posts' ? 'active' : ''}`}
+      >
+        {/* SVG посты (добавляю иконку списка) */}
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginRight: '8px'}}>
+          <rect x="4" y="5" width="16" height="2" fill="currentColor"/>
+          <rect x="4" y="11" width="16" height="2" fill="currentColor"/>
+          <rect x="4" y="17" width="16" height="2" fill="currentColor"/>
+        </svg>
+        <span>Посты</span>
+      </button>
+    </div>
+
+        {/* Выбор канала */}
+        <div className="channel-selector">
+          <label>Каналы: </label>
+          <div className="custom-dropdown" style={{ position: 'relative', display: 'inline-block', minWidth: 220 }}>
+            <div className="selected" onClick={() => setDropdownOpen(v => !v)} style={{ border: '1px solid #ccc', borderRadius: 6, padding: '7px 12px', background: '#fff', cursor: 'pointer', minWidth: 180, color: '#222', fontWeight: 500 }}>
+              {channelName || 'Выберите канал'}
+              <span style={{ float: 'right', fontSize: 14, color: '#888' }}>{dropdownOpen ? '▲' : '▼'}</span>
+            </div>
+            {dropdownOpen && (
+              <ul className="dropdown-list" style={{ position: 'absolute', zIndex: 10, background: '#fff', border: '1px solid #ccc', borderRadius: 6, margin: 0, padding: 0, listStyle: 'none', width: '100%' }}>
+                {allChannels.length === 0 && <li style={{ padding: '8px 12px', color: '#888' }}>Нет каналов</li>}
+                {allChannels.map(channel => (
+                  <li key={channel} className="dropdown-item" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #eee', cursor: 'pointer', color: '#222' }}>
+                    <span style={{ flex: 1, color: '#222' }} onClick={() => { setChannelName(channel); setDropdownOpen(false); }}>{channel}</span>
+                    <button
+                      className="remove-btn"
+                      onClick={e => { e.stopPropagation(); handleRemoveChannel(channel); }}
+                      style={{ marginLeft: 8, color: 'red', cursor: 'pointer', border: 'none', background: 'none', fontSize: 18 }}
+                      title="Удалить канал"
+                    >×</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        {/* Контент */}
+        <div className="view-container">
+          {/* Вид анализа */}
+          {currentView === 'analyze' && ( 
+            <div className="view analyze-view">
+      <h2>Анализ Telegram-канала</h2>
+      <div className="input-container">
+        <input
+          type="text"
+          className="channel-input"
+          value={channelInput}
+          onChange={e => setChannelInput(e.target.value.replace(/^@/, ''))}
+          placeholder="Введите username канала (без @)"
+                  disabled={isAnalyzing}
+                />
+                <button 
+                  onClick={() => analyzeChannel(channelInput)} 
+                  className="action-button"
+                  disabled={isAnalyzing || !channelInput || analyzeLimitExceeded}
+                >
+                  {isAnalyzing ? 'Анализ...' : 'Анализировать'}
+        </button>
+      </div>
+
+              {/* Добавляем индикатор загрузки сохраненного анализа */}
+              {loadingAnalysis && (
+                  <div className="loading-indicator small">
+                      <div className="loading-spinner small"></div>
+                      <p>Загрузка сохраненного анализа...</p>
+                  </div>
+              )}
+
+              {isAnalyzing && (
+                <div style={{ margin: '20px 0' }}>
+                  <ProgressBar progress={progress} />
+                  <p>Анализируем канал...</p>
+                </div>
+              )}
+              
+              {error && !isAnalyzing && !analysisResult && (
+                <div className="error-message" style={{ margin: '20px 0', padding: '15px', borderRadius: '8px' }}>
+                  <p style={{ marginBottom: '10px', fontWeight: 'bold' }}>Ошибка анализа:</p>
+                  <p>{error}</p>
+                </div>
+              )}
+
+      {analysisResult && (
+          <div className="results-container">
+              <h3>Результаты анализа:</h3>
+              {/* Показываем сообщение, если анализ был загружен из БД */}
+              {analysisLoadedFromDB && !isAnalyzing && (
+                <p className="info-message small"><em>Результаты загружены из сохраненных данных.</em></p>
+              )}
+              <p><strong>Темы:</strong> {analysisResult.themes.join(', ')}</p>
+              <p><strong>Стили:</strong> {analysisResult.styles.join(', ')}</p>
+                  <p><strong>Лучшее время для постинга:</strong> {analysisResult.best_posting_time}</p>
+                  <p><strong>Проанализировано постов:</strong> {analysisResult.analyzed_posts_count}</p>
+                  
+              <button 
+                    onClick={generateIdeas} 
+                    className="action-button generate-button"
+                    disabled={isGeneratingIdeas || !analysisResult || ideasLimitExceeded} 
+                    style={{marginTop: '20px'}}
+                  >
+                    {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать новые идеи'}
+              </button>
+              {isGeneratingIdeas && (
+                <div style={{ margin: '20px 0' }}>
+                  <ProgressBar progress={progress} />
+                  <p className="loading-message" style={{ textAlign: 'center', fontStyle: 'italic', transition: 'opacity 0.5s ease-in-out' }}>
+                    {currentIdeasMessage}
+                  </p>
+                </div>
+              )}
+              {ideasLimitExceeded && (
+                <div className="error-message">
+                  <p>Достигнут лимит генерации идей для бесплатной подписки.</p>
+                  {ideasLimitResetTime && (
+                    <p>Следующая попытка будет доступна после: <strong>{new Date(ideasLimitResetTime).toLocaleString()}</strong></p>
+                  )}
+                  <p style={{ marginTop: '10px' }}>
+                    <button 
+                      onClick={() => setShowSubscription(true)} 
+                      className="action-button subscription-button"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight: '8px', verticalAlign: 'middle'}}>
+                        <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+                      </svg>
+                      <span style={{verticalAlign: 'middle'}}>Оформить подписку</span>
+                    </button>
+                  </p>
+                </div>
+              )}
+          </div>
+      )}
+
+              {!analysisResult && !isAnalyzing && (
+                <p>Введите имя канала для начала анализа. Например: durov</p>
+      )}
+      {analyzeLimitExceeded && (
+        <div className="error-message small">Достигнут лимит анализа каналов для бесплатной подписки. Оформите подписку для снятия ограничений.</div>
+      )}
+    </div>
+          )}
+
+          {/* Вид идей */}
+          {currentView === 'suggestions' && channelName && (
+            <div className="view suggestions-view">
+              {ideasLimitExceeded && (
+                <div className="error-message">
+                  <p>Достигнут лимит генерации идей для бесплатной подписки.</p>
+                  {ideasLimitResetTime && (
+                    <p>Следующая попытка будет доступна после: <strong>{new Date(ideasLimitResetTime).toLocaleString()}</strong></p>
+                  )}
+                  <p style={{ marginTop: '10px' }}>
+                    <button 
+                      onClick={() => setShowSubscription(true)} 
+                      className="action-button subscription-button"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight: '8px', verticalAlign: 'middle'}}>
+                        <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+                      </svg>
+                      <span style={{verticalAlign: 'middle'}}>Оформить подписку</span>
+                    </button>
+                  </p>
+                </div>
+              )}
+              
+              <h2>Идеи контента для @{channelName}</h2>
+              
+              {isGeneratingIdeas && (
+                <div style={{ margin: '20px 0' }}>
+                  <ProgressBar progress={progress} />
+                  <p className="loading-message" style={{ textAlign: 'center', fontStyle: 'italic', transition: 'opacity 0.5s ease-in-out' }}>
+                    {currentIdeasMessage}
+                  </p>
+                </div>
+              )}
+
+              {suggestedIdeas.length > 0 ? (
+                <div className="ideas-list">
+                  {suggestedIdeas.map((idea) => (
+                    <div key={idea.id} className="idea-item">
+                      <div className="idea-content">
+                        <div className="idea-header">
+                          <span className="idea-title">{idea.topic_idea}</span>
+                          <span className="idea-style">({idea.format_style})</span>
+            </div>
+                        {idea.day && <div className="idea-day">День {idea.day}</div>}
+                                </div>
+                            <button 
+                        className="action-button small"
+                        onClick={() => handleDetailIdea(idea)}
+                      >
+                        Детализировать
+                            </button>
+                        </div>
+                  ))}
+                    </div>
+              ) : (
+                <p>
+                  {analysisResult 
+                    ? 'Нажмите "Сгенерировать идеи" на вкладке Анализ, чтобы создать новые идеи для контента.' 
+                    : loadingAnalysis 
+                        ? 'Загрузка сохраненного анализа...' 
+                        : 'Сначала выполните анализ канала на вкладке "Анализ" или выберите канал с сохраненным анализом.'
+                  }
+                </p>
+              )}
+              
+        <button 
+                    onClick={generateIdeas} 
+                    className="action-button generate-button"
+                    disabled={isGeneratingIdeas || !analysisResult || ideasLimitExceeded} 
+                    style={{marginTop: '20px'}} // Добавим отступ
+                  >
+                    {isGeneratingIdeas ? 'Генерация...' : 'Сгенерировать новые идеи'}
+        </button>
+             </div>
+              )}
+            {/* Сообщение, если канал не выбран для идей */} 
+            {currentView === 'suggestions' && !channelName && (
+                <p>Пожалуйста, выберите канал для просмотра или генерации идей.</p>
+            )}
+
+          {/* Календарь и Посты показываем всегда, но данные фильтруются по channelName/selectedChannels */} 
+          {currentView === 'calendar' && (
+            <div className="view calendar-view">
+              <h2>Календарь публикаций</h2>
+              {/* Календарь - ВОССТАНОВЛЕННЫЙ КОД */}
+              <div className="calendar-container">
+                {/* Заголовок с названием месяца и навигацией */}
+                <div className="calendar-header">
+                  <button 
+                    className="nav-button"
+                    onClick={goToPrevMonth}
+                  >
+                    &lt;
+                  </button>
+                  <h3>{currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}</h3>
+                  <button 
+                    className="nav-button"
+                    onClick={goToNextMonth}
+                  >
+                    &gt;
+                  </button>
+                </div>
+                {/* Дни недели */}
+                <div className="weekdays">
+                  {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day) => (
+                    <div key={day} className="weekday">{day}</div>
+                  ))}
+                </div>
+                {/* Дни календаря */}
+                <div className="calendar-grid">
+                  {calendarDays.map((day, index) => (
+                    <CalendarDay 
+                      key={index} 
+                      day={day} 
+                      onEditPost={startEditingPost}
+                    />
+                  ))}
+                </div>
+              </div>
+              {/* КОНЕЦ ВОССТАНОВЛЕННОГО КОДА */}
+            </div>
+          )}
+          {/* --- КОНЕЦ ИЗМЕНЕНИЯ --- */}
+          
+          {/* --- НАЧАЛО: НОВЫЙ Вид "Посты" с таблицей --- */}
+          {currentView === 'posts' && (
+            <div className="view posts-view">
+              <h2>
+                Список сохраненных постов
+                {/* Убираем отображение выбранных каналов */}
+              </h2>
+              {/* Удалён фильтр по каналам для вкладки Посты */}
+              {/* Таблица постов (перемещенный код) */}
+              <div className="posts-table-container">
+                 {loadingSavedPosts ? (
+                     <Loading message="Загрузка постов..." />
+                 ) : savedPosts.length > 0 ? (
+                    <table className="posts-table">
+                      <thead>
+                        <tr>
+                          <th>Дата</th>
+                          <th>Канал</th>
+                          <th>Тема/Идея</th>
+                          <th>Действия</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...savedPosts]
+                          .sort((a, b) => new Date(b.target_date).getTime() - new Date(a.target_date).getTime()) 
+                          .map((post) => (
+                            <tr key={post.id}>
+                              <td>{new Date(post.target_date).toLocaleDateString()}</td>
+                              <td>{post.channel_name || 'N/A'}</td>
+                              <td>{post.topic_idea}</td>
+                              <td>
+                                <button 
+                                  className="action-button edit-button small"
+                                  onClick={() => startEditingPost(post)}
+                                  title="Редактировать"
+                                >
+                                  <span>📝</span>
+                                </button>
+                                <button 
+                                  className="action-button delete-button small"
+                                  onClick={() => {
+                                    if (window.confirm('Вы уверены, что хотите удалить этот пост?')) {
+                                      deletePost(post.id);
+                                    }
+                                  }}
+                                  title="Удалить"
+                                >
+                                  <span>🗑️</span>
+                                </button>
+                              </td>
+                            </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                 ) : (
+                    <p>Нет сохраненных постов для выбранных каналов.</p>
+                 )}
+              </div>
+            </div>
+           )}
+          {/* --- КОНЕЦ НОВОГО ВИДА "Посты" --- */}
+
+          {/* Вид редактирования/детализации поста */}
+          {(currentView === 'edit' || currentView === 'details') && (
+            <div className="view edit-view">
+              <h2>{currentPostId ? 'Редактирование поста' : 'Создание нового поста'}</h2>
+
+              {/* Прогресс-бар генерации с забавными сообщениями */}
+              {isGeneratingPostDetails && (
+                <div style={{ margin: '20px 0' }}>
+                  <ProgressBar progress={progress} />
+                  <p className="loading-message" style={{ textAlign: 'center', fontStyle: 'italic', transition: 'opacity 0.5s ease-in-out' }}>
+                    {currentPostDetailsMessage}
+                  </p>
+                </div>
+              )}
+
+              {/* --- Основные поля поста --- */}
+              <div className="post-fields">
+                <div className="form-group">
+                  <label htmlFor="channelName">Канал:</label>
+                  <input 
+                    type="text" 
+                    id="channelName"
+                    value={channelName || ''}
+                    onChange={(e) => setChannelName(e.target.value)} 
+                    disabled 
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="postDate">Дата публикации:</label>
+                  <input 
+                    type="date" 
+                    id="postDate"
+                    value={currentPostDate}
+                    onChange={(e) => setCurrentPostDate(e.target.value)} 
+                    disabled={isSavingPost}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="postTopic">Тема/Идея:</label>
+                  <input 
+                    type="text" 
+                    id="postTopic"
+                    value={currentPostTopic}
+                    onChange={(e) => setCurrentPostTopic(e.target.value)}
+                    disabled
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="postFormat">Формат/Стиль:</label>
+                  <input 
+                    type="text" 
+                    id="postFormat"
+                    value={currentPostFormat}
+                    onChange={(e) => setCurrentPostFormat(e.target.value)}
+                    disabled
+                  />
+                </div>
+              </div>
+              
+              {/* --- Редактор текста поста --- */}
+              <div className="form-group post-text-editor">
+                <label htmlFor="postText">Текст поста:</label>
+                  <textarea 
+                  id="postText"
+                  value={currentPostText}
+                  onChange={(e) => setCurrentPostText(e.target.value)}
+                  rows={16}
+                  style={{ minHeight: '220px', fontSize: '1.1em', padding: '14px', borderRadius: '8px' }}
+                  placeholder="Введите или сгенерируйте текст поста..."
+                  disabled={isSavingPost || isGeneratingPostDetails}
+                  />
+                </div>
+                
+              {/* --- НАЧАЛО: Секция управления изображениями --- */}
+              <div className="image-management-section">
+                  
+                  {/* --- Предложенные изображения (если есть) --- */}
+                  {suggestedImages.length > 0 && (
+                      <div className="suggested-images-section">
+                          <h3>Предложенные изображения:</h3>
+                          <div className="image-gallery suggested">
+                              {suggestedImages.map((image, index) => {
+                                  const isSelected = selectedImage ? selectedImage.url === image.url : false;
+                                  return (
+                                      <div 
+                                          key={image.url || image.id || `suggested-${index}`} // Более надежный ключ
+                                          className={`image-item ${isSelected ? 'selected' : ''}`}
+                                          onClick={() => handleImageSelection(image)}
+                                          style={{ cursor: 'pointer', position: 'relative', border: isSelected ? '3px solid #1976d2' : '2px solid transparent', padding: '2px' }} // Явная рамка для выбранного
+                                      >
+                                      <img 
+                                          src={image.preview_url || image.url} 
+                                          alt={image.alt || 'Suggested image'} 
+                                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                          onError={(e) => {
+                                              const target = e.target as HTMLImageElement;
+                                              target.src = 'https://via.placeholder.com/100?text=Ошибка'; 
+                                              console.error('Image load error:', image.preview_url || image.url);
+                                          }}
+                                      />
+                                      {isSelected && (
+                                          <div className="checkmark" style={{ 
+                                              position: 'absolute', 
+                                              top: '5px', 
+                                              right: '5px', 
+                                              backgroundColor: '#1976d2', 
+                                              color: 'white', 
+                                              borderRadius: '50%', 
+                                              width: '20px',
+                                              height: '20px',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                              fontSize: '12px',
+                                              fontWeight: 'bold',
+                                              zIndex: 10
+                                          }}>✔</div> 
+                                      )}
+                                      </div>
+                                  );
+                              })}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* --- Блок для своего изображения: Загрузчик и Превью --- */}
+                  <div className="custom-image-section">
+                     <h4>Свое изображение:</h4>
+                      <ImageUploader onImageUploaded={handleCustomImageUpload} userId={userId} />
+                      
+                      {selectedImage && (
+                          <div className="selected-image-preview" style={{ marginTop: '15px', padding: '10px', border: 'none', borderRadius: '8px', background: 'none' }}>
+                              <h5 style={{ marginTop: '0', marginBottom: '10px' }}>Выбранное изображение:</h5>
+                              <div className="preview-container" style={{ textAlign: 'center' }}>
+                                <div className="image-preview-container" style={{ background: 'none', maxWidth: '100%', margin: 0, padding: 0, display: 'inline-block', position: 'relative' }}>
+                                  {selectedImage && (
+                                    <img
+                                      src={selectedImage.preview_url || selectedImage.url}
+                                      alt={selectedImage.alt || 'Изображение'}
+                                      style={{ display: 'block', maxWidth: '100%', height: 'auto', maxHeight: '60vh', margin: '0 auto', background: 'none', borderRadius: '8px' }}
+                                    />
+                                  )}
+                                </div>
+                                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '10px' }}>
+                                  <button 
+                                    className="action-button delete-button small remove-image-btn"
+                                    onClick={() => {
+                                      setSelectedImage(null);
+                                    }}
+                                    title="Удалить выбранное изображение"
+                                  >
+                                    <span>🗑️ Отменить выбор</span>
+                                  </button>
+                                  <button
+                                    className="action-button download-button small"
+                                    onClick={handleSendImageToChat}
+                                    title="Скачать изображение"
+                                  >
+                                    ⬇️ Скачать
+                                  </button>
+                                  <button
+                                    className="action-button small"
+                                    onClick={() => setIsImageModalOpen(true)}
+                                    title="Приблизить изображение"
+                                  >
+                                    🔍 Приблизить
+                                  </button>
+                                </div>
+                              </div>
+                          </div>
+                      )}
+                </div>
+              </div>
+              {/* --- КОНЕЦ: Секция управления изображениями --- */} 
+                
+              {/* Кнопки действий */}
+              <div className="form-actions">
+                  <button 
+                    onClick={handleSaveOrUpdatePost} 
+                    className="action-button save-button"
+                    disabled={isSavingPost || isGeneratingPostDetails || !currentPostText || postLimitExceeded}
+                  >
+                    {isSavingPost ? 'Сохранение...' : (currentPostId ? 'Обновить пост' : 'Сохранить пост')}
+                  </button>
+                  
+                  {selectedImage && (
+                    <div style={{ marginTop: '10px', color: 'green', fontWeight: 'bold', textAlign: 'center' }}>
+                      ✅ Изображение "{selectedImage.alt?.substring(0,30) || 'Выбранное'}{selectedImage.alt && selectedImage.alt.length > 30 ? '...' : ''}" будет сохранено с постом.
+                    </div>
+                  )}
+                 {/* Добавляем кнопку Отмена */}
+                  <button 
+                    onClick={() => {
+                        setCurrentView('calendar'); // Возвращаемся в календарь
+                        // Сбрасываем состояние редактирования
+                        setCurrentPostId(null);
+                        setCurrentPostDate(new Date().toISOString().split('T')[0]);
+                        setCurrentPostTopic('');
+                        setCurrentPostFormat('');
+                        setCurrentPostText('');
+                        setSelectedImage(null);
+                        setSuggestedImages([]);
+                    }}
+                    className="action-button cancel-button"
+                    disabled={isSavingPost}
+                  >
+                    Отмена
+                  </button>
+                </div>
+
+            </div>
+          )}
+        </div>
+      </main> {/* <-- ИСПРАВЛЕНО: Добавлен закрывающий тег */} 
+
       <footer className="app-footer">
         <p>© 2024 Smart Content Assistant</p>
       </footer>
-        </>
+
+      {/* Модальное окно предпросмотра изображения */}
+      {isImageModalOpen && selectedImage && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0,0,0,0.85)',
+          zIndex: 1000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh', padding: '16px' }}>
+            <img
+              src={selectedImage.url}
+              alt={selectedImage.alt || 'Изображение'}
+              style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: '10px', boxShadow: '0 2px 16px #0008', display: 'block' }}
+            />
+            <button
+              onClick={() => setIsImageModalOpen(false)}
+              style={{
+                position: 'absolute',
+                top: 16,
+                right: 16,
+                background: '#fff',
+                color: '#222',
+                border: 'none',
+                borderRadius: '50%',
+                width: 36,
+                height: 36,
+                fontSize: 22,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px #0004',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              title="Закрыть"
+            >✖</button>
+          </div>
+        </div>
       )}
       <Toaster position="top-center" reverseOrder={false} />
     </div>
   );
 }
+
+// === ДОБАВЛЯЮ: Функция для очистки текста поста от лишних символов ===
+function cleanPostText(text: string) {
+  // Удаляем звездочки, markdown-символы, лишние пробелы
+  return text.replace(/[\*\_\#\-]+/g, '').replace(/\s{2,}/g, ' ').trim();
+}
+
+
 
 export default App;

@@ -43,7 +43,6 @@ from backend.telegram_utils import get_telegram_posts_via_telethon, get_telegram
 import backend.move_temp_files
 from datetime import datetime, timedelta
 import traceback
-from backend.services.telegram_subscription_check import check_user_channel_subscription, send_subscription_prompt
 
 # Unsplash
 from unsplash import Api as UnsplashApi
@@ -2269,7 +2268,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
             if not can_generate:
                 usage = await subscription_service.get_user_usage(int(telegram_user_id))
                 reset_at = usage.get("reset_at")
-                raise HTTPException(status_code=403, detail=f"Достигнут лимит генерации идей для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Оформите подписку для снятия ограничений.")
+                raise HTTPException(status_code=403, detail=f"Достигнут лимит в 2 генерации постов для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Лимиты обновляются каждые 3 дня. Оформите подписку для снятия ограничений.")
         if not telegram_user_id:
             logger.warning("Запрос генерации поста без идентификации пользователя Telegram")
             # Используем HTTPException для корректного ответа
@@ -4188,18 +4187,4 @@ async def send_image_to_chat(request: Request):
             return JSONResponse({'success': False, 'error': resp.text}, status_code=500)
     except Exception as e:
         return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
-
-@app.get("/api/check-channel-subscription")
-async def check_channel_subscription(request: Request):
-    telegram_user_id = request.headers.get("X-Telegram-User-Id")
-    if not telegram_user_id or not telegram_user_id.isdigit():
-        return {"subscribed": False, "error": "Не удалось определить Telegram ID"}
-    user_id = int(telegram_user_id)
-    try:
-        is_subscribed = await check_user_channel_subscription(user_id)
-        if not is_subscribed:
-            await send_subscription_prompt(user_id)
-        return {"subscribed": is_subscribed}
-    except Exception as e:
-        return {"subscribed": False, "error": str(e)}
 
