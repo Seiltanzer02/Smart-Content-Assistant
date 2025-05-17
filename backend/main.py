@@ -4243,7 +4243,7 @@ except Exception as e:
     print(f"=== ОШИБКА при подключении роутера проверки подписки: {e} ===")
 
 # --- Эндпоинт для проверки подписки на канал по аналогии с премиум ---
-@app.get("/bot-style-channel-check/{user_id}", status_code=200)
+@app.get("/api/bot-style-channel-check/{user_id}", status_code=200)
 async def bot_style_channel_check(user_id: int, request: Request):
     from backend.services.telegram_subscription_check import check_user_channel_subscription, send_subscription_prompt
     import logging
