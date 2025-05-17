@@ -69,6 +69,9 @@ async def get_saved_ideas(request: Request, channel_name: Optional[str] = None):
 
 async def generate_content_plan(request: Request, req):
     try:
+        # Инициализируем переменную перед использованием
+        used_backup_api = False
+        
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
         if not telegram_user_id:
             logger.warning("Запрос генерации плана без идентификации пользователя Telegram")
