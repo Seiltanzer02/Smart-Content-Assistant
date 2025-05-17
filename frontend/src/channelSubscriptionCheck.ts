@@ -8,17 +8,13 @@ export async function checkChannelSubscription(userId?: number): Promise<{subscr
   if (!realUserId) {
     throw new Error('Не удалось определить Telegram ID пользователя');
   }
-  const response = await fetch("/check-channel-subscription", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ user_id: realUserId })
+  const response = await fetch(`/channel-subscription-check/${realUserId}`, {
+    method: "GET"
   });
 
   if (!response.ok) {
-    const data = await response.json();
-    throw new Error(data.detail || "Ошибка проверки подписки");
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.message || "Ошибка проверки подписки");
   }
 
   return await response.json();
