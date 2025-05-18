@@ -214,6 +214,8 @@ app.add_middleware(
 
 # --- Подключение роутеров ---
 from backend.routes import user_limits, analysis, ideas, posts, user_settings, images
+# Импортируем новый роутер для проверки подписки на канал
+from backend.services.telegram_subscription_check import info_router as telegram_channel_info_router
 
 app.include_router(user_limits.router)
 app.include_router(analysis.router)
@@ -221,6 +223,8 @@ app.include_router(ideas.router)
 app.include_router(posts.router)
 app.include_router(user_settings.router, prefix="/api/user", tags=["User Settings"])
 app.include_router(images.router, prefix="/api", tags=["Images"])
+# Добавляем новый роутер для проверки подписки на канал
+app.include_router(telegram_channel_info_router, prefix="", tags=["Telegram Channel Info"])
 # --- Конец подключения роутеров ---
 
 # --- ВАЖНО: API-эндпоинты для проверки подписки ПЕРЕД SPA-маршрутами ---
@@ -2050,18 +2054,28 @@ async def delete_post(post_id: str, request: Request):
 
 # --- Настраиваем обработку всех путей SPA для обслуживания статических файлов (в конце файла) ---
 @app.get("/{rest_of_path:path}")
-async def serve_spa(rest_of_path: str):
+async def serve_spa(request: Request, rest_of_path: str):
     """Обслуживает все запросы к путям SPA, возвращая index.html"""
+    # Проверяем, не является ли запрос к API или другим специальным маршрутам
+    if rest_of_path.startswith(("api/", "api-v2/", "docs", "openapi.json", "uploads/", "assets/")):
+        # Возвращаем JSONResponse с 404 для API путей
+        return JSONResponse(content={"error": "Not found (main SPA)"}, status_code=404)
+    
     # Проверяем, есть ли запрошенный файл
     if SHOULD_MOUNT_STATIC:
         file_path = os.path.join(static_folder, rest_of_path)
         if os.path.exists(file_path) and os.path.isfile(file_path):
+            # Определяем content_type на основе расширения файла
             return FileResponse(file_path)
         
         # Если файл не найден, возвращаем index.html для поддержки SPA-роутинга
-        return FileResponse(os.path.join(static_folder, "index.html"))
+        index_path = os.path.join(static_folder, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path, media_type="text/html")
+        else:
+            return JSONResponse(content={"error": "Frontend not found"}, status_code=404)
     else:
-        return {"message": "API работает, но статические файлы не настроены. Обратитесь к API напрямую."}
+        return JSONResponse(content={"message": "API работает, но статические файлы не настроены. Обратитесь к API напрямую."}, status_code=404)
 
 # --- Функция для генерации ключевых слов для поиска изображений ---
 async def generate_image_keywords(text: str, topic: str, format_style: str) -> List[str]:
@@ -3558,10 +3572,10 @@ if SHOULD_MOUNT_STATIC:
         async def serve_index():
             index_path = os.path.join(static_folder, "index.html")
             if os.path.exists(index_path):
-                 return FileResponse(index_path)
+                 return FileResponse(index_path, media_type="text/html")
             else:
                  logger.error(f"Файл index.html не найден в {static_folder}")
-                 raise HTTPException(status_code=404, detail="Index file not found")
+                 return JSONResponse(content={"error": "Frontend not found"}, status_code=404)
 
         # Обработчик для всех остальных путей SPA (если StaticFiles(html=True) недостаточно)
         # Этот обработчик ПЕРЕХВАТИТ все, что не было перехвачено ранее (/api, /uploads, etc.)
@@ -3569,10 +3583,7 @@ if SHOULD_MOUNT_STATIC:
         async def serve_spa_catch_all(request: Request, rest_of_path: str):
             # Исключаем API пути, чтобы избежать конфликтов (на всякий случай)
             # Проверяем, не начинается ли путь с /api/, /docs, /openapi.json или /uploads/
-            if rest_of_path.startswith("api/") or \
-               rest_of_path.startswith("docs") or \
-               rest_of_path.startswith("openapi.json") or \
-               rest_of_path.startswith("uploads/"):
+            if rest_of_path.startswith(("api/", "api-v2/", "docs", "openapi.json", "uploads/", "assets/")):
                  # Этот код не должен выполняться, т.к. роуты API/docs/uploads определены выше, но для надежности
                  # Логируем попытку доступа к API через SPA catch-all
                  logger.debug(f"Запрос к '{rest_of_path}' перехвачен SPA catch-all, но проигнорирован (API/Docs/Uploads).")
@@ -3584,10 +3595,10 @@ if SHOULD_MOUNT_STATIC:
             if os.path.exists(index_path):
                 # Логируем возврат index.html для SPA пути
                 logger.debug(f"Возвращаем index.html для SPA пути: '{rest_of_path}'")
-                return FileResponse(index_path)
+                return FileResponse(index_path, media_type="text/html")
             else:
                 logger.error(f"Файл index.html не найден в {static_folder} для пути {rest_of_path}")
-                raise HTTPException(status_code=404, detail="Index file not found")
+                return JSONResponse(content={"error": "Frontend not found (SPA catch-all)"}, status_code=404)
 
         logger.info("Обработчики для SPA настроены.")
 
@@ -4188,8 +4199,8 @@ async def send_image_to_chat(request: Request):
     except Exception as e:
         return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
 
-from backend.services.telegram_subscription_check import router as telegram_subscription_router
-app.include_router(telegram_subscription_router, prefix="", tags=["Telegram Channel Subscription"])
+from backend.services.telegram_subscription_check import info_router as telegram_channel_info_router
+app.include_router(telegram_channel_info_router, prefix="", tags=["Telegram Channel Info"])
 
 from backend.services.telegram_subscription_check import check_user_channel_subscription
 
@@ -4207,38 +4218,8 @@ async def channel_subscription_check_v2(request: Request, user_id: Optional[str]
     except ValueError:
         return {"has_channel_subscription": False, "user_id": effective_user_id, "error": "ID пользователя должен быть числом"}
     try:
-        is_subscribed = await check_user_channel_subscription(user_id_int)
-        return {"has_channel_subscription": is_subscribed, "user_id": user_id_int, "error": None}
+        is_subscribed, error_msg = await check_user_channel_subscription(user_id_int)
+        return {"has_channel_subscription": is_subscribed, "user_id": user_id_int, "error": error_msg}
     except Exception as e:
         return {"has_channel_subscription": False, "user_id": user_id_int, "error": str(e)}
-
-from backend.services.telegram_subscription_check import info_router as telegram_channel_info_router
-app.include_router(telegram_channel_info_router, prefix="", tags=["Telegram Channel Info"])
-
-# === SPA-обработка ===
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FRONTEND_DIR = os.path.join(BASE_DIR, "..", "frontend", "dist")
-
-if not os.path.exists(FRONTEND_DIR):
-    logger.error(f"Директория фронтенда не найдена: {FRONTEND_DIR}")
-else:
-    logger.info(f"Директория фронтенда найдена: {FRONTEND_DIR}")
-
-    @app.get("/")
-    async def serve_index():
-        index_path = os.path.join(FRONTEND_DIR, "index.html")
-        if os.path.exists(index_path):
-            return FileResponse(index_path, media_type="text/html")
-        logger.error(f"Файл index.html не найден в {FRONTEND_DIR}")
-        return JSONResponse(content={"error": "Frontend not found"}, status_code=404)
-
-    @app.get("/{rest_of_path:path}")
-    async def serve_spa_catch_all(request: Request, rest_of_path: str):
-        if rest_of_path.startswith(("api/", "api-v2/", "docs", "openapi.json", "uploads/", "assets/")):
-            return JSONResponse(content={"error": "Not found (SPA catch-all exclusion)"}, status_code=404)
-        index_path = os.path.join(FRONTEND_DIR, "index.html")
-        if os.path.exists(index_path):
-            return FileResponse(index_path, media_type="text/html")
-        logger.error(f"Файл index.html не найден в {FRONTEND_DIR} для пути {rest_of_path}")
-        return JSONResponse(content={"error": "Frontend not found (SPA catch-all)"}, status_code=404)
 
