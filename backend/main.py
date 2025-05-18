@@ -4188,3 +4188,6 @@ async def send_image_to_chat(request: Request):
     except Exception as e:
         return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
 
+from backend.services.telegram_subscription_check import router as telegram_subscription_router
+app.include_router(telegram_subscription_router, prefix="", tags=["Telegram Channel Subscription"])
+

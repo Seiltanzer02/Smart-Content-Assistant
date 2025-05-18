@@ -418,6 +418,17 @@ const normalizeChannelName = (name: string) => name.replace(/^@/, '').toLowerCas
 
 // Код, который вызывал ошибки Cannot find name, перемещен внутрь функции App
 
+const TELEGRAM_CHANNEL = 'ИМЯ_ВАШЕГО_КАНАЛА'; // <= Заменить на имя канала без @
+
+async function checkChannelSubscription(userId: string): Promise<{ has_channel_subscription: boolean, error?: string }> {
+  const response = await fetch('/api/user/check-channel-subscription', {
+    headers: {
+      'X-Telegram-User-Id': userId
+    }
+  });
+  return await response.json();
+}
+
 function App() {
   // --- ВСЕ useState ТОЛЬКО ЗДЕСЬ ---
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -461,6 +472,9 @@ function App() {
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   // Добавляю состояние для хранения времени сброса лимита
   const [ideasLimitResetTime, setIdeasLimitResetTime] = useState<string | null>(null);
+  const [channelChecked, setChannelChecked] = useState(false);
+  const [hasChannelAccess, setHasChannelAccess] = useState(false);
+  const [channelCheckError, setChannelCheckError] = useState<string | null>(null);
   
   // === ДОБАВЛЯЮ: Массивы забавных сообщений для прогресс-баров ===
   const postDetailsMessages = [
@@ -1622,6 +1636,40 @@ function App() {
   // Компонент авторизации
   if (!isAuthenticated) {
     return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
+  }
+
+  // Проверка подписки на канал
+  const handleCheckChannel = async () => {
+    setChannelCheckError(null);
+    if (!userId) return;
+    const res = await checkChannelSubscription(userId);
+    setChannelChecked(true);
+    setHasChannelAccess(res.has_channel_subscription);
+    if (!res.has_channel_subscription) setChannelCheckError(res.error || 'Вы не подписаны на канал');
+  };
+
+  // Показываем экран подписки, если не подписан
+  if (isAuthenticated && userId && (!channelChecked || !hasChannelAccess)) {
+    return (
+      <div style={{ textAlign: 'center', marginTop: 40 }}>
+        <p>Чтобы пользоваться приложением, подпишитесь на наш канал:</p>
+        <a
+          href={`https://t.me/${TELEGRAM_CHANNEL}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ fontWeight: 'bold', fontSize: 18, color: '#1976d2' }}
+        >
+          Перейти в канал
+        </a>
+        <br /><br />
+        <button onClick={handleCheckChannel} style={{ padding: '10px 20px', fontSize: 16 }}>
+          Проверить подписку
+        </button>
+        {channelChecked && !hasChannelAccess && (
+          <div style={{ color: 'red', marginTop: 10 }}>{channelCheckError}</div>
+        )}
+      </div>
+    );
   }
 
   // Основной интерфейс
