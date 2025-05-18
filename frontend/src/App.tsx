@@ -488,6 +488,11 @@ function App() {
   const [currentPostDetailsMessage, setCurrentPostDetailsMessage] = useState(postDetailsMessages[0]);
   const [currentIdeasMessage, setCurrentIdeasMessage] = useState(ideasGenerationMessages[0]);
   
+  // Обработчик проверки подписки на канал
+  const handleSubscriptionVerified = (isSubscribed: boolean) => {
+    setIsChannelSubscribed(isSubscribed);
+  };
+  
   // === ДОБАВЛЯЮ: Функция для добавления канала в allChannels ===
   const addChannelToAllChannels = (channel: string) => {
     const normalized = normalizeChannelName(channel);
@@ -1669,10 +1674,5 @@ function cleanPostText(text: string) {
   // Удаляем звездочки, markdown-символы, лишние пробелы
   return text.replace(/[\*\_\#\-]+/g, '').replace(/\s{2,}/g, ' ').trim();
 }
-
-// Обработчик проверки подписки на канал
-const handleSubscriptionVerified = (isSubscribed: boolean) => {
-  setIsChannelSubscribed(isSubscribed);
-};
 
 export default App;
