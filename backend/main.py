@@ -4191,3 +4191,24 @@ async def send_image_to_chat(request: Request):
 from backend.services.telegram_subscription_check import router as telegram_subscription_router
 app.include_router(telegram_subscription_router, prefix="", tags=["Telegram Channel Subscription"])
 
+from backend.services.telegram_subscription_check import check_user_channel_subscription
+
+@app.get("/api-v2/channel-subscription/check", status_code=200)
+async def channel_subscription_check_v2(request: Request, user_id: Optional[str] = None):
+    """
+    Проверка подписки на канал (аналогично премиум-подписке).
+    user_id можно передать как query или через X-Telegram-User-Id.
+    """
+    effective_user_id = user_id or request.headers.get("x-telegram-user-id")
+    if not effective_user_id:
+        return {"has_channel_subscription": False, "user_id": None, "error": "ID пользователя не предоставлен"}
+    try:
+        user_id_int = int(effective_user_id)
+    except ValueError:
+        return {"has_channel_subscription": False, "user_id": effective_user_id, "error": "ID пользователя должен быть числом"}
+    try:
+        is_subscribed = await check_user_channel_subscription(user_id_int)
+        return {"has_channel_subscription": is_subscribed, "user_id": user_id_int, "error": None}
+    except Exception as e:
+        return {"has_channel_subscription": False, "user_id": user_id_int, "error": str(e)}
+
