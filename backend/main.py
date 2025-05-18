@@ -4212,3 +4212,33 @@ async def channel_subscription_check_v2(request: Request, user_id: Optional[str]
     except Exception as e:
         return {"has_channel_subscription": False, "user_id": user_id_int, "error": str(e)}
 
+from backend.services.telegram_subscription_check import info_router as telegram_channel_info_router
+app.include_router(telegram_channel_info_router, prefix="", tags=["Telegram Channel Info"])
+
+# === SPA-обработка ===
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FRONTEND_DIR = os.path.join(BASE_DIR, "..", "frontend", "dist")
+
+if not os.path.exists(FRONTEND_DIR):
+    logger.error(f"Директория фронтенда не найдена: {FRONTEND_DIR}")
+else:
+    logger.info(f"Директория фронтенда найдена: {FRONTEND_DIR}")
+
+    @app.get("/")
+    async def serve_index():
+        index_path = os.path.join(FRONTEND_DIR, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path, media_type="text/html")
+        logger.error(f"Файл index.html не найден в {FRONTEND_DIR}")
+        return JSONResponse(content={"error": "Frontend not found"}, status_code=404)
+
+    @app.get("/{rest_of_path:path}")
+    async def serve_spa_catch_all(request: Request, rest_of_path: str):
+        if rest_of_path.startswith(("api/", "api-v2/", "docs", "openapi.json", "uploads/", "assets/")):
+            return JSONResponse(content={"error": "Not found (SPA catch-all exclusion)"}, status_code=404)
+        index_path = os.path.join(FRONTEND_DIR, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path, media_type="text/html")
+        logger.error(f"Файл index.html не найден в {FRONTEND_DIR} для пути {rest_of_path}")
+        return JSONResponse(content={"error": "Frontend not found (SPA catch-all)"}, status_code=404)
+
