@@ -559,13 +559,20 @@ async def telegram_webhook(request: Request):
         
         # Обработка команды /partner_link
         if text == '/partner_link':
+            logger.info(f"[PARTNER_LINK] Запуск обработки команды для user_id={user_id}")
             try:
                 db_pool = get_db_pool()
+                if not db_pool:
+                    logger.error("[PARTNER_LINK] db_pool не инициализирован!")
+                    await send_telegram_message(user_id, "Ошибка сервера: база данных недоступна.")
+                    return {"ok": False, "error": "db_pool is None"}
                 service = PartnerReferralService(db_pool)
                 partner_link = await service.get_partner_link(int(user_id))
+                logger.info(f"[PARTNER_LINK] Получена ссылка: {partner_link}")
                 await send_telegram_message(user_id, f"Ваша партнёрская ссылка:\n{partner_link}")
             except Exception as e:
-                logger.error(f"Ошибка при получении партнёрской ссылки: {e}")
+                import traceback
+                logger.error(f"[PARTNER_LINK] Ошибка: {e}\n{traceback.format_exc()}")
                 await send_telegram_message(user_id, "Ошибка при получении партнёрской ссылки. Попробуйте позже.")
             return {"ok": True}
         
