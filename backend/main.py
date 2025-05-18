@@ -3587,16 +3587,19 @@ if SHOULD_MOUNT_STATIC:
                 if os.path.exists(file_path) and os.path.isfile(file_path):
                     return FileResponse(file_path) # FastAPI/Starlette угадает media_type
                 else:
+                    # Если файл в /assets/ не найден, это ошибка 404 для конкретного ресурса
                     logger.error(f"Статический актив не найден: {file_path}")
                     return JSONResponse(content={"error": "Asset not found"}, status_code=404)
 
-            # Исключаем API пути, чтобы SPA не перехватывал их
-            # (Это условие должно быть после проверки assets, чтобы assets не попадали сюда)
+            # Исключаем API пути, чтобы SPA не перехватывал их.
+            # Эти пути должны обрабатываться своими собственными декораторами.
+            # Если запрос дошел сюда и это API путь, значит, соответствующий эндпоинт не найден.
             if rest_of_path.startswith(("api/", "api-v2/", "docs", "openapi.json", "uploads/")):
-                logger.debug(f"Запрос к API-подобному пути '{rest_of_path}' перехвачен SPA catch-all и возвращает 404.")
-                return JSONResponse(content={"error": "API route not found via SPA catch-all"}, status_code=404)
+                logger.debug(f"Запрос к API-подобному пути '{rest_of_path}' не был обработан специализированным роутером и возвращает 404 из SPA catch-all.")
+                return JSONResponse(content={"error": f"API endpoint '{rest_of_path}' not found"}, status_code=404)
 
-            # Если это не API и не известный статический актив, то это должен быть путь SPA, возвращаем index.html
+            # Если это не API и не известный статический актив (не в /assets/), 
+            # то это должен быть путь SPA, возвращаем index.html для клиентского роутинга.
             index_path = os.path.join(static_folder, "index.html")
             if os.path.exists(index_path):
                 return FileResponse(index_path, media_type="text/html")
