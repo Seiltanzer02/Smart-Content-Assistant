@@ -23,9 +23,6 @@ from telethon import TelegramClient
 from telethon.errors import ChannelInvalidError, ChannelPrivateError, UsernameNotOccupiedError
 from dotenv import load_dotenv
 
-# Импортируем модуль проверки подписки на канал
-from backend.services.telegram_channel_check import check_subscription_endpoint, notify_subscription_required
-
 # Supabase
 from supabase import create_client, Client, AClient
 from postgrest.exceptions import APIError
@@ -116,18 +113,6 @@ if not SUPABASE_URL or not SUPABASE_ANON_KEY:
         missing_keys.append("SUPABASE_URL")
     if not SUPABASE_ANON_KEY:
         missing_keys.append("SUPABASE_ANON_KEY")
-        
-# Проверка переменных окружения для функции проверки подписки на канал
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TARGET_CHANNEL_USERNAME = os.getenv("TARGET_CHANNEL_USERNAME")
-
-if not TELEGRAM_BOT_TOKEN:
-    logger.warning("TELEGRAM_BOT_TOKEN не найден! Функциональность проверки подписки на канал не будет работать.")
-    missing_keys.append("TELEGRAM_BOT_TOKEN")
-
-if not TARGET_CHANNEL_USERNAME:
-    logger.warning("TARGET_CHANNEL_USERNAME не найден! Укажите имя канала в переменных окружения.")
-    missing_keys.append("TARGET_CHANNEL_USERNAME")
 
 # Вывод информации о состоянии переменных окружения
 if missing_keys:
@@ -218,18 +203,6 @@ origins = [
     "*"                        # Временно разрешаем все
 ]
 
-# --- Обновляем origins для CORS, добавляем домены Telegram ---
-origins = [
-    "http://localhost", 
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-    "https://t.me",
-    "https://telegram.org",
-    "https://telegram.me"
-]
-
-# Применяем middleware с обновленными origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -4214,15 +4187,4 @@ async def send_image_to_chat(request: Request):
             return JSONResponse({'success': False, 'error': resp.text}, status_code=500)
     except Exception as e:
         return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
-
-# --- Эндпоинты для проверки подписки на канал ---
-@app.get("/channel/check-subscription", status_code=200)
-async def channel_subscription_check(request: Request, user_id: Optional[int] = None):
-    """Проверяет подписку пользователя на целевой канал."""
-    return await check_subscription_endpoint(request, user_id)
-
-@app.get("/channel/subscription-required", status_code=200)
-async def subscription_required(request: Request):
-    """Возвращает расширенную информацию с инструкциями по подписке на канал."""
-    return await notify_subscription_required(request)
 

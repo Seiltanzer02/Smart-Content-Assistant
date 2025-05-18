@@ -69,9 +69,7 @@ async def get_saved_ideas(request: Request, channel_name: Optional[str] = None):
 
 async def generate_content_plan(request: Request, req):
     try:
-        # Инициализируем переменную перед использованием
         used_backup_api = False
-        
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
         if not telegram_user_id:
             logger.warning("Запрос генерации плана без идентификации пользователя Telegram")
@@ -128,10 +126,6 @@ async def generate_content_plan(request: Request, req):
 
 Необходимо создать {period_days} идей для постов - по одной на каждый день."""
         
-        # Инициализируем переменную для хранения текста плана
-        plan_text = None
-        
-        # Пробуем использовать OpenRouter API, если доступен
         if OPENROUTER_API_KEY:
             try:
                 logger.info(f"Отправка запроса на генерацию плана через OpenRouter API для канала {channel_name}")
@@ -220,6 +214,7 @@ async def generate_content_plan(request: Request, req):
                         "message": "Ошибка при генерации плана. API для генерации недоступны.",
                         "limit_reached": False
                     }
+        
         # Если нет OPENROUTER_API_KEY, но есть OPENAI_API_KEY, используем его напрямую
         elif OPENAI_API_KEY:
             used_backup_api = True
@@ -255,7 +250,6 @@ async def generate_content_plan(request: Request, req):
                     "message": f"Ошибка при генерации плана: {str(openai_error)}",
                     "limit_reached": False
                 }
-        # Если нет ни OPENROUTER_API_KEY, ни OPENAI_API_KEY
         else:
             logger.error("Отсутствуют API ключи для генерации плана (OPENROUTER_API_KEY и OPENAI_API_KEY)")
             return {
@@ -323,9 +317,9 @@ async def generate_content_plan(request: Request, req):
         if used_backup_api:
             result_message = "План сгенерирован с использованием резервного API (OpenAI)"
         
-                # После успешной генерации идей увеличиваем счетчик использования
-        await subscription_service.increment_idea_usage(int(telegram_user_id))
-        
+        # После успешной генерации идей увеличиваем счетчик использования
+            await subscription_service.increment_idea_usage(int(telegram_user_id))
+            
         return {"plan": plan_items, "message": result_message}
     except Exception as e:
         logger.error(f"Ошибка при генерации плана: {e}")

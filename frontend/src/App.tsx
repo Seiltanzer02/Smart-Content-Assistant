@@ -8,14 +8,6 @@ import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
 import DirectPremiumStatus from './components/DirectPremiumStatus'; // <-- Импортируем новый компонент
 import ProgressBar from './components/ProgressBar';
-import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
-import MainPage from './pages/MainPage';
-import AnalysisPage from './pages/AnalysisPage';
-import PlanPage from './pages/PlanPage';
-import PostsPage from './pages/PostsPage';
-import PostEditorPage from './pages/PostEditorPage';
-import ChannelSubscriptionCheck from './components/ChannelSubscriptionCheck';
-import { getTelegramUserId } from './utils/telegramAuth';
 
 // Определяем базовый URL API
 // Так как фронтенд и API на одном домене, используем пустую строку
@@ -427,6 +419,7 @@ const normalizeChannelName = (name: string) => name.replace(/^@/, '').toLowerCas
 // Код, который вызывал ошибки Cannot find name, перемещен внутрь функции App
 
 function App() {
+  // --- ВСЕ useState ТОЛЬКО ЗДЕСЬ ---
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
@@ -468,10 +461,9 @@ function App() {
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   // Добавляю состояние для хранения времени сброса лимита
   const [ideasLimitResetTime, setIdeasLimitResetTime] = useState<string | null>(null);
-  const [isCheckingSubscription, setIsCheckingSubscription] = useState<boolean>(true);
-  const [isSubscribed, setIsSubscribed] = useState<boolean>(false);
-
-  const [currentPostDetailsMessage, setCurrentPostDetailsMessage] = useState([
+  
+  // === ДОБАВЛЯЮ: Массивы забавных сообщений для прогресс-баров ===
+  const postDetailsMessages = [
     "Завариваем кофе для музы... Обычно это занимает некоторое время. ☕",
     "Наши нейроны шевелятся быстрее, чем вы думаете! (но не всегда) 😉",
     "Почти готово! Если 'почти' для вас — это как 'скоро' у разработчиков. 😅",
@@ -479,9 +471,9 @@ function App() {
     "Согласовываем текст с главным редактором — котиком. Он очень строг. 😼",
     "Так-так-так... что бы такого остроумного написать?.. 🤔",
     "Наши алгоритмы сейчас проходят тест Тьюринга... на выдержку. 🧘"
-  ]);
+  ];
   
-  const [currentIdeasMessage, setCurrentIdeasMessage] = useState([
+  const ideasGenerationMessages = [
     "Перебираем триллионы идей... Осталось всего пара миллиардов. 🤯",
     "Штурмуем мозговой центр! Иногда там бывает ветрено. 💨",
     "Ловим вдохновение сачком... Оно такое неуловимое! 🦋",
@@ -489,11 +481,11 @@ function App() {
     "Генератор идей заряжается... Пожалуйста, не отключайте от розетки! 🔌",
     "Анализируем тренды, мемы и фазы Луны... для полной картины. 🌕",
     "Разбудили креативного директора. Он просил передать, что 'еще 5 минуточек'. 😴"
-  ]);
+  ];
   
-  const [currentPostDetailsMessageIndex, setCurrentPostDetailsMessageIndex] = useState(0);
-  const [currentIdeasMessageIndex, setCurrentIdeasMessageIndex] = useState(0);
-
+  const [currentPostDetailsMessage, setCurrentPostDetailsMessage] = useState(postDetailsMessages[0]);
+  const [currentIdeasMessage, setCurrentIdeasMessage] = useState(ideasGenerationMessages[0]);
+  
   // === ДОБАВЛЯЮ: Функция для добавления канала в allChannels ===
   const addChannelToAllChannels = (channel: string) => {
     const normalized = normalizeChannelName(channel);
@@ -2300,5 +2292,7 @@ function cleanPostText(text: string) {
   // Удаляем звездочки, markdown-символы, лишние пробелы
   return text.replace(/[\*\_\#\-]+/g, '').replace(/\s{2,}/g, ' ').trim();
 }
+
+
 
 export default App;
