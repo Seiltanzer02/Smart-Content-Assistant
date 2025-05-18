@@ -23,7 +23,6 @@ from telethon.errors import (
 )
 import httpx
 from bs4 import BeautifulSoup
-from telethon import functions as telethon_functions
 
 # --- ПЕРЕМЕЩАЕМ Логгирование В НАЧАЛО --- 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -265,26 +264,3 @@ def get_sample_posts(channel_name: str) -> List[str]:
         return business_posts
     else:
         return generic_posts 
-
-async def get_official_stars_affiliate_link(partner_user_id: int, bot_username: str) -> str:
-    """
-    Получить официальную партнерскую ссылку Stars для пользователя через MTProto (Telethon).
-    Требует, чтобы у вас была сессия для партнера (user_id).
-    Возвращает ссылку или выбрасывает исключение.
-    """
-    TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID")
-    TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH")
-    session_name = f"partner_session_{partner_user_id}"
-
-    # Инициализация клиента для партнера (каждый партнер должен пройти авторизацию один раз)
-    partner_client = TelegramClient(session_name, int(TELEGRAM_API_ID), TELEGRAM_API_HASH)
-    await partner_client.start()
-    try:
-        result = await partner_client(telethon_functions.payments.ConnectStarRefBotRequest(
-            bot=bot_username
-        ))
-        link = result.link
-        logger.info(f"Партнерская ссылка для user_id={partner_user_id}: {link}")
-        return link
-    finally:
-        await partner_client.disconnect() 
