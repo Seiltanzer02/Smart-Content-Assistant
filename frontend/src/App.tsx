@@ -1642,10 +1642,16 @@ function App() {
   // Основной интерфейс
   return (
     <div className="app-container">
-      {/* Лог состояния */}
       <header className="app-header" style={{ minHeight: '36px', padding: '6px 0', fontSize: '1.1em' }}>
         <h1 style={{ margin: 0, fontSize: '1.2em', fontWeight: 600 }}>Smart Content Assistant</h1>
       </header>
+      
+      {/* Отладочная информация */}
+      <div style={{ padding: '5px', fontSize: '12px', color: '#666', textAlign: 'center' }}>
+        Статус подписки: {isChannelSubscribed === true ? 'Подписан' : 
+                         isChannelSubscribed === false ? 'Не подписан' : 
+                         'Проверка...'}
+      </div>
       
       {/* Компонент проверки подписки на канал */}
       {userId && isChannelSubscribed === false && (
@@ -1655,27 +1661,23 @@ function App() {
         />
       )}
       
-      {/* Отображаем основной контент только если пользователь подписан на канал или проверка не завершена */}
-      {(isChannelSubscribed === true || isChannelSubscribed === null) && (
-        <>
-          {/* Блок подписки */}
-          {showSubscription && (
-            <SubscriptionWidget userId={userId} isActive={true}/>
-          )}
-
-          <main className="app-main">
-            {/* Сообщения об ошибках и успешном выполнении */}
-            {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
-            {success && <SuccessMessage message={success} onClose={() => setSuccess(null)} />}
-            
-            {/* Всё остальное содержимое main остаётся без изменений */}
-            <div>
-              <h2>Основной контент загружен</h2>
-              <p>Приложение работает корректно</p>
-            </div>
-          </main>
-        </>
-      )}
+      {/* Отображаем основной контент в любом случае, чтобы избежать пустой страницы */}
+      <main className="app-main">
+        {/* Сообщения об ошибках и успешном выполнении */}
+        {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
+        {success && <SuccessMessage message={success} onClose={() => setSuccess(null)} />}
+        
+        {/* Показываем блок подписки, если нужно */}
+        {showSubscription && (
+          <SubscriptionWidget userId={userId} isActive={true}/>
+        )}
+        
+        {/* Всё остальное содержимое main остаётся без изменений */}
+        <div>
+          <h2>Основной контент загружен</h2>
+          <p>Приложение работает корректно</p>
+        </div>
+      </main>
       
       <Toaster position="top-center" reverseOrder={false} />
     </div>

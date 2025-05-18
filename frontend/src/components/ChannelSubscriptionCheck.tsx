@@ -15,10 +15,12 @@ const ChannelSubscriptionCheck: React.FC<ChannelSubscriptionCheckProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [channelName, setChannelName] = useState<string>('');
+  const [debugInfo, setDebugInfo] = useState<string>('Инициализация...');
 
   // Проверка подписки при загрузке компонента
   useEffect(() => {
     console.log('ChannelSubscriptionCheck: initializing with userId:', userId);
+    setDebugInfo(`Проверка подписки для пользователя: ${userId}`);
     checkSubscription();
   }, [userId]);
 
@@ -27,6 +29,7 @@ const ChannelSubscriptionCheck: React.FC<ChannelSubscriptionCheckProps> = ({
     if (!userId) {
       console.error('ChannelSubscriptionCheck: userId is null');
       setError('Не удалось определить ID пользователя');
+      setDebugInfo('Ошибка: userId is null');
       setIsLoading(false);
       return;
     }
@@ -34,12 +37,14 @@ const ChannelSubscriptionCheck: React.FC<ChannelSubscriptionCheckProps> = ({
     console.log('ChannelSubscriptionCheck: начинаем проверку подписки для', userId);
     setIsLoading(true);
     setError(null);
+    setDebugInfo(`Отправка запроса на /channel/subscription/status?user_id=${userId}`);
 
     try {
       const result = await checkChannelSubscription(userId);
       console.log('ChannelSubscriptionCheck: результат проверки:', result);
       setIsSubscribed(result.is_subscribed);
       setChannelName(result.channel);
+      setDebugInfo(`Получен ответ: is_subscribed=${result.is_subscribed}, channel=${result.channel}`);
       
       // Вызываем callback, если он предоставлен
       if (onSubscriptionVerified) {
@@ -49,6 +54,7 @@ const ChannelSubscriptionCheck: React.FC<ChannelSubscriptionCheckProps> = ({
     } catch (err) {
       console.error('Ошибка при проверке подписки:', err);
       setError('Не удалось проверить подписку. Пожалуйста, попробуйте позже.');
+      setDebugInfo(`Ошибка: ${err}`);
     } finally {
       setIsLoading(false);
     }
@@ -56,22 +62,26 @@ const ChannelSubscriptionCheck: React.FC<ChannelSubscriptionCheckProps> = ({
 
   // Открытие канала для подписки
   const handleSubscribe = async () => {
+    setDebugInfo('Открытие канала для подписки...');
     await openChannelSubscription();
+    setDebugInfo('Канал для подписки открыт. Ожидание проверки...');
   };
 
   if (isLoading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
         <CircularProgress />
+        <Typography variant="body2" sx={{ mt: 2, color: '#666' }}>
+          Проверка подписки...
+        </Typography>
+        <Typography variant="caption" sx={{ mt: 1, color: '#999', fontSize: '10px' }}>
+          Отладка: {debugInfo}
+        </Typography>
       </Box>
     );
   }
 
-  // Если пользователь уже подписан, не показываем ничего
-  if (isSubscribed === true) {
-    return null;
-  }
-
+  // Всегда показываем компонент при первоначальной загрузке
   return (
     <Paper 
       elevation={3} 
@@ -85,7 +95,9 @@ const ChannelSubscriptionCheck: React.FC<ChannelSubscriptionCheckProps> = ({
       }}
     >
       <Typography variant="h5" component="h2" gutterBottom>
-        Требуется подписка на канал
+        {isSubscribed 
+          ? "Подписка активна" 
+          : "Требуется подписка на канал"}
       </Typography>
       
       {error && (
@@ -95,18 +107,21 @@ const ChannelSubscriptionCheck: React.FC<ChannelSubscriptionCheckProps> = ({
       )}
       
       <Typography variant="body1" paragraph>
-        Для использования приложения необходимо подписаться на наш канал{' '}
-        {channelName && <strong>@{channelName}</strong>}.
+        {isSubscribed 
+          ? `Вы успешно подписаны на канал @${channelName}` 
+          : `Для использования приложения необходимо подписаться на канал ${channelName && <strong>@{channelName}</strong>}.`}
       </Typography>
       
       <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mt: 2 }}>
-        <Button 
-          variant="contained" 
-          color="primary" 
-          onClick={handleSubscribe}
-        >
-          Подписаться на канал
-        </Button>
+        {!isSubscribed && (
+          <Button 
+            variant="contained" 
+            color="primary" 
+            onClick={handleSubscribe}
+          >
+            Подписаться на канал
+          </Button>
+        )}
         
         <Button 
           variant="outlined"
@@ -115,6 +130,11 @@ const ChannelSubscriptionCheck: React.FC<ChannelSubscriptionCheckProps> = ({
           Проверить подписку
         </Button>
       </Box>
+      
+      {/* Отладочная информация */}
+      <Typography variant="caption" sx={{ mt: 2, display: 'block', color: '#999', fontSize: '10px' }}>
+        Отладка: {debugInfo}
+      </Typography>
     </Paper>
   );
 };
