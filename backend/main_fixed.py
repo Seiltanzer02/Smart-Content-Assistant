@@ -557,6 +557,18 @@ async def telegram_webhook(request: Request):
         
         # ... остальная обработка вебхуков ...
         
+        # Обработка команды /partner_link
+        if text == '/partner_link':
+            try:
+                db_pool = get_db_pool()
+                service = PartnerReferralService(db_pool)
+                partner_link = await service.get_partner_link(int(user_id))
+                await send_telegram_message(user_id, f"Ваша партнёрская ссылка:\n{partner_link}")
+            except Exception as e:
+                logger.error(f"Ошибка при получении партнёрской ссылки: {e}")
+                await send_telegram_message(user_id, "Ошибка при получении партнёрской ссылки. Попробуйте позже.")
+            return {"ok": True}
+        
         return {"ok": True}
     except Exception as e:
         logger.error(f"Ошибка при обработке вебхука Telegram: {e}")
@@ -2445,11 +2457,11 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
                         # Обновляем существующую запись
                         result = supabase.table("channel_analysis").update(analysis_data).eq("user_id", telegram_user_id).eq("channel_name", username).execute()
                         logger.info(f"Обновлен результат анализа для канала @{username} пользователя {telegram_user_id}")
-            else:
+                    else:
                         # Создаем новую запись
                         result = supabase.table("channel_analysis").insert(analysis_data).execute()
                         logger.info(f"Сохранен новый результат анализа для канала @{username} пользователя {telegram_user_id}")
-        except Exception as api_error:
+                except Exception as api_error:
                     logger.warning(f"Ошибка при сохранении через API: {api_error}. Пробуем прямой SQL запрос.")
                     
                     # Получаем URL и ключ Supabase

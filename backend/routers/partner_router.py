@@ -1,10 +1,10 @@
+import os
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import logging
-
 from utils.partner_referral import get_partner_referral_service, PartnerReferralService
-import asyncpg
+from main_fixed import get_db_pool
 
 # Настройка логирования
 logger = logging.getLogger('partner_router')
@@ -33,11 +33,7 @@ class ReferralRequest(BaseModel):
 
 # Функция для получения сервиса работы с партнерскими ссылками
 async def get_referral_service():
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        raise ValueError("DATABASE_URL не указан в переменных окружения")
-    
-    pool = await asyncpg.create_pool(db_url)
+    pool = get_db_pool()
     return await get_partner_referral_service(pool)
 
 # Маршруты API
@@ -75,7 +71,4 @@ async def track_referral(request: ReferralRequest, service: PartnerReferralServi
         return {"success": True, "message": "Реферал успешно отслежен"}
     except Exception as e:
         logger.error(f"Ошибка при отслеживании реферала: {e}")
-        raise HTTPException(status_code=500, detail=f"Не удалось отследить реферал: {str(e)}")
-
-# Импорт модуля os
-import os 
+        raise HTTPException(status_code=500, detail=f"Не удалось отследить реферал: {str(e)}") 

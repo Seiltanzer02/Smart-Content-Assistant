@@ -91,6 +91,17 @@ class DirectPremiumStatusResponse(BaseModel):
     analysis_count: Optional[int] = None
     post_generation_count: Optional[int] = None
 
+db_pool = None
+
+@app.on_event("startup")
+async def startup():
+    global db_pool
+    db_url = os.getenv("DATABASE_URL")
+    db_pool = await asyncpg.create_pool(db_url)
+
+def get_db_pool():
+    return db_pool
+
 async def get_subscription_service():
     """Создает экземпляр SubscriptionService с подключением к базе данных"""
     try:
