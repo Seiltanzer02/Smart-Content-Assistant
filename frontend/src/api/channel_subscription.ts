@@ -20,6 +20,7 @@ export interface ChannelSubscriptionStatus {
  */
 export const checkChannelSubscription = async (userId: string | null): Promise<ChannelSubscriptionStatus> => {
   if (!userId) {
+    console.error('checkChannelSubscription: userId не предоставлен');
     return {
       success: false,
       is_subscribed: false,
@@ -31,6 +32,7 @@ export const checkChannelSubscription = async (userId: string | null): Promise<C
   }
 
   try {
+    console.log(`checkChannelSubscription: Проверяем подписку для пользователя ${userId}`);
     const nocache = `nocache=${new Date().getTime()}`;
     const response = await axios.get(`${API_URL}/channel/subscription/status?user_id=${userId}&${nocache}`, {
       headers: {
@@ -41,6 +43,7 @@ export const checkChannelSubscription = async (userId: string | null): Promise<C
       }
     });
 
+    console.log('checkChannelSubscription: Получен ответ', response.data);
     return response.data;
   } catch (error) {
     console.error('Ошибка при проверке подписки на канал:', error);

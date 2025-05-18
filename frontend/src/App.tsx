@@ -464,6 +464,14 @@ function App() {
   const [ideasLimitResetTime, setIdeasLimitResetTime] = useState<string | null>(null);
   const [isChannelSubscribed, setIsChannelSubscribed] = useState<boolean | null>(null);
   
+  // ДОБАВЛЯЮ ЛОГИ ДЛЯ ОТЛАДКИ
+  console.log('Состояние App:', { 
+    isAuthenticated, 
+    userId, 
+    isChannelSubscribed,
+    loading 
+  });
+  
   // === ДОБАВЛЯЮ: Массивы забавных сообщений для прогресс-баров ===
   const postDetailsMessages = [
     "Завариваем кофе для музы... Обычно это занимает некоторое время. ☕",
@@ -1634,12 +1642,13 @@ function App() {
   // Основной интерфейс
   return (
     <div className="app-container">
+      {/* Лог состояния */}
       <header className="app-header" style={{ minHeight: '36px', padding: '6px 0', fontSize: '1.1em' }}>
         <h1 style={{ margin: 0, fontSize: '1.2em', fontWeight: 600 }}>Smart Content Assistant</h1>
       </header>
       
       {/* Компонент проверки подписки на канал */}
-      {userId && !isChannelSubscribed && (
+      {userId && isChannelSubscribed === false && (
         <ChannelSubscriptionCheck 
           userId={userId} 
           onSubscriptionVerified={handleSubscriptionVerified} 
@@ -1647,7 +1656,7 @@ function App() {
       )}
       
       {/* Отображаем основной контент только если пользователь подписан на канал или проверка не завершена */}
-      {(isChannelSubscribed || isChannelSubscribed === null) && (
+      {(isChannelSubscribed === true || isChannelSubscribed === null) && (
         <>
           {/* Блок подписки */}
           {showSubscription && (
@@ -1660,6 +1669,10 @@ function App() {
             {success && <SuccessMessage message={success} onClose={() => setSuccess(null)} />}
             
             {/* Всё остальное содержимое main остаётся без изменений */}
+            <div>
+              <h2>Основной контент загружен</h2>
+              <p>Приложение работает корректно</p>
+            </div>
           </main>
         </>
       )}
