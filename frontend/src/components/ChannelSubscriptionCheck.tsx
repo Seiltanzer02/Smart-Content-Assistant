@@ -18,27 +18,32 @@ const ChannelSubscriptionCheck: React.FC<ChannelSubscriptionCheckProps> = ({
 
   // Проверка подписки при загрузке компонента
   useEffect(() => {
+    console.log('ChannelSubscriptionCheck: initializing with userId:', userId);
     checkSubscription();
   }, [userId]);
 
   // Функция для проверки подписки
   const checkSubscription = async () => {
     if (!userId) {
+      console.error('ChannelSubscriptionCheck: userId is null');
       setError('Не удалось определить ID пользователя');
       setIsLoading(false);
       return;
     }
 
+    console.log('ChannelSubscriptionCheck: начинаем проверку подписки для', userId);
     setIsLoading(true);
     setError(null);
 
     try {
       const result = await checkChannelSubscription(userId);
+      console.log('ChannelSubscriptionCheck: результат проверки:', result);
       setIsSubscribed(result.is_subscribed);
       setChannelName(result.channel);
       
       // Вызываем callback, если он предоставлен
       if (onSubscriptionVerified) {
+        console.log('ChannelSubscriptionCheck: вызываем onSubscriptionVerified с', result.is_subscribed);
         onSubscriptionVerified(result.is_subscribed);
       }
     } catch (err) {
