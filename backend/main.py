@@ -14,7 +14,7 @@ import re
 import random
 
 # FastAPI компоненты
-from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends, Form, BackgroundTasks
+from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends, Form
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -221,11 +221,6 @@ app.include_router(ideas.router)
 app.include_router(posts.router)
 app.include_router(user_settings.router, prefix="/api/user", tags=["User Settings"])
 app.include_router(images.router, prefix="/api", tags=["Images"])
-
-# Импортируем роутер для проверки подписки на канал
-from backend.routers.channel_subscription import router as channel_subscription_router
-
-app.include_router(channel_subscription_router)  # Добавляем роутер для проверки подписки на канал
 # --- Конец подключения роутеров ---
 
 # --- ВАЖНО: API-эндпоинты для проверки подписки ПЕРЕД SPA-маршрутами ---
@@ -4192,4 +4187,7 @@ async def send_image_to_chat(request: Request):
             return JSONResponse({'success': False, 'error': resp.text}, status_code=500)
     except Exception as e:
         return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
+
+from backend.services.telegram_subscription_check import router as telegram_subscription_router
+app.include_router(telegram_subscription_router, prefix="", tags=["Telegram Channel Subscription"])
 

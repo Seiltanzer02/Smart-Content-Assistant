@@ -2445,11 +2445,11 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
                         # Обновляем существующую запись
                         result = supabase.table("channel_analysis").update(analysis_data).eq("user_id", telegram_user_id).eq("channel_name", username).execute()
                         logger.info(f"Обновлен результат анализа для канала @{username} пользователя {telegram_user_id}")
-                    else:
+            else:
                         # Создаем новую запись
                         result = supabase.table("channel_analysis").insert(analysis_data).execute()
                         logger.info(f"Сохранен новый результат анализа для канала @{username} пользователя {telegram_user_id}")
-                except Exception as api_error:
+        except Exception as api_error:
                     logger.warning(f"Ошибка при сохранении через API: {api_error}. Пробуем прямой SQL запрос.")
                     
                     # Получаем URL и ключ Supabase
@@ -2503,7 +2503,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
         sample_texts = [post.get("text", "") for post in posts[:5] if post.get("text")]
         sample_posts = sample_texts
         
-    except Exception as e:
+            except Exception as e:
         logger.error(f"Ошибка при анализе контента: {e}")
         # Если произошла ошибка при анализе, возвращаем ошибку 500
         raise HTTPException(status_code=500, detail=f"Ошибка при анализе контента: {str(e)}")
