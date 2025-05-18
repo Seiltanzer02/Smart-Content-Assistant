@@ -1629,70 +1629,145 @@ function App() {
     };
   }, []);
 
-  // Компонент загрузки
-  if (loading) {
-    return (
-      <div className="loading-container">
-        <div className="loading-spinner"></div>
-        <p>Загрузка приложения...</p>
-    </div>
-  );
-  }
-
-  // Компонент авторизации
-  if (!isAuthenticated) {
-    return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
-  }
-
   // Получаем username канала с backend
   useEffect(() => {
     async function fetchChannelUsername() {
+      // --- ДОБАВЛЕНО: Проверка userId ---
+      if (!userId) {
+        // Можно также сбросить channelUsername, если userId пропал
+        // setChannelUsername(''); 
+        return;
+      }
+      // --- КОНЕЦ ДОБАВЛЕНИЯ ---
       try {
-        const res = await fetch('/api/user/channel-info');
+        const res = await fetch('/api/user/channel-info'); // Этот эндпоинт все еще нужен
         const data = await res.json();
         if (data.channel_username) setChannelUsername(data.channel_username);
       } catch (e) {
         // fallback не нужен, просто не будет ссылки
+        console.error("Ошибка при загрузке channel username:", e);
       }
     }
     fetchChannelUsername();
-  }, []);
+  }, [userId]); // <--- ИЗМЕНЕНО: Добавлен userId в зависимости
 
   // Проверка подписки на канал
   const handleCheckChannel = async () => {
     setChannelCheckError(null);
-    if (!userId) return;
-    const res = await checkChannelSubscription(userId);
-    setChannelChecked(true);
-    setHasChannelAccess(res.has_channel_subscription);
-    if (!res.has_channel_subscription) setChannelCheckError(res.error || 'Вы не подписаны на канал');
+    // --- ИЗМЕНЕНО: Проверка userId в начале ---
+    if (!userId) {
+      setChannelCheckError("Пользователь не авторизован для проверки подписки.");
+      // Не устанавливаем channelChecked в true, так как проверка не состоялась
+      return; 
+    }
+    // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
+    try { // --- ДОБАВЛЕНО: try-catch для обработки ошибок запроса ---
+      const res = await checkChannelSubscription(userId);
+      // --- ИЗМЕНЕНО: setChannelChecked(true) после ответа ---
+      setChannelChecked(true); 
+      setHasChannelAccess(res.has_channel_subscription);
+      if (!res.has_channel_subscription) {
+        setChannelCheckError(res.error || 'Вы не подписаны на канал. Пожалуйста, подпишитесь и попробуйте снова.');
+      }
+    } catch (apiError: any) {
+      console.error("Ошибка API при проверке подписки на канал:", apiError);
+      setChannelChecked(true); // Проверка была, но с ошибкой
+      setHasChannelAccess(false); // Считаем, что доступа нет
+      setChannelCheckError(apiError?.message || "Ошибка при проверке подписки. Попробуйте позже.");
+    }
+    // --- КОНЕЦ ДОБАВЛЕНИЯ ---
   };
 
   // Показываем экран подписки, если не подписан
-  if (isAuthenticated && userId && (!channelChecked || !hasChannelAccess)) {
+  // --- ИЗМЕНЕНИЕ: Добавил начальную проверку isAuthenticated && userId, чтобы handleCheckChannel не вызывался слишком рано ---
+  useEffect(() => {
+    if (isAuthenticated && userId && !channelChecked) {
+      // Вызываем проверку только если пользователь аутентифицирован, есть ID,
+      // и проверка еще не выполнялась (или ее нужно выполнить повторно)
+      handleCheckChannel();
+    }
+    // Зависимости: isAuthenticated, userId, channelChecked 
+    // Если channelChecked сбрасывать при выходе/потере userId, то этот useEffect будет срабатывать правильно
+  }, [isAuthenticated, userId, channelChecked]); 
+
+
+  // --- ИЗМЕНЕНИЕ: Логика отображения загрузки/авторизации/экрана подписки ---
+  if (loading) { // Общая загрузка приложения (например, скрипты Telegram)
     return (
-      <div style={{ textAlign: 'center', marginTop: 40 }}>
-        <p>Чтобы пользоваться приложением, подпишитесь на наш канал:</p>
-        <a
-          href={`https://t.me/${channelUsername}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ fontWeight: 'bold', fontSize: 18, color: '#1976d2' }}
-        >
-          Перейти в канал
-        </a>
-        <br /><br />
-        <button onClick={handleCheckChannel} style={{ padding: '10px 20px', fontSize: 16 }}>
-          Проверить подписку
-        </button>
-        {channelChecked && !hasChannelAccess && (
-          <div style={{ color: 'red', marginTop: 10 }}>{channelCheckError}</div>
-        )}
+      <div className="loading-container">
+        <div className="loading-spinner"></div>
+        <p>Загрузка приложения...</p>
       </div>
     );
   }
 
-  // Основной интерфейс
+  if (!isAuthenticated || !userId) { // Если не аутентифицирован или нет userId
+    return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
+  }
+  
+  // Если аутентифицирован и есть userId, но проверка подписки еще не завершена ИЛИ нет доступа
+  if (!channelChecked || !hasChannelAccess) {
+    // Если channelUsername еще не загружен, можно показать другую загрузку или просто подождать
+    // Этот блок теперь зависит от channelChecked
+    // Если handleCheckChannel еще не вызывался (например, channelChecked = false), он вызовется из useEffect выше.
+    // Если вызвался, но hasChannelAccess = false, покажем этот экран.
+
+    // Если channelUsername пуст, но проверка уже идет/была, то ссылка будет неполной.
+    // Можно добавить условие на channelUsername или просто показать "загрузка..." для ссылки.
+    const channelLink = channelUsername 
+      ? `https://t.me/${channelUsername}` 
+      : "#"; // Или какой-то placeholder
+
+    return (
+      <div style={{ textAlign: 'center', marginTop: 40, padding: 20 }}>
+        <h3>Проверка доступа</h3>
+        {!channelChecked && ( // Если проверка еще не была инициирована или в процессе
+           <div style={{ margin: '20px 0' }}>
+             <ClipLoader color="#36d7b7" size={35} />
+             <p style={{ marginTop: 10 }}>Проверяем вашу подписку на канал...</p>
+           </div>
+        )}
+        {channelChecked && !hasChannelAccess && ( // Если проверка была, но доступа нет
+          <>
+            <p>Для доступа к приложению, пожалуйста, подпишитесь на наш Telegram-канал:</p>
+            <a
+              href={channelLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ 
+                fontWeight: 'bold', 
+                fontSize: 18, 
+                color: '#1976d2', 
+                display: 'inline-block', 
+                margin: '10px 0',
+                pointerEvents: channelUsername ? 'auto' : 'none', // Делаем ссылку некликабельной, если имя не загружено
+                opacity: channelUsername ? 1 : 0.5
+              }}
+            >
+              {channelUsername ? `Перейти в канал @${channelUsername}` : "Загрузка имени канала..."}
+            </a>
+            <br /><br />
+            <button 
+              onClick={handleCheckChannel} 
+              style={{ padding: '10px 20px', fontSize: 16, cursor: 'pointer' }}
+              disabled={!userId} // Блокируем, если вдруг userId пропал
+            >
+              Проверить подписку еще раз
+            </button>
+            {channelCheckError && (
+              <div style={{ color: 'red', marginTop: 15, padding: '10px', border: '1px solid red', borderRadius: '4px', backgroundColor: '#ffeeee' }}>
+                {channelCheckError}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+  // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
+  // Основной интерфейс (если все проверки пройдены)
   return (
     <div className="app-container">
       <header className="app-header" style={{ minHeight: '36px', padding: '6px 0', fontSize: '1.1em' }}>
