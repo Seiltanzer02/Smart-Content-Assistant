@@ -1,15 +1,12 @@
 ﻿# Сервис для работы с постами
 from fastapi import Request, HTTPException
 from typing import Dict, Any, List, Optional
-from backend.main import supabase, logger, OPENROUTER_API_KEY, OPENAI_API_KEY
-from backend.main import generate_image_keywords, search_unsplash_images, get_channel_analysis, IMAGE_RESULTS_COUNT
+from backend.main import supabase, logger
 from pydantic import BaseModel
 import uuid
 import asyncio
 from datetime import datetime
 import traceback
-from openai import AsyncOpenAI
-from backend.services.supabase_subscription_service import SupabaseSubscriptionService
 
 # Импорт моделей PostImage, PostData, SavedPostResponse, PostDetailsResponse из main.py или отдельного файла моделей
 # from backend.models import PostImage, PostData, SavedPostResponse, PostDetailsResponse
@@ -341,30 +338,24 @@ async def delete_post(post_id: str, request: Request):
         raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера при удалении поста: {str(e)}")
 
 async def generate_post_details(request: Request, req):
+    import traceback
+    from backend.main import generate_image_keywords, search_unsplash_images, get_channel_analysis, IMAGE_RESULTS_COUNT, PostImage, OPENROUTER_API_KEY, OPENAI_API_KEY, logger
+    from openai import AsyncOpenAI
     found_images = []
     api_error_message = None
-    
     try:
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
-        subscription_service = SupabaseSubscriptionService(supabase)
-        
-        # Проверка лимита создания постов (если пользователь авторизован)
         if telegram_user_id:
+            from backend.services.supabase_subscription_service import SupabaseSubscriptionService
+            subscription_service = SupabaseSubscriptionService(supabase)
             can_generate = await subscription_service.can_generate_post(int(telegram_user_id))
             if not can_generate:
                 usage = await subscription_service.get_user_usage(int(telegram_user_id))
                 reset_at = usage.get("reset_at")
-                logger.warning(f"Достигнут лимит генераций поста для пользователя {telegram_user_id}")
-                return {
-                    "generated_text": "",
-                    "found_images": [],
-                    "message": f"Достигнут лимит для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Лимиты обновляются каждые 3 дня. Оформите подписку для снятия ограничений.",
-                    "limit_reached": True,
-                    "reset_at": reset_at,
-                    "subscription_required": True
-                }
-        
-        # Получаем параметры для генерации
+                raise HTTPException(status_code=403, detail=f"Достигнут лимит в 2 генерации постов для бесплатной подписки. Следующая попытка будет доступна после: {reset_at}. Лимиты обновляются каждые 3 дня. Оформите подписку для снятия ограничений.")
+        if not telegram_user_id:
+            logger.warning("Запрос генерации поста без идентификации пользователя Telegram")
+            raise HTTPException(status_code=401, detail="Для генерации постов необходимо авторизоваться через Telegram")
         topic_idea = req.get("topic_idea")
         format_style = req.get("format_style")
         channel_name = req.get("channel_name", "")
@@ -409,31 +400,31 @@ async def generate_post_details(request: Request, req):
         if OPENROUTER_API_KEY:
             try:
                 logger.info(f"Отправка запроса на генерацию поста по идее через OpenRouter API: {topic_idea}")
-                client = AsyncOpenAI(
-                    base_url="https://openrouter.ai/api/v1",
-                    api_key=OPENROUTER_API_KEY
-                )
-                response = await client.chat.completions.create(
+        client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY
+        )
+            response = await client.chat.completions.create(
                     model="meta-llama/llama-4-maverick:free",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=850,
-                    timeout=60,
-                    extra_headers={
-                        "HTTP-Referer": "https://content-manager.onrender.com",
-                        "X-Title": "Smart Content Assistant"
-                    }
-                )
-                if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-                    post_text = response.choices[0].message.content.strip()
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=850,
+                timeout=60,
+                extra_headers={
+                    "HTTP-Referer": "https://content-manager.onrender.com",
+                    "X-Title": "Smart Content Assistant"
+                }
+            )
+            if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+                post_text = response.choices[0].message.content.strip()
                     logger.info(f"Получен текст поста через OpenRouter API ({len(post_text)} символов)")
-                elif response and hasattr(response, 'error') and response.error:
-                    err_details = response.error
-                    api_error_message = getattr(err_details, 'message', str(err_details))
-                    logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
+            elif response and hasattr(response, 'error') and response.error:
+                err_details = response.error
+                api_error_message = getattr(err_details, 'message', str(err_details))
+                logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
                     # Ошибка OpenRouter API - пробуем запасной вариант
                     raise Exception(f"OpenRouter API вернул ошибку: {api_error_message}")
                 else:
@@ -473,7 +464,7 @@ async def generate_post_details(request: Request, req):
                         post_text = "[Текст не сгенерирован из-за ошибок API]"
                 else:
                     logger.error("Запасной OPENAI_API_KEY не настроен, невозможно использовать альтернативный API")
-                    post_text = "[Текст не сгенерирован из-за ошибки API]"
+                post_text = "[Текст не сгенерирован из-за ошибки API]"
         
         # Если нет OPENROUTER_API_KEY, но есть OPENAI_API_KEY, используем его напрямую
         elif OPENAI_API_KEY:
@@ -495,7 +486,7 @@ async def generate_post_details(request: Request, req):
                 if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
                     post_text = openai_response.choices[0].message.content.strip()
                     logger.info(f"Получен текст поста через OpenAI API ({len(post_text)} символов)")
-                else:
+            else:
                     logger.error(f"Некорректный или пустой ответ от OpenAI API")
                     post_text = "[Текст не сгенерирован из-за ошибки API]"
             except Exception as openai_error:

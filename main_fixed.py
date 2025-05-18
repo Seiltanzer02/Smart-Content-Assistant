@@ -421,7 +421,6 @@ async def force_premium_status(user_id: str):
                 SELECT end_date 
                 FROM user_subscription 
                 WHERE user_id = $1 
-                  AND is_active = TRUE
                 ORDER BY end_date DESC 
                 LIMIT 1
                 """
@@ -1375,10 +1374,9 @@ async def force_premium_status(user_id: str, days: int = 30, admin_key: str = Qu
                 start_date,
                 start_date
             )
-            
-            # Возвращаем результат внутри блока try
-            return {
-                "success": True,
+        
+        return {
+            "success": True,
                 "message": f"Премиум-статус успешно активирован для пользователя {user_id}",
                 "user_id": user_id,
                 "start_date": start_date.isoformat(),

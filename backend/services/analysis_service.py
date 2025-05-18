@@ -119,9 +119,9 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
             # Пробуем сначала использовать OpenRouter API
             try:
                 logger.info(f"Анализируем посты канала @{username} с использованием OpenRouter API")
-                analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
-                themes = analysis_result.get("themes", [])
-                styles = analysis_result.get("styles", [])
+        analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
+        themes = analysis_result.get("themes", [])
+        styles = analysis_result.get("styles", [])
                 
                 if not themes and not styles:
                     # Если не получены результаты, пробуем запасной API
@@ -308,36 +308,26 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
             user_settings_result = supabase.table("user_settings").select("allChannels").eq("user_id", telegram_user_id).maybe_single().execute()
             all_channels = []
             if hasattr(user_settings_result, 'data') and user_settings_result.data and user_settings_result.data.get("allChannels"):
-                all_channels = user_settings_result.data.get("allChannels", [])
+                all_channels = user_settings_result.data["allChannels"]
             if username not in all_channels:
                 all_channels.append(username)
-                supabase.table("user_settings").upsert({"user_id": int(telegram_user_id), "allChannels": all_channels}).execute()
-            # Увеличиваем счетчик использования анализа (только если это не было ошибкой)
-            await subscription_service.increment_analysis_usage(int(telegram_user_id))
+                supabase.table("user_settings").update({"allChannels": all_channels, "updated_at": datetime.now().isoformat()}).eq("user_id", telegram_user_id).execute()
         except Exception as db_error:
-            logger.error(f"Ошибка при сохранении анализа в БД: {db_error}")
-            error_message = error_message or f"Ошибка при сохранении результатов анализа: {str(db_error)}"
-        
-        # 6. Возвращаем результат
+            logger.error(f"Ошибка при сохранении результатов анализа в БД: {db_error}")
+        # 6. Увеличиваем счетчик использования
+        try:
+            await subscription_service.increment_analysis_usage(int(telegram_user_id))
+        except Exception as counter_error:
+            logger.error(f"Ошибка при увеличении счетчика анализа: {counter_error}")
+        # 7. Возвращаем результат
         return AnalyzeResponse(
             themes=themes,
             styles=styles,
-            analyzed_posts_sample=[p.get("text", "")[:200] + "..." if len(p.get("text", "")) > 200 else p.get("text", "") for p in posts[:5]],
-            best_posting_time="18:00-20:00",  # Упрощенно
+            analyzed_posts_sample=[post.get("text", "") for post in posts[:10]],
+            best_posting_time="18:00-20:00",
             analyzed_posts_count=len(posts),
             message=error_message
         )
-        
-    except HTTPException as he:
-        # Пробрасываем HTTPException дальше
-        raise he
     except Exception as e:
-        logger.error(f"Ошибка при анализе канала @{req.username}: {e}")
-        return AnalyzeResponse(
-            themes=[],
-            styles=[],
-            analyzed_posts_sample=[],
-            best_posting_time="",
-            analyzed_posts_count=0,
-            error=f"Ошибка при анализе канала @{req.username}: {str(e)}"
-        ) 
+        logger.error(f"Ошибка при анализе канала для пользователя {telegram_user_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера: {str(e)}") 
