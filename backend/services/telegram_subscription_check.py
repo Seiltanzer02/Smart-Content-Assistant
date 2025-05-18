@@ -3,7 +3,7 @@ import httpx
 from fastapi import HTTPException, APIRouter, Request
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TARGET_CHANNEL_USERNAME = os.getenv("TARGET_CHANNEL_USERNAME")  # Пример: "@my_channel"
+TARGET_CHANNEL_USERNAME = os.getenv("TARGET_CHANNEL_USERNAME")  # без @
 
 if not TELEGRAM_BOT_TOKEN or not TARGET_CHANNEL_USERNAME:
     raise RuntimeError("TELEGRAM_BOT_TOKEN и TARGET_CHANNEL_USERNAME должны быть заданы в переменных окружения")
@@ -14,20 +14,17 @@ async def check_user_channel_subscription(user_id: int) -> bool:
     """
     Проверяет, подписан ли пользователь на канал.
     """
-    channel = TARGET_CHANNEL_USERNAME.lstrip("@")
     url = f"{TELEGRAM_API_URL}/getChatMember"
     params = {
-        "chat_id": f"@{channel}",
+        "chat_id": f"@{TARGET_CHANNEL_USERNAME}",
         "user_id": user_id
     }
     async with httpx.AsyncClient() as client:
         resp = await client.get(url, params=params)
         data = resp.json()
         if not data.get("ok"):
-            # Если бот не админ в канале — будет ошибка
-            raise HTTPException(status_code=500, detail=f"Ошибка Telegram API: {data.get('description')}")
+            return False
         status = data["result"]["status"]
-        # Подписан, если статус member, administrator, creator
         return status in ("member", "administrator", "creator")
 
 async def send_subscription_prompt(user_id: int):
@@ -64,7 +61,12 @@ async def check_channel_subscription(request: Request):
         user_id = int(telegram_user_id)
         is_subscribed = await check_user_channel_subscription(user_id)
         return {"has_channel_subscription": is_subscribed}
-    except HTTPException as e:
-        return {"has_channel_subscription": False, "error": str(e.detail)}
     except Exception as e:
-        return {"has_channel_subscription": False, "error": str(e)} 
+        return {"has_channel_subscription": False, "error": str(e)}
+
+@router.get("/api/user/channel-info", status_code=200)
+async def get_channel_info():
+    """
+    Возвращает username канала для фронта (без @)
+    """
+    return {"channel_username": TARGET_CHANNEL_USERNAME} 
