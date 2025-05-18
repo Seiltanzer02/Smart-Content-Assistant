@@ -129,28 +129,28 @@ async def generate_content_plan(request: Request, req):
         if OPENROUTER_API_KEY:
             try:
                 logger.info(f"Отправка запроса на генерацию плана через OpenRouter API для канала {channel_name}")
-        client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=OPENROUTER_API_KEY
-        )
+                client = AsyncOpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=OPENROUTER_API_KEY
+                )
                 
-        response = await client.chat.completions.create(
+                response = await client.chat.completions.create(
                     model="meta-llama/llama-4-maverick:free",
-            messages=[
+                    messages=[
                         {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.7,
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.7,
                     max_tokens=1200,
                     timeout=60,
-            extra_headers={
-                "HTTP-Referer": "https://content-manager.onrender.com",
-                "X-Title": "Smart Content Assistant"
-            }
-        )
+                    extra_headers={
+                        "HTTP-Referer": "https://content-manager.onrender.com",
+                        "X-Title": "Smart Content Assistant"
+                    }
+                )
                 
-        if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-            plan_text = response.choices[0].message.content.strip()
+                if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+                    plan_text = response.choices[0].message.content.strip()
                     logger.info(f"Получен ответ с планом публикаций через OpenRouter API (первые 100 символов): {plan_text[:100]}...")
                 elif response and hasattr(response, 'error') and response.error:
                     err_details = response.error
@@ -158,12 +158,12 @@ async def generate_content_plan(request: Request, req):
                     logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
                     # Ошибка OpenRouter API - пробуем запасной вариант
                     raise Exception(f"OpenRouter API вернул ошибку: {api_error_message}")
-        else:
+                else:
                     # Проблема с ответом API
-            try:
+                    try:
                         logger.error(f"Некорректный или пустой ответ от OpenRouter API. Ответ: {response}")
-            except Exception as log_err:
-                logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
+                    except Exception as log_err:
+                        logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
                     # Ошибка OpenRouter API - пробуем запасной вариант
                     raise Exception("Некорректный или пустой ответ от OpenRouter API")
             except Exception as api_error:
@@ -214,42 +214,6 @@ async def generate_content_plan(request: Request, req):
                         "message": "Ошибка при генерации плана. API для генерации недоступны.",
                         "limit_reached": False
                     }
-        
-        # Если нет OPENROUTER_API_KEY, но есть OPENAI_API_KEY, используем его напрямую
-        elif OPENAI_API_KEY:
-            used_backup_api = True
-            logger.info(f"OPENROUTER_API_KEY отсутствует, используем OpenAI API напрямую для канала {channel_name}")
-            try:
-                openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-                
-                openai_response = await openai_client.chat.completions.create(
-                    model="gpt-3.5-turbo",  # Используем GPT-3.5 Turbo
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=1200
-                )
-                
-                if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
-                    plan_text = openai_response.choices[0].message.content.strip()
-                    logger.info(f"Получен план через OpenAI API ({len(plan_text)} символов)")
-                else:
-                    logger.error(f"Некорректный или пустой ответ от OpenAI API")
-                    return {
-                        "plan": [],
-                        "message": "Ошибка при генерации плана (некорректный ответ API).",
-                        "limit_reached": False
-                    }
-            except Exception as openai_error:
-                api_error_message = f"Ошибка соединения с OpenAI API: {str(openai_error)}"
-                logger.error(f"Ошибка при запросе к OpenAI API: {openai_error}", exc_info=True)
-                return {
-                    "plan": [],
-                    "message": f"Ошибка при генерации плана: {str(openai_error)}",
-                    "limit_reached": False
-                }
         else:
             logger.error("Отсутствуют API ключи для генерации плана (OPENROUTER_API_KEY и OPENAI_API_KEY)")
             return {
@@ -318,7 +282,7 @@ async def generate_content_plan(request: Request, req):
             result_message = "План сгенерирован с использованием резервного API (OpenAI)"
         
         # После успешной генерации идей увеличиваем счетчик использования
-            await subscription_service.increment_idea_usage(int(telegram_user_id))
+        await subscription_service.increment_idea_usage(int(telegram_user_id))
             
         return {"plan": plan_items, "message": result_message}
     except Exception as e:
