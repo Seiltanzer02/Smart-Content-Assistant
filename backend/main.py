@@ -3553,70 +3553,71 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
         if file and hasattr(file, 'close') and callable(file.close):
             await file.close()
 
-# --- Настройка обслуживания статических файлов (SPA) ---
-# Убедимся, что этот код идет ПОСЛЕ монтирования /uploads
-# Путь к папке сборки фронтенда (предполагаем, что она на два уровня выше и в папке frontend/dist)
-static_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
-
-# ФЛАГ для монтирования статики в конце файла
-SHOULD_MOUNT_STATIC = os.path.exists(static_folder) and os.path.isdir(static_folder)
-
-if SHOULD_MOUNT_STATIC:
-    logger.info(f"Статические файлы SPA будут обслуживаться из папки: {static_folder}")
-    try: # ИСПРАВЛЕНО: Добавлен блок try...except
-        app.mount("/", StaticFiles(directory=static_folder, html=True), name="static-spa") # ИСПРАВЛЕНО: Убраны лишние `\`
-        logger.info(f"Статические файлы SPA успешно смонтированы в корневом пути '/'")
-
-        # Явно добавим обработчик для корневого пути, если StaticFiles не справляется
-        @app.get("/") # ИСПРАВЛЕНО: Убраны лишние `\`
-        async def serve_index():
-            index_path = os.path.join(static_folder, "index.html")
-            if os.path.exists(index_path):
-                 return FileResponse(index_path, media_type="text/html")
-            else:
-                 logger.error(f"Файл index.html не найден в {static_folder}")
-                 return JSONResponse(content={"error": "Frontend not found"}, status_code=404)
-
-        # Обработчик для всех остальных путей SPA (если StaticFiles(html=True) недостаточно)
-        # Этот обработчик ПЕРЕХВАТИТ все, что не было перехвачено ранее (/api, /uploads, etc.)
-        @app.get("/{rest_of_path:path}") # ИСПРАВЛЕНО: Убраны лишние `\`
-        async def serve_spa_catch_all(request: Request, rest_of_path: str):
-            # Попытка обслужить статический актив из /assets/
-            if rest_of_path.startswith("assets/"):
-                file_path = os.path.join(static_folder, rest_of_path)
-                if os.path.exists(file_path) and os.path.isfile(file_path):
-                    return FileResponse(file_path) # FastAPI/Starlette угадает media_type
-                else:
-                    # Если файл в /assets/ не найден, это ошибка 404 для конкретного ресурса
-                    logger.error(f"Статический актив не найден: {file_path}")
-                    return JSONResponse(content={"error": "Asset not found"}, status_code=404)
-
-            # Исключаем API пути, чтобы SPA не перехватывал их.
-            # Эти пути должны обрабатываться своими собственными декораторами.
-            # Если запрос дошел сюда и это API путь, значит, соответствующий эндпоинт не найден.
-            if rest_of_path.startswith(("api/", "api-v2/", "docs", "openapi.json", "uploads/")):
-                logger.debug(f"Запрос к API-подобному пути '{rest_of_path}' не был обработан специализированным роутером и возвращает 404 из SPA catch-all.")
-                return JSONResponse(content={"error": f"API endpoint '{rest_of_path}' not found"}, status_code=404)
-
-            # Если это не API и не известный статический актив (не в /assets/), 
-            # то это должен быть путь SPA, возвращаем index.html для клиентского роутинга.
-            index_path = os.path.join(static_folder, "index.html")
-            if os.path.exists(index_path):
-                return FileResponse(index_path, media_type="text/html")
-            
-            # Крайний случай: index.html не найден (проблема конфигурации сервера)
-            logger.error(f"Файл index.html не найден в {static_folder} для SPA пути {rest_of_path}")
-            return JSONResponse(content={"error": "Frontend index.html not found"}, status_code=500)
-
-        logger.info("Обработчики для SPA настроены.")
-
-    except RuntimeError as mount_error: # ИСПРАВЛЕНО: Добавлен блок except
-        logger.error(f"Ошибка при монтировании статических файлов SPA: {mount_error}. Возможно, имя 'static-spa' уже используется или путь '/' занят.")
-    except Exception as e: # ИСПРАВЛЕНО: Добавлен блок except
-        logger.error(f"Непредвиденная ошибка при монтировании статических файлов SPA: {e}")
-else:
-    logger.warning(f"Папка статических файлов SPA не найдена: {static_folder}")
-    logger.warning("Обслуживание SPA фронтенда не настроено. Только API endpoints доступны.")
+# Старый код настройки SPA - закомментирован и перенесен в конец файла
+# # --- Настройка обслуживания статических файлов (SPA) ---
+# # Убедимся, что этот код идет ПОСЛЕ монтирования /uploads
+# # Путь к папке сборки фронтенда (предполагаем, что она на два уровня выше и в папке frontend/dist)
+# static_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
+# 
+# # ФЛАГ для монтирования статики в конце файла
+# SHOULD_MOUNT_STATIC = os.path.exists(static_folder) and os.path.isdir(static_folder)
+# 
+# if SHOULD_MOUNT_STATIC:
+#     logger.info(f"Статические файлы SPA будут обслуживаться из папки: {static_folder}")
+#     try: # ИСПРАВЛЕНО: Добавлен блок try...except
+#         app.mount("/", StaticFiles(directory=static_folder, html=True), name="static-spa") # ИСПРАВЛЕНО: Убраны лишние `\`
+#         logger.info(f"Статические файлы SPA успешно смонтированы в корневом пути '/'")
+# 
+#         # Явно добавим обработчик для корневого пути, если StaticFiles не справляется
+#         @app.get("/") # ИСПРАВЛЕНО: Убраны лишние `\`
+#         async def serve_index():
+#             index_path = os.path.join(static_folder, "index.html")
+#             if os.path.exists(index_path):
+#                  return FileResponse(index_path, media_type="text/html")
+#             else:
+#                  logger.error(f"Файл index.html не найден в {static_folder}")
+#                  return JSONResponse(content={"error": "Frontend not found"}, status_code=404)
+# 
+#         # Обработчик для всех остальных путей SPA (если StaticFiles(html=True) недостаточно)
+#         # Этот обработчик ПЕРЕХВАТИТ все, что не было перехвачено ранее (/api, /uploads, etc.)
+#         @app.get("/{rest_of_path:path}") # ИСПРАВЛЕНО: Убраны лишние `\`
+#         async def serve_spa_catch_all(request: Request, rest_of_path: str):
+#             # Попытка обслужить статический актив из /assets/
+#             if rest_of_path.startswith("assets/"):
+#                 file_path = os.path.join(static_folder, rest_of_path)
+#                 if os.path.exists(file_path) and os.path.isfile(file_path):
+#                     return FileResponse(file_path) # FastAPI/Starlette угадает media_type
+#                 else:
+#                     # Если файл в /assets/ не найден, это ошибка 404 для конкретного ресурса
+#                     logger.error(f"Статический актив не найден: {file_path}")
+#                     return JSONResponse(content={"error": "Asset not found"}, status_code=404)
+# 
+#             # Исключаем API пути, чтобы SPA не перехватывал их.
+#             # Эти пути должны обрабатываться своими собственными декораторами.
+#             # Если запрос дошел сюда и это API путь, значит, соответствующий эндпоинт не найден.
+#             if rest_of_path.startswith(("api/", "api-v2/", "docs", "openapi.json", "uploads/")):
+#                 logger.debug(f"Запрос к API-подобному пути '{rest_of_path}' не был обработан специализированным роутером и возвращает 404 из SPA catch-all.")
+#                 return JSONResponse(content={"error": f"API endpoint '{rest_of_path}' not found"}, status_code=404)
+# 
+#             # Если это не API и не известный статический актив (не в /assets/), 
+#             # то это должен быть путь SPA, возвращаем index.html для клиентского роутинга.
+#             index_path = os.path.join(static_folder, "index.html")
+#             if os.path.exists(index_path):
+#                 return FileResponse(index_path, media_type="text/html")
+#             
+#             # Крайний случай: index.html не найден (проблема конфигурации сервера)
+#             logger.error(f"Файл index.html не найден в {static_folder} для SPA пути {rest_of_path}")
+#             return JSONResponse(content={"error": "Frontend index.html not found"}, status_code=500)
+# 
+#         logger.info("Обработчики для SPA настроены.")
+# 
+#     except RuntimeError as mount_error: # ИСПРАВЛЕНО: Добавлен блок except
+#         logger.error(f"Ошибка при монтировании статических файлов SPA: {mount_error}. Возможно, имя 'static-spa' уже используется или путь '/' занят.")
+#     except Exception as e: # ИСПРАВЛЕНО: Добавлен блок except
+#         logger.error(f"Непредвиденная ошибка при монтировании статических файлов SPA: {e}")
+# else:
+#     logger.warning(f"Папка статических файлов SPA не найдена: {static_folder}")
+#     logger.warning("Обслуживание SPA фронтенда не настроено. Только API endpoints доступны.")
 
 # --- Запуск сервера (обычно в конце файла) ---
 if __name__ == "__main__":
@@ -4230,4 +4231,70 @@ async def channel_subscription_check_v2(request: Request, user_id: Optional[str]
         return {"has_channel_subscription": is_subscribed, "user_id": user_id_int, "error": error_msg}
     except Exception as e:
         return {"has_channel_subscription": False, "user_id": user_id_int, "error": str(e)}
+
+
+# --- Настройка обслуживания статических файлов (SPA) ---
+# Убедимся, что этот код идет ПОСЛЕ всех API маршрутов
+# Путь к папке сборки фронтенда (предполагаем, что она на два уровня выше и в папке frontend/dist)
+static_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
+
+# ФЛАГ для монтирования статики в конце файла
+SHOULD_MOUNT_STATIC = os.path.exists(static_folder) and os.path.isdir(static_folder)
+
+if SHOULD_MOUNT_STATIC:
+    logger.info(f"Статические файлы SPA будут обслуживаться из папки: {static_folder}")
+    try: # ИСПРАВЛЕНО: Добавлен блок try...except
+        app.mount("/", StaticFiles(directory=static_folder, html=True), name="static-spa") # ИСПРАВЛЕНО: Убраны лишние `\`
+        logger.info(f"Статические файлы SPA успешно смонтированы в корневом пути '/'")
+
+        # Явно добавим обработчик для корневого пути, если StaticFiles не справляется
+        @app.get("/") # ИСПРАВЛЕНО: Убраны лишние `\`
+        async def serve_index():
+            index_path = os.path.join(static_folder, "index.html")
+            if os.path.exists(index_path):
+                 return FileResponse(index_path, media_type="text/html")
+            else:
+                 logger.error(f"Файл index.html не найден в {static_folder}")
+                 return JSONResponse(content={"error": "Frontend not found"}, status_code=404)
+
+        # Обработчик для всех остальных путей SPA (если StaticFiles(html=True) недостаточно)
+        # Этот обработчик ПЕРЕХВАТИТ все, что не было перехвачено ранее (/api, /uploads, etc.)
+        @app.get("/{rest_of_path:path}") # ИСПРАВЛЕНО: Убраны лишние `\`
+        async def serve_spa_catch_all(request: Request, rest_of_path: str):
+            # Попытка обслужить статический актив из /assets/
+            if rest_of_path.startswith("assets/"):
+                file_path = os.path.join(static_folder, rest_of_path)
+                if os.path.exists(file_path) and os.path.isfile(file_path):
+                    return FileResponse(file_path) # FastAPI/Starlette угадает media_type
+                else:
+                    # Если файл в /assets/ не найден, это ошибка 404 для конкретного ресурса
+                    logger.error(f"Статический актив не найден: {file_path}")
+                    return JSONResponse(content={"error": "Asset not found"}, status_code=404)
+
+            # Исключаем API пути, чтобы SPA не перехватывал их.
+            # Эти пути должны обрабатываться своими собственными декораторами.
+            # Если запрос дошел сюда и это API путь, значит, соответствующий эндпоинт не найден.
+            if rest_of_path.startswith(("api/", "api-v2/", "docs", "openapi.json", "uploads/")):
+                logger.debug(f"Запрос к API-подобному пути '{rest_of_path}' не был обработан специализированным роутером и возвращает 404 из SPA catch-all.")
+                return JSONResponse(content={"error": f"API endpoint '{rest_of_path}' not found"}, status_code=404)
+
+            # Если это не API и не известный статический актив (не в /assets/), 
+            # то это должен быть путь SPA, возвращаем index.html для клиентского роутинга.
+            index_path = os.path.join(static_folder, "index.html")
+            if os.path.exists(index_path):
+                return FileResponse(index_path, media_type="text/html")
+            
+            # Крайний случай: index.html не найден (проблема конфигурации сервера)
+            logger.error(f"Файл index.html не найден в {static_folder} для SPA пути {rest_of_path}")
+            return JSONResponse(content={"error": "Frontend index.html not found"}, status_code=500)
+
+        logger.info("Обработчики для SPA настроены.")
+
+    except RuntimeError as mount_error: # ИСПРАВЛЕНО: Добавлен блок except
+        logger.error(f"Ошибка при монтировании статических файлов SPA: {mount_error}. Возможно, имя 'static-spa' уже используется или путь '/' занят.")
+    except Exception as e: # ИСПРАВЛЕНО: Добавлен блок except
+        logger.error(f"Непредвиденная ошибка при монтировании статических файлов SPA: {e}")
+else:
+    logger.warning(f"Папка статических файлов SPA не найдена: {static_folder}")
+    logger.warning("Обслуживание SPA фронтенда не настроено. Только API endpoints доступны.")
 
