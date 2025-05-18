@@ -418,20 +418,37 @@ const normalizeChannelName = (name: string) => name.replace(/^@/, '').toLowerCas
 
 // Код, который вызывал ошибки Cannot find name, перемещен внутрь функции App
 
-const TELEGRAM_CHANNEL = 'ИМЯ_ВАШЕГО_КАНАЛА'; // <= Заменить на имя канала без @
+// Удаляем хардкод TELEGRAM_CHANNEL, используем channelUsername из API
 
 async function checkChannelSubscription(userId: string): Promise<{ has_channel_subscription: boolean, error?: string }> {
   // Новый эндпоинт, аналогично премиум
-  const nocache = new Date().getTime();
-  const response = await fetch(`/api-v2/channel-subscription/check?user_id=${userId}&nocache=${nocache}`, {
-    headers: {
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-      'Accept': 'application/json'
+  try {
+    const nocache = new Date().getTime();
+    const response = await fetch(`/api-v2/channel-subscription/check?user_id=${userId}&nocache=${nocache}`, {
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Accept': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      console.error(`Ошибка API при проверке подписки: ${response.status} ${response.statusText}`);
+      return { has_channel_subscription: false, error: `Ошибка сервера: ${response.status}` };
     }
-  });
-  return await response.json();
+    
+    const contentType = response.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      console.error(`Неверный Content-Type: ${contentType}`);
+      return { has_channel_subscription: false, error: "Сервер вернул неверный формат данных" };
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error("Ошибка при проверке подписки на канал:", error);
+    return { has_channel_subscription: false, error: "Ошибка при проверке подписки" };
+  }
 }
 
 function App() {
@@ -1528,7 +1545,7 @@ function App() {
       if (interval) clearInterval(interval);
     };
   }, [isAnalyzing, isGeneratingPostDetails, isGeneratingIdeas]);
-  
+
   // === ДОБАВЛЯЮ: Эффект для смены сообщений в прогресс-баре генерации деталей поста ===
   useEffect(() => {
     let messageInterval: number | null = null;
@@ -1698,14 +1715,14 @@ function App() {
       <div className="loading-container">
         <div className="loading-spinner"></div>
         <p>Загрузка приложения...</p>
-      </div>
-    );
+    </div>
+  );
   }
 
   if (!isAuthenticated || !userId) { // Если не аутентифицирован или нет userId
     return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
   }
-  
+
   // Если аутентифицирован и есть userId, но проверка подписки еще не завершена ИЛИ нет доступа
   if (!channelChecked || !hasChannelAccess) {
     // Если channelUsername еще не загружен, можно показать другую загрузку или просто подождать
