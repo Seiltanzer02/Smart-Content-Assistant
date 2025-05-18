@@ -421,9 +421,14 @@ const normalizeChannelName = (name: string) => name.replace(/^@/, '').toLowerCas
 const TELEGRAM_CHANNEL = 'ИМЯ_ВАШЕГО_КАНАЛА'; // <= Заменить на имя канала без @
 
 async function checkChannelSubscription(userId: string): Promise<{ has_channel_subscription: boolean, error?: string }> {
-  const response = await fetch('/api/user/check-channel-subscription', {
+  // Новый эндпоинт, аналогично премиум
+  const nocache = new Date().getTime();
+  const response = await fetch(`/api-v2/channel-subscription/check?user_id=${userId}&nocache=${nocache}`, {
     headers: {
-      'X-Telegram-User-Id': userId
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'Accept': 'application/json'
     }
   });
   return await response.json();
