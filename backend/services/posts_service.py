@@ -400,33 +400,31 @@ async def generate_post_details(request: Request, req):
         if OPENROUTER_API_KEY:
             try:
                 logger.info(f"Отправка запроса на генерацию поста по идее через OpenRouter API: {topic_idea}")
-        client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=OPENROUTER_API_KEY
-        )
-                
-            response = await client.chat.completions.create(
+                client = AsyncOpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=OPENROUTER_API_KEY
+                )
+                response = await client.chat.completions.create(
                     model="meta-llama/llama-4-maverick:free",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.7,
-                max_tokens=850,
-                timeout=60,
-                extra_headers={
-                    "HTTP-Referer": "https://content-manager.onrender.com",
-                    "X-Title": "Smart Content Assistant"
-                }
-            )
-                
-            if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-                post_text = response.choices[0].message.content.strip()
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=850,
+                    timeout=60,
+                    extra_headers={
+                        "HTTP-Referer": "https://content-manager.onrender.com",
+                        "X-Title": "Smart Content Assistant"
+                    }
+                )
+                if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+                    post_text = response.choices[0].message.content.strip()
                     logger.info(f"Получен текст поста через OpenRouter API ({len(post_text)} символов)")
-            elif response and hasattr(response, 'error') and response.error:
-                err_details = response.error
-                api_error_message = getattr(err_details, 'message', str(err_details))
-                logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
+                elif response and hasattr(response, 'error') and response.error:
+                    err_details = response.error
+                    api_error_message = getattr(err_details, 'message', str(err_details))
+                    logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
                     # Ошибка OpenRouter API - пробуем запасной вариант
                     raise Exception(f"OpenRouter API вернул ошибку: {api_error_message}")
                 else:
@@ -438,14 +436,12 @@ async def generate_post_details(request: Request, req):
                 # В случае ошибки с OpenRouter API, проверяем наличие запасного ключа
                 api_error_message = f"Ошибка соединения с OpenRouter API: {str(api_error)}"
                 logger.error(f"Ошибка при запросе к OpenRouter API: {api_error}", exc_info=True)
-                
                 # Пробуем использовать OpenAI API как запасной вариант
                 if OPENAI_API_KEY:
                     used_backup_api = True
                     logger.info(f"Попытка использования OpenAI API как запасного варианта для идеи: {topic_idea}")
                     try:
                         openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-                        
                         openai_response = await openai_client.chat.completions.create(
                             model="gpt-3.5-turbo",  # Используем GPT-3.5 Turbo как запасной вариант
                             messages=[
@@ -455,7 +451,6 @@ async def generate_post_details(request: Request, req):
                             temperature=0.7,
                             max_tokens=850
                         )
-                        
                         if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
                             post_text = openai_response.choices[0].message.content.strip()
                             logger.info(f"Получен текст поста через запасной OpenAI API ({len(post_text)} символов)")
@@ -491,7 +486,7 @@ async def generate_post_details(request: Request, req):
                 if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
                     post_text = openai_response.choices[0].message.content.strip()
                     logger.info(f"Получен текст поста через OpenAI API ({len(post_text)} символов)")
-            else:
+                else:
                     logger.error(f"Некорректный или пустой ответ от OpenAI API")
                     post_text = "[Текст не сгенерирован из-за ошибки API]"
             except Exception as openai_error:
