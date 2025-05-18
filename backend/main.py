@@ -2053,29 +2053,29 @@ async def delete_post(post_id: str, request: Request):
         raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера при удалении поста: {str(e)}")
 
 # --- Настраиваем обработку всех путей SPA для обслуживания статических файлов (в конце файла) ---
-@app.get("/{rest_of_path:path}")
-async def serve_spa(request: Request, rest_of_path: str):
-    """Обслуживает все запросы к путям SPA, возвращая index.html"""
-    # Проверяем, не является ли запрос к API или другим специальным маршрутам
-    if rest_of_path.startswith(("api/", "api-v2/", "docs", "openapi.json", "uploads/", "assets/")):
-        # Возвращаем JSONResponse с 404 для API путей
-        return JSONResponse(content={"error": "Not found (main SPA)"}, status_code=404)
-    
-    # Проверяем, есть ли запрошенный файл
-    if SHOULD_MOUNT_STATIC:
-        file_path = os.path.join(static_folder, rest_of_path)
-        if os.path.exists(file_path) and os.path.isfile(file_path):
-            # Определяем content_type на основе расширения файла
-            return FileResponse(file_path)
-        
-        # Если файл не найден, возвращаем index.html для поддержки SPA-роутинга
-        index_path = os.path.join(static_folder, "index.html")
-        if os.path.exists(index_path):
-            return FileResponse(index_path, media_type="text/html")
-        else:
-            return JSONResponse(content={"error": "Frontend not found"}, status_code=404)
-    else:
-        return JSONResponse(content={"message": "API работает, но статические файлы не настроены. Обратитесь к API напрямую."}, status_code=404)
+# @app.get("/{rest_of_path:path}")
+# async def serve_spa(request: Request, rest_of_path: str):
+#     """Обслуживает все запросы к путям SPA, возвращая index.html"""
+#     # Проверяем, не является ли запрос к API или другим специальным маршрутам
+#     if rest_of_path.startswith(("api/", "api-v2/", "docs", "openapi.json", "uploads/", "assets/")):
+#         # Возвращаем JSONResponse с 404 для API путей
+#         return JSONResponse(content={"error": "Not found (main SPA)"}, status_code=404)
+#     
+#     # Проверяем, есть ли запрошенный файл
+#     if SHOULD_MOUNT_STATIC:
+#         file_path = os.path.join(static_folder, rest_of_path)
+#         if os.path.exists(file_path) and os.path.isfile(file_path):
+#             # Определяем content_type на основе расширения файла
+#             return FileResponse(file_path)
+#         
+#         # Если файл не найден, возвращаем index.html для поддержки SPA-роутинга
+#         index_path = os.path.join(static_folder, "index.html")
+#         if os.path.exists(index_path):
+#             return FileResponse(index_path, media_type="text/html")
+#         else:
+#             return JSONResponse(content={"error": "Frontend not found"}, status_code=404)
+#     else:
+#         return JSONResponse(content={"message": "API работает, но статические файлы не настроены. Обратитесь к API напрямую."}, status_code=404)
 
 # --- Функция для генерации ключевых слов для поиска изображений ---
 async def generate_image_keywords(text: str, topic: str, format_style: str) -> List[str]:
@@ -3583,7 +3583,7 @@ if SHOULD_MOUNT_STATIC:
         async def serve_spa_catch_all(request: Request, rest_of_path: str):
             # Попытка обслужить статический актив из /assets/
             if rest_of_path.startswith("assets/"):
-                file_path = os.path.join(FRONTEND_DIR, rest_of_path)
+                file_path = os.path.join(static_folder, rest_of_path)
                 if os.path.exists(file_path) and os.path.isfile(file_path):
                     return FileResponse(file_path) # FastAPI/Starlette угадает media_type
                 else:
@@ -3597,12 +3597,12 @@ if SHOULD_MOUNT_STATIC:
                 return JSONResponse(content={"error": "API route not found via SPA catch-all"}, status_code=404)
 
             # Если это не API и не известный статический актив, то это должен быть путь SPA, возвращаем index.html
-            index_path = os.path.join(FRONTEND_DIR, "index.html")
+            index_path = os.path.join(static_folder, "index.html")
             if os.path.exists(index_path):
                 return FileResponse(index_path, media_type="text/html")
             
             # Крайний случай: index.html не найден (проблема конфигурации сервера)
-            logger.error(f"Файл index.html не найден в {FRONTEND_DIR} для SPA пути {rest_of_path}")
+            logger.error(f"Файл index.html не найден в {static_folder} для SPA пути {rest_of_path}")
             return JSONResponse(content={"error": "Frontend index.html not found"}, status_code=500)
 
         logger.info("Обработчики для SPA настроены.")
