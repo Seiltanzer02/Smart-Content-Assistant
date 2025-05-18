@@ -561,28 +561,16 @@ async def telegram_webhook(request: Request):
         if text == '/partner_link':
             logger.info(f"[PARTNER_LINK] Запуск обработки команды для user_id={user_id}")
             try:
-                # Проверяем, инициализирован ли Supabase клиент
-                if not supabase:
-                    logger.error("Supabase клиент не инициализирован")
-                    await send_telegram_message(user_id, "Ошибка сервера: не удалось подключиться к базе данных. Пожалуйста, сообщите администратору.")
-                    return {"ok": True, "error": "Supabase client not initialized"}
-
-                # Запрашиваем partner_link для пользователя через REST API
-                try:
-                    user_settings_query = supabase.table("user_settings").select("partner_link").eq("user_id", user_id).execute()
-                    logger.info(f"Результат запроса partner_link через REST API: {user_settings_query}")
-                    partner_link = None
-                    if hasattr(user_settings_query, 'data') and user_settings_query.data:
-                        partner_link = user_settings_query.data[0].get("partner_link")
-                    if partner_link:
-                        await send_telegram_message(user_id, f"Ваша партнёрская ссылка:\n{partner_link}")
-                    else:
-                        await send_telegram_message(user_id, "Партнёрская ссылка не найдена. Обратитесь в поддержку или попробуйте позже.")
-                    return {"ok": True}
-                except Exception as api_error:
-                    logger.error(f"Ошибка при получении partner_link через REST API: {api_error}")
-                    await send_telegram_message(user_id, "Ошибка при получении партнёрской ссылки. Попробуйте позже.")
-                    return {"ok": False, "error": str(api_error)}
+                db_pool = get_db_pool() if 'get_db_pool' in globals() else None
+                if not db_pool:
+                    logger.error("db_pool не инициализирован! Попробуйте позже.")
+                    await send_telegram_message(user_id, "Ошибка сервера: база данных недоступна.")
+                    return {"ok": False, "error": "db_pool is None"}
+                service = PartnerReferralService(db_pool)
+                partner_link = await service.get_partner_link(int(user_id))
+                logger.info(f"[PARTNER_LINK] Получена или сгенерирована ссылка: {partner_link}")
+                await send_telegram_message(user_id, f"Ваша партнёрская ссылка:\n{partner_link}")
+                return {"ok": True}
             except Exception as e:
                 import traceback
                 logger.error(f"[PARTNER_LINK] Ошибка: {e}\n{traceback.format_exc()}")
