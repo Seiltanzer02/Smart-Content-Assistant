@@ -29,7 +29,3 @@ services:
         value: /opt/render/project/src
       - key: ENVIRONMENT
         value: production 
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TARGET_CHANNEL_USERNAME
-        sync: false 

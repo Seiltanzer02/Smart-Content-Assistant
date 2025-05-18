@@ -343,7 +343,6 @@ async def generate_post_details(request: Request, req):
     from openai import AsyncOpenAI
     found_images = []
     api_error_message = None
-    
     try:
         telegram_user_id = request.headers.get("X-Telegram-User-Id")
         if telegram_user_id:
@@ -357,12 +356,10 @@ async def generate_post_details(request: Request, req):
         if not telegram_user_id:
             logger.warning("Запрос генерации поста без идентификации пользователя Telegram")
             raise HTTPException(status_code=401, detail="Для генерации постов необходимо авторизоваться через Telegram")
-            
         topic_idea = req.get("topic_idea")
         format_style = req.get("format_style")
         channel_name = req.get("channel_name", "")
         post_samples = req.get("post_samples") or []
-        
         if not post_samples and channel_name:
             try:
                 channel_data = await get_channel_analysis(request, channel_name)
@@ -391,7 +388,6 @@ async def generate_post_details(request: Request, req):
 Не используй хэштеги, если это не является частью формата или их нет в примерах.
 Сделай пост уникальным и интересным, но приоритет — на точном следовании стилю канала.
 Используй примеры постов канала, если они предоставлены, чтобы сохранить стиль. Если примеры не предоставлены, создай качественный пост в указанном формате."""
-
         user_prompt = f"""Создай пост для Telegram-канала \\\"@{channel_name}\\\" на тему:\\n\\\"{topic_idea}\\\"\\n\\nФормат поста: {format_style}\\n\\nНапиши полный текст поста, который будет готов к публикации.\\n"""
         if post_samples:
             sample_text = "\\n\\n---\\n\\n".join(post_samples[:10]) # Увеличено количество примеров до 10
@@ -474,6 +470,7 @@ async def generate_post_details(request: Request, req):
                 else:
                     logger.error("Запасной OPENAI_API_KEY не настроен, невозможно использовать альтернативный API")
                     post_text = "[Текст не сгенерирован из-за ошибки API]"
+        
         # Если нет OPENROUTER_API_KEY, но есть OPENAI_API_KEY, используем его напрямую
         elif OPENAI_API_KEY:
             used_backup_api = True
@@ -501,8 +498,6 @@ async def generate_post_details(request: Request, req):
                 api_error_message = f"Ошибка соединения с OpenAI API: {str(openai_error)}"
                 logger.error(f"Ошибка при запросе к OpenAI API: {openai_error}", exc_info=True)
                 post_text = "[Текст не сгенерирован из-за ошибки API]"
-        else:
-            post_text = "[Текст не сгенерирован из-за отсутствия доступных API]"
         
         # Генерация ключевых слов для поиска изображений
         image_keywords = await generate_image_keywords(post_text, topic_idea, format_style)
