@@ -8,6 +8,14 @@ import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
 import DirectPremiumStatus from './components/DirectPremiumStatus'; // <-- Импортируем новый компонент
 import ProgressBar from './components/ProgressBar';
+import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
+import MainPage from './pages/MainPage';
+import AnalysisPage from './pages/AnalysisPage';
+import PlanPage from './pages/PlanPage';
+import PostsPage from './pages/PostsPage';
+import PostEditorPage from './pages/PostEditorPage';
+import ChannelSubscriptionCheck from './components/ChannelSubscriptionCheck';
+import { getTelegramUserId } from './utils/telegramAuth';
 
 // Определяем базовый URL API
 // Так как фронтенд и API на одном домене, используем пустую строку
@@ -419,7 +427,6 @@ const normalizeChannelName = (name: string) => name.replace(/^@/, '').toLowerCas
 // Код, который вызывал ошибки Cannot find name, перемещен внутрь функции App
 
 function App() {
-  // --- ВСЕ useState ТОЛЬКО ЗДЕСЬ ---
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
@@ -461,9 +468,10 @@ function App() {
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   // Добавляю состояние для хранения времени сброса лимита
   const [ideasLimitResetTime, setIdeasLimitResetTime] = useState<string | null>(null);
-  
-  // === ДОБАВЛЯЮ: Массивы забавных сообщений для прогресс-баров ===
-  const postDetailsMessages = [
+  const [isCheckingSubscription, setIsCheckingSubscription] = useState<boolean>(true);
+  const [isSubscribed, setIsSubscribed] = useState<boolean>(false);
+
+  const [currentPostDetailsMessage, setCurrentPostDetailsMessage] = useState([
     "Завариваем кофе для музы... Обычно это занимает некоторое время. ☕",
     "Наши нейроны шевелятся быстрее, чем вы думаете! (но не всегда) 😉",
     "Почти готово! Если 'почти' для вас — это как 'скоро' у разработчиков. 😅",
@@ -471,9 +479,9 @@ function App() {
     "Согласовываем текст с главным редактором — котиком. Он очень строг. 😼",
     "Так-так-так... что бы такого остроумного написать?.. 🤔",
     "Наши алгоритмы сейчас проходят тест Тьюринга... на выдержку. 🧘"
-  ];
+  ]);
   
-  const ideasGenerationMessages = [
+  const [currentIdeasMessage, setCurrentIdeasMessage] = useState([
     "Перебираем триллионы идей... Осталось всего пара миллиардов. 🤯",
     "Штурмуем мозговой центр! Иногда там бывает ветрено. 💨",
     "Ловим вдохновение сачком... Оно такое неуловимое! 🦋",
@@ -481,11 +489,11 @@ function App() {
     "Генератор идей заряжается... Пожалуйста, не отключайте от розетки! 🔌",
     "Анализируем тренды, мемы и фазы Луны... для полной картины. 🌕",
     "Разбудили креативного директора. Он просил передать, что 'еще 5 минуточек'. 😴"
-  ];
+  ]);
   
-  const [currentPostDetailsMessage, setCurrentPostDetailsMessage] = useState(postDetailsMessages[0]);
-  const [currentIdeasMessage, setCurrentIdeasMessage] = useState(ideasGenerationMessages[0]);
-  
+  const [currentPostDetailsMessageIndex, setCurrentPostDetailsMessageIndex] = useState(0);
+  const [currentIdeasMessageIndex, setCurrentIdeasMessageIndex] = useState(0);
+
   // === ДОБАВЛЯЮ: Функция для добавления канала в allChannels ===
   const addChannelToAllChannels = (channel: string) => {
     const normalized = normalizeChannelName(channel);
@@ -2293,6 +2301,106 @@ function cleanPostText(text: string) {
   return text.replace(/[\*\_\#\-]+/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
+function App() {
+  const [isCheckingSubscription, setIsCheckingSubscription] = useState<boolean>(true);
+  const [isSubscribed, setIsSubscribed] = useState<boolean>(false);
+  const [userId] = useState<string | null>(getTelegramUserId());
 
+  useEffect(() => {
+    // Проверка подписки на канал при загрузке приложения
+    async function checkChannelSubscription() {
+      if (!userId) {
+        setIsCheckingSubscription(false);
+        return;
+      }
+
+      try {
+        const nocache = `nocache=${new Date().getTime()}`;
+        const response = await axios.get(`/channel/check-subscription?user_id=${userId}&${nocache}`, {
+          headers: {
+            'X-Telegram-User-Id': userId,
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        });
+
+        setIsSubscribed(response.data.is_subscribed);
+      } catch (error) {
+        console.error('Ошибка при проверке подписки на канал:', error);
+        // В случае ошибки разрешаем доступ к приложению
+        setIsSubscribed(true);
+      } finally {
+        setIsCheckingSubscription(false);
+      }
+    }
+
+    checkChannelSubscription();
+  }, [userId]);
+
+  // Компонент для защищенных маршрутов, которые требуют подписки на канал
+  const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+    if (isCheckingSubscription) {
+      // Если всё еще проверяем подписку, отображаем загрузочный экран
+      return <div className="loading-container">Проверка подписки...</div>;
+    }
+
+    if (!isSubscribed) {
+      // Если нет подписки, перенаправляем на страницу проверки подписки
+      return <Navigate to="/check-subscription" />;
+    }
+
+    return <>{children}</>;
+  };
+
+  if (isCheckingSubscription) {
+    // Показываем загрузочный экран, пока проверяем подписку
+    return <div className="loading-container">Загрузка приложения...</div>;
+  }
+
+  return (
+    <Router>
+      <Routes>
+        {/* Публичные маршруты */}
+        <Route path="/check-subscription" element={<ChannelSubscriptionCheck />} />
+        
+        {/* Защищенные маршруты */}
+        <Route path="/" element={
+          <ProtectedRoute>
+            <MainPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/analysis" element={
+          <ProtectedRoute>
+            <AnalysisPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/plan" element={
+          <ProtectedRoute>
+            <PlanPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/posts" element={
+          <ProtectedRoute>
+            <PostsPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/post/:id" element={
+          <ProtectedRoute>
+            <PostEditorPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/post/new" element={
+          <ProtectedRoute>
+            <PostEditorPage />
+          </ProtectedRoute>
+        } />
+        
+        {/* Перенаправление для необработанных маршрутов */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Router>
+  );
+}
 
 export default App;
