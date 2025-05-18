@@ -1611,12 +1611,12 @@ function App() {
 
   // Компонент загрузки
   if (loading) {
-                                  return (
+    return (
       <div className="loading-container">
         <div className="loading-spinner"></div>
         <p>Загрузка приложения...</p>
-                                      </div>
-                                  );
+      </div>
+    );
   }
 
   // Компонент авторизации
@@ -1624,11 +1624,222 @@ function App() {
     return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
   }
 
-  // Показываем SubscriptionWidget до загрузки приложения, если нет подписки
+  // Показываем полное приложение, включая виджет подписки для доступа к премиум-функциям
   return (
     <SimpleErrorBoundary>
-      <SubscriptionWidget userId={userId} />
-      {/* ... остальной код приложения ... */}
+      <div className="app-container">
+        <Toaster position="top-center" />
+        
+        <header>
+          <h1>Ассистент для контент-мейкеров</h1>
+          <SubscriptionWidget userId={userId} />
+        </header>
+        
+        <main>
+          {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
+          {success && <SuccessMessage message={success} onClose={() => setSuccess(null)} />}
+          
+          {/* Панель навигации для переключения между разделами */}
+          <div className="view-tabs">
+            <button 
+              className={`tab-button ${currentView === 'analyze' ? 'active' : ''}`} 
+              onClick={() => setCurrentView('analyze')}>
+              Анализ канала
+            </button>
+            <button 
+              className={`tab-button ${currentView === 'suggestions' ? 'active' : ''}`} 
+              onClick={() => setCurrentView('suggestions')}>
+              Генерация идей
+            </button>
+            <button 
+              className={`tab-button ${currentView === 'calendar' ? 'active' : ''}`} 
+              onClick={() => setCurrentView('calendar')}>
+              Календарь
+            </button>
+            {/* Условное отображение вкладок в зависимости от состояния */}
+            {selectedIdea && 
+              <button 
+                className={`tab-button ${currentView === 'details' ? 'active' : ''}`} 
+                onClick={() => setCurrentView('details')}>
+                Детализация
+              </button>
+            }
+            {currentPostId && 
+              <button 
+                className={`tab-button ${currentView === 'edit' ? 'active' : ''}`} 
+                onClick={() => setCurrentView('edit')}>
+                Редактирование
+              </button>
+            }
+            <button 
+              className={`tab-button ${currentView === 'posts' ? 'active' : ''}`} 
+              onClick={() => { setCurrentView('posts'); fetchSavedPosts(); }}>
+              Мои посты
+            </button>
+          </div>
+
+          {/* Прогресс-бар для отображения процесса анализа/генерации */}
+          {(isAnalyzing || isGeneratingIdeas || isGeneratingPostDetails) && (
+            <div className="progress-container">
+              <ProgressBar progress={progress} />
+              <div className="loading-message">
+                {isAnalyzing && "Анализируем канал..."}
+                {isGeneratingIdeas && currentIdeasMessage}
+                {isGeneratingPostDetails && currentPostDetailsMessage}
+              </div>
+            </div>
+          )}
+
+          {/* Разделы приложения */}
+          {currentView === 'analyze' && (
+            <div className="analysis-section">
+              <div className="channel-input-container">
+                <input 
+                  type="text" 
+                  value={channelInput} 
+                  onChange={(e) => setChannelInput(e.target.value)}
+                  placeholder="Введите @username канала" 
+                  className="channel-input"
+                />
+                <button 
+                  className="action-button" 
+                  onClick={() => analyzeChannel()}
+                  disabled={isAnalyzing || !channelInput}
+                >
+                  Анализировать
+                </button>
+              </div>
+              
+              {/* Список всех каналов */}
+              {allChannels.length > 0 && (
+                <div className="channel-list">
+                  <h3>Ваши каналы:</h3>
+                  <div className="channel-tags">
+                    {allChannels.map((channel) => (
+                      <div key={channel} className="channel-tag">
+                        <span 
+                          className={channelName === channel ? 'active' : ''}
+                          onClick={() => {
+                            setChannelName(channel);
+                            setChannelInput(channel);
+                            fetchSavedAnalysis(channel);
+                          }}
+                        >
+                          @{channel}
+                        </span>
+                        <button 
+                          className="remove-button"
+                          onClick={() => handleRemoveChannel(channel)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Результаты анализа канала */}
+              {analysisResult && (
+                <div className="analysis-results">
+                  <h2>Результаты анализа канала {channelName ? `@${channelName}` : ''}</h2>
+                  <h3>Основные темы:</h3>
+                  <ul className="themes-list">
+                    {analysisResult.themes.map((theme, index) => (
+                      <li key={index}>{theme}</li>
+                    ))}
+                  </ul>
+                  <h3>Форматы и стили:</h3>
+                  <ul className="styles-list">
+                    {analysisResult.styles.map((style, index) => (
+                      <li key={index}>{style}</li>
+                    ))}
+                  </ul>
+                  {analysisResult.best_posting_time && (
+                    <div className="posting-time">
+                      <h3>Оптимальное время для публикаций:</h3>
+                      <p>{analysisResult.best_posting_time}</p>
+                    </div>
+                  )}
+                  <div className="analysis-actions">
+                    <button 
+                      className="action-button"
+                      onClick={generateIdeas}
+                      disabled={isGeneratingIdeas || ideasLimitExceeded}
+                    >
+                      Сгенерировать план контента
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Раздел для генерации идей */}
+          {currentView === 'suggestions' && (
+            <div className="suggestions-section">
+              <h2>План контента</h2>
+              {ideasLimitExceeded && (
+                <div className="limit-exceeded-message">
+                  <p>Достигнут лимит генерации идей для вашего тарифа.</p>
+                  {ideasLimitResetTime && <p>Лимит будет сброшен: {formatResetAtDate(ideasLimitResetTime)}</p>}
+                </div>
+              )}
+              
+              {!suggestedIdeas.length && !isGeneratingIdeas && !ideasLimitExceeded && !postLimitExceeded && (
+                <div className="no-ideas-message">
+                  <p>У вас пока нет сгенерированных идей.</p>
+                  {analysisResult ? (
+                    <button 
+                      className="action-button"
+                      onClick={generateIdeas}
+                      disabled={isGeneratingIdeas}
+                    >
+                      Сгенерировать идеи
+                    </button>
+                  ) : (
+                    <p>Сначала выполните анализ канала.</p>
+                  )}
+                </div>
+              )}
+              
+              {/* Список сгенерированных идей */}
+              {suggestedIdeas.length > 0 && (
+                <>
+                  <div className="ideas-list">
+                    {suggestedIdeas.map((idea) => (
+                      <div key={idea.id} className="idea-card">
+                        <h3>{idea.topic_idea}</h3>
+                        <p className="format-style">{idea.format_style}</p>
+                        {idea.day && <p className="idea-day">День {idea.day}</p>}
+                        <button 
+                          className="action-button small"
+                          onClick={() => handleDetailIdea(idea)}
+                        >
+                          Раскрыть идею
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  <div className="ideas-actions">
+                    <button 
+                      className="action-button"
+                      onClick={generateIdeas}
+                      disabled={isGeneratingIdeas || ideasLimitExceeded}
+                    >
+                      Сгенерировать новые идеи
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Остальные разделы приложения... */}
+          {/* (Здесь должны быть детализация, календарь, редактирование, мои посты) */}
+        </main>
+      </div>
     </SimpleErrorBoundary>
   );
 }

@@ -466,7 +466,12 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       });
   }, [validatedUserId]);
 
-  // Если не подписан — показываем экран с кнопкой перехода и повторной проверкой
+  // Если все еще загрузка и данных нет - показываем индикатор загрузки
+  if (loading && !premiumStatus && !status && channelCheck.loading) {
+    return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
+  }
+  
+  // Если не подписан на канал — показываем экран с кнопкой перехода и повторной проверкой
   if (!channelCheck.loading && !channelCheck.subscribed) {
     return (
       <div className="subscription-required">
@@ -477,6 +482,9 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
       </div>
     );
   }
+
+  // Если пользователь подписан на канал, теперь мы отображаем только информацию о премиум-статусе
+  // Не блокируя доступ к приложению
 
   // Используем комбинацию всех доступных проверок премиума
   // Приоритет: 1) Прямая проверка через bot-style API, 2) Стандартная проверка через subscription/status, 3) localStorage
@@ -492,10 +500,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     status?.subscription_end_date || // Приоритет 2: из стандартной проверки
     localEndDate; // Приоритет 3: из localStorage
 
-  if (loading && !premiumStatus && !status) {
-    return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
-  }
-  
   if (error && !hasPremium) {
     return (
       <div className="subscription-widget error">
