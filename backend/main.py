@@ -14,7 +14,7 @@ import re
 import random
 
 # FastAPI компоненты
-from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends, Form, BackgroundTasks
+from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends, Form
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -221,11 +221,6 @@ app.include_router(ideas.router)
 app.include_router(posts.router)
 app.include_router(user_settings.router, prefix="/api/user", tags=["User Settings"])
 app.include_router(images.router, prefix="/api", tags=["Images"])
-
-# Импортируем роутер для проверки подписки на канал
-from backend.routers.channel_subscription import router as channel_subscription_router
-
-app.include_router(channel_subscription_router)  # Добавляем роутер для проверки подписки на канал
 # --- Конец подключения роутеров ---
 
 # --- ВАЖНО: API-эндпоинты для проверки подписки ПЕРЕД SPA-маршрутами ---
