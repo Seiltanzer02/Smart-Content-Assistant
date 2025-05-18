@@ -28,21 +28,7 @@ class PartnerReferralService:
         :param db_pool: Пул соединений с базой данных
         """
         self.db_pool = db_pool
-        self.telegram_client = None
-        
-    async def init_telegram_client(self, session_name='partner_session'):
-        """
-        Инициализирует клиент Telethon для работы с API Telegram
-        
-        :param session_name: Имя файла сессии
-        """
-        if not API_ID or not API_HASH:
-            raise ValueError("API_ID и API_HASH должны быть указаны в переменных окружения")
-            
-        self.telegram_client = TelegramClient(session_name, API_ID, API_HASH)
-        await self.telegram_client.start()
-        logger.info("Telegram клиент инициализирован успешно")
-        
+
     async def get_partner_link(self, user_id: int) -> str:
         """
         Получает партнерскую ссылку для пользователя из базы данных
@@ -51,41 +37,31 @@ class PartnerReferralService:
         :param user_id: ID пользователя Telegram
         :return: Партнерская ссылка
         """
-        # Проверяем, есть ли уже партнерская ссылка в БД
         async with self.db_pool.acquire() as conn:
             partner_link = await conn.fetchval(
                 "SELECT partner_link FROM user_settings WHERE user_id = $1",
                 user_id
             )
-            
-            # Если ссылка уже существует, возвращаем её
             if partner_link:
                 logger.info(f"Найдена существующая партнерская ссылка для пользователя {user_id}")
                 return partner_link
-                
-            # Если ссылки нет, генерируем новую
             try:
-                if not self.telegram_client:
-                    await self.init_telegram_client()
-                    
-                # Извлекаем username бота из токена
-                bot_username = None
-                if TELEGRAM_BOT_TOKEN:
-                    bot_username = f"@{TELEGRAM_BOT_TOKEN.split(':')[0]}"
-                    
+                # Уникальное имя сессии для каждого пользователя
+                session_name = f"partner_session_{user_id}"
+                api_id = int(os.getenv("TELEGRAM_API_ID", 0))
+                api_hash = os.getenv("TELEGRAM_API_HASH", "")
+                bot_username = os.getenv("TELEGRAM_BOT_USERNAME")
+                if not api_id or not api_hash:
+                    raise ValueError("TELEGRAM_API_ID и TELEGRAM_API_HASH должны быть заданы в .env")
                 if not bot_username:
-                    raise ValueError("Не удалось определить username бота из TELEGRAM_BOT_TOKEN")
-                    
-                # Вызываем метод API для получения партнерской ссылки
-                result = await self.telegram_client(functions.payments.ConnectStarRefBotRequest(
-                    bot=bot_username  # Используем username бота
-                ))
-                
-                # Получаем ссылку из результата
-                new_link = result.link
+                    raise ValueError("TELEGRAM_BOT_USERNAME должен быть задан в .env")
+                async with TelegramClient(session_name, api_id, api_hash) as client:
+                    await client.start()
+                    result = await client(functions.payments.ConnectStarRefBotRequest(
+                        bot=bot_username
+                    ))
+                    new_link = result.link
                 logger.info(f"Сгенерирована новая партнерская ссылка для пользователя {user_id}: {new_link}")
-                
-                # Сохраняем ссылку в базе данных
                 await conn.execute(
                     """
                     INSERT INTO user_settings (user_id, partner_link) 
@@ -95,12 +71,8 @@ class PartnerReferralService:
                     """,
                     user_id, new_link
                 )
-                
-                # Добавляем запись в таблицу user_referrals, если еще не существует
                 await self._ensure_referral_record(user_id, conn)
-                
                 return new_link
-                
             except Exception as e:
                 logger.error(f"Ошибка при получении партнерской ссылки для пользователя {user_id}: {e}")
                 raise

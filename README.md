@@ -99,6 +99,7 @@ uvicorn main_fixed:app --reload
 
 ```
 TELEGRAM_BOT_TOKEN=ваш_токен_бота
+TELEGRAM_BOT_USERNAME=@YourBot
 DATABASE_URL=ваш_url_базы_данных
 TELEGRAM_API_ID=ваш_api_id
 TELEGRAM_API_HASH=ваш_api_hash
