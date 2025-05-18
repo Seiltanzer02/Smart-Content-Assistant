@@ -1,21 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/SubscriptionWidget.css';
 import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice, checkPremiumViaBot, getBotStylePremiumStatus, PremiumStatus } from '../api/subscription';
-import { checkChannelSubscription } from '../channelSubscriptionCheck';
 
 // Добавляем объявление глобального объекта Telegram для TypeScript
 declare global {
   interface Window {
     Telegram?: any;
-  }
-}
-
-declare global {
-  interface ImportMetaEnv {
-    readonly VITE_TARGET_CHANNEL_USERNAME: string;
-  }
-  interface ImportMeta {
-    readonly env: ImportMetaEnv;
   }
 }
 
@@ -43,9 +33,6 @@ const formatDate = (isoDateString: string): string => {
   });
 };
 
-const TARGET_CHANNEL_USERNAME = import.meta.env.VITE_TARGET_CHANNEL_USERNAME || '';
-const channelUrl = 'https://t.me/' + TARGET_CHANNEL_USERNAME;
-
 const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActive }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,8 +44,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const [validatedUserId, setValidatedUserId] = useState<string | null>(null);
   // localStorage только как fallback для даты окончания
   const [localEndDate, setLocalEndDate] = useState<string | null>(null);
-  const [channelCheck, setChannelCheck] = useState<{ loading: boolean, subscribed: boolean, message: string }>({ loading: true, subscribed: false, message: '' });
-  const [checking, setChecking] = useState(false);
   
   // Проверка и валидация ID пользователя
   useEffect(() => {
@@ -440,52 +425,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     };
   }, [validatedUserId]);
 
-  // Функция повторной проверки
-  const handleRecheck = async () => {
-    if (!validatedUserId) return;
-    setChecking(true);
-    try {
-      const res = await checkChannelSubscription(Number(validatedUserId));
-      setChannelCheck({ loading: false, subscribed: res.subscribed, message: res.message });
-    } catch (e: any) {
-      setChannelCheck({ loading: false, subscribed: false, message: e.message || 'Ошибка проверки подписки' });
-    }
-    setChecking(false);
-  };
-
-  // Проверка подписки на канал при появлении validatedUserId
-  useEffect(() => {
-    if (!validatedUserId) return;
-    setChannelCheck({ loading: true, subscribed: false, message: '' });
-    checkChannelSubscription(Number(validatedUserId))
-      .then(res => {
-        setChannelCheck({ loading: false, subscribed: res.subscribed, message: res.message });
-      })
-      .catch(e => {
-        setChannelCheck({ loading: false, subscribed: false, message: e.message || 'Ошибка проверки подписки' });
-      });
-  }, [validatedUserId]);
-
-  // Если все еще загрузка и данных нет - показываем индикатор загрузки
-  if (loading && !premiumStatus && !status && channelCheck.loading) {
-    return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
-  }
-  
-  // Если не подписан на канал — показываем экран с кнопкой перехода и повторной проверкой
-  if (!channelCheck.loading && !channelCheck.subscribed) {
-    return (
-      <div className="subscription-required">
-        <h2>Подпишитесь на наш канал</h2>
-        <p>{channelCheck.message || 'Чтобы пользоваться приложением, подпишитесь на канал.'}</p>
-        <a href={channelUrl} target="_blank" rel="noopener noreferrer" className="subscription-button">Перейти в канал</a>
-        <button className="action-button" onClick={handleRecheck} disabled={checking}>{checking ? 'Проверяем...' : 'Проверить подписку'}</button>
-      </div>
-    );
-  }
-
-  // Если пользователь подписан на канал, теперь мы отображаем только информацию о премиум-статусе
-  // Не блокируя доступ к приложению
-
   // Используем комбинацию всех доступных проверок премиума
   // Приоритет: 1) Прямая проверка через bot-style API, 2) Стандартная проверка через subscription/status, 3) localStorage
   const hasPremium = 
@@ -500,6 +439,10 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
     status?.subscription_end_date || // Приоритет 2: из стандартной проверки
     localEndDate; // Приоритет 3: из localStorage
 
+  if (loading && !premiumStatus && !status) {
+    return <div className="subscription-widget loading">Загрузка информации о подписке...</div>;
+  }
+  
   if (error && !hasPremium) {
     return (
       <div className="subscription-widget error">

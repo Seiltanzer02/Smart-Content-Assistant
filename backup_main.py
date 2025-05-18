@@ -11,8 +11,6 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 
-print("=== ДИАГНОСТИКА: Файл backup_main.py запускается ===")
-
 # FastAPI компоненты
 from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
