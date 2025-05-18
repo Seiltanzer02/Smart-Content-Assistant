@@ -3581,24 +3581,29 @@ if SHOULD_MOUNT_STATIC:
         # Этот обработчик ПЕРЕХВАТИТ все, что не было перехвачено ранее (/api, /uploads, etc.)
         @app.get("/{rest_of_path:path}") # ИСПРАВЛЕНО: Убраны лишние `\`
         async def serve_spa_catch_all(request: Request, rest_of_path: str):
-            # Исключаем API пути, чтобы избежать конфликтов (на всякий случай)
-            # Проверяем, не начинается ли путь с /api/, /docs, /openapi.json или /uploads/
-            if rest_of_path.startswith(("api/", "api-v2/", "docs", "openapi.json", "uploads/", "assets/")):
-                 # Этот код не должен выполняться, т.к. роуты API/docs/uploads определены выше, но для надежности
-                 # Логируем попытку доступа к API через SPA catch-all
-                 logger.debug(f"Запрос к '{rest_of_path}' перехвачен SPA catch-all, но проигнорирован (API/Docs/Uploads).")
-                 # Важно вернуть 404, чтобы FastAPI мог найти правильный обработчик, если он есть
-                 raise HTTPException(status_code=404, detail="Not Found (SPA Catch-all exclusion)")
+            # Попытка обслужить статический актив из /assets/
+            if rest_of_path.startswith("assets/"):
+                file_path = os.path.join(FRONTEND_DIR, rest_of_path)
+                if os.path.exists(file_path) and os.path.isfile(file_path):
+                    return FileResponse(file_path) # FastAPI/Starlette угадает media_type
+                else:
+                    logger.error(f"Статический актив не найден: {file_path}")
+                    return JSONResponse(content={"error": "Asset not found"}, status_code=404)
 
+            # Исключаем API пути, чтобы SPA не перехватывал их
+            # (Это условие должно быть после проверки assets, чтобы assets не попадали сюда)
+            if rest_of_path.startswith(("api/", "api-v2/", "docs", "openapi.json", "uploads/")):
+                logger.debug(f"Запрос к API-подобному пути '{rest_of_path}' перехвачен SPA catch-all и возвращает 404.")
+                return JSONResponse(content={"error": "API route not found via SPA catch-all"}, status_code=404)
 
-            index_path = os.path.join(static_folder, "index.html")
+            # Если это не API и не известный статический актив, то это должен быть путь SPA, возвращаем index.html
+            index_path = os.path.join(FRONTEND_DIR, "index.html")
             if os.path.exists(index_path):
-                # Логируем возврат index.html для SPA пути
-                logger.debug(f"Возвращаем index.html для SPA пути: '{rest_of_path}'")
                 return FileResponse(index_path, media_type="text/html")
-            else:
-                logger.error(f"Файл index.html не найден в {static_folder} для пути {rest_of_path}")
-                return JSONResponse(content={"error": "Frontend not found (SPA catch-all)"}, status_code=404)
+            
+            # Крайний случай: index.html не найден (проблема конфигурации сервера)
+            logger.error(f"Файл index.html не найден в {FRONTEND_DIR} для SPA пути {rest_of_path}")
+            return JSONResponse(content={"error": "Frontend index.html not found"}, status_code=500)
 
         logger.info("Обработчики для SPA настроены.")
 
