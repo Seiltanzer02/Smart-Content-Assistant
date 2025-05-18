@@ -3421,3 +3421,7 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
         if ext.lower() not in allowed_extensions:
              logger.warning(f"Попытка загрузить файл с недопустимым расширением: {file.filename}")
              raise HTTPException(status_code=400, detail=f"Недопустимое расширение файла. Разрешены: {', '.join(allowed_extensions)}")
+        # ... остальной код загрузки ...
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке изображения: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при загрузке изображения: {str(e)}")
