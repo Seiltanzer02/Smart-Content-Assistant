@@ -38,6 +38,11 @@ app.add_middleware(
 )
 
 from services.subscription_service import SubscriptionService, FREE_ANALYSIS_LIMIT, FREE_POST_LIMIT, SUBSCRIPTION_PRICE, SUBSCRIPTION_DURATION_MONTHS
+# Импорт роутера партнерской программы
+from backend.routers.partner_router import router as partner_router
+
+# Подключаем роутер партнерской программы
+app.include_router(partner_router)
 
 # Настройка логирования
 import logging
