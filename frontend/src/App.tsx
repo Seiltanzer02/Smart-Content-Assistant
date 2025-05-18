@@ -475,6 +475,7 @@ function App() {
   const [channelChecked, setChannelChecked] = useState(false);
   const [hasChannelAccess, setHasChannelAccess] = useState(false);
   const [channelCheckError, setChannelCheckError] = useState<string | null>(null);
+  const [channelUsername, setChannelUsername] = useState<string>('');
   
   // === ДОБАВЛЯЮ: Массивы забавных сообщений для прогресс-баров ===
   const postDetailsMessages = [
@@ -1638,6 +1639,20 @@ function App() {
     return <TelegramAuth onAuthSuccess={handleAuthSuccess} />;
   }
 
+  // Получаем username канала с backend
+  useEffect(() => {
+    async function fetchChannelUsername() {
+      try {
+        const res = await fetch('/api/user/channel-info');
+        const data = await res.json();
+        if (data.channel_username) setChannelUsername(data.channel_username);
+      } catch (e) {
+        // fallback не нужен, просто не будет ссылки
+      }
+    }
+    fetchChannelUsername();
+  }, []);
+
   // Проверка подписки на канал
   const handleCheckChannel = async () => {
     setChannelCheckError(null);
@@ -1654,7 +1669,7 @@ function App() {
       <div style={{ textAlign: 'center', marginTop: 40 }}>
         <p>Чтобы пользоваться приложением, подпишитесь на наш канал:</p>
         <a
-          href={`https://t.me/${TELEGRAM_CHANNEL}`}
+          href={`https://t.me/${channelUsername}`}
           target="_blank"
           rel="noopener noreferrer"
           style={{ fontWeight: 'bold', fontSize: 18, color: '#1976d2' }}
