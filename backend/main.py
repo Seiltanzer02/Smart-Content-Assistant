@@ -22,6 +22,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from telethon import TelegramClient
 from telethon.errors import ChannelInvalidError, ChannelPrivateError, UsernameNotOccupiedError
 from dotenv import load_dotenv
+from telethon import events
+import aiohttp
 
 # Supabase
 from supabase import create_client, Client, AClient
@@ -4297,4 +4299,33 @@ if SHOULD_MOUNT_STATIC:
 else:
     logger.warning(f"Папка статических файлов SPA не найдена: {static_folder}")
     logger.warning("Обслуживание SPA фронтенда не настроено. Только API endpoints доступны.")
+
+# --- Обработчик команды /partnerlink для чат-бота ---
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+BACKEND_URL = os.getenv("BACKEND_URL") or "http://localhost:8000/api/user/partnerlink"  # Укажите ваш backend URL
+
+if TELEGRAM_BOT_TOKEN:
+    bot_client = TelegramClient("bot_session", int(TELEGRAM_API_ID), TELEGRAM_API_HASH).start(bot_token=TELEGRAM_BOT_TOKEN)
+
+    @bot_client.on(events.NewMessage(pattern=r"/partnerlink"))
+    async def handler_partnerlink(event):
+        user_id = event.sender_id
+        headers = {"X-Telegram-User-Id": str(user_id)}
+        async with aiohttp.ClientSession() as session:
+            async with session.post(BACKEND_URL, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    partner_link = data.get("partner_link")
+                    if partner_link:
+                        await event.respond(f"Ваша партнёрская ссылка:\n{partner_link}")
+                    else:
+                        await event.respond("Не удалось получить партнёрскую ссылку. Попробуйте позже.")
+                else:
+                    await event.respond("Ошибка при получении партнёрской ссылки. Попробуйте позже.")
+
+    # Запуск бота в отдельном таске
+    import threading
+    def run_bot():
+        bot_client.run_until_disconnected()
+    threading.Thread(target=run_bot, daemon=True).start()
 
