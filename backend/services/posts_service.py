@@ -378,56 +378,89 @@ async def generate_post_details(request: Request, req):
         if post_samples:
             avg_length = int(sum(len(p) for p in post_samples) / len(post_samples))
         
-        # --- Усиление требований к длине и структуре ---
-        extra_length_req = f"Напиши развернутый, подробный, длинный пост, не менее {avg_length} символов, с примерами, деталями, аналитикой, списками, абзацами, пояснениями, выводами и рекомендациями. Не сокращай!"
-        system_prompt = f"{extra_length_req}\n" + system_prompt + f"\n{extra_length_req}"
-        user_prompt = f"{extra_length_req}\n" + user_prompt + f"\n{extra_length_req}"
-        # --- Генерация поста ---
+        # --- Усиление требований к длине и детализации ---
+        length_rule = f"Напиши развернутый, подробный, длинный пост, не менее {avg_length} символов, с примерами, деталями, аналитикой, списками, абзацами, пояснениями, выводами и рекомендациями. Не сокращай!"
+        system_prompt = f"{length_rule}\n\n" + system_prompt + f"\n\n{length_rule}"
+        user_prompt = f"{length_rule}\n\n" + user_prompt + f"\n\n{length_rule}"
+        # --- Генерация поста (основной и, при необходимости, повторный запрос) ---
         def is_too_short(text):
             return text and len(text) < int(avg_length * 0.9)
-        async def generate_with_prompt(prompt):
-            if OPENROUTER_API_KEY:
+        post_text = ""
+        used_backup_api = False
+        async def generate_post(system_prompt, user_prompt, is_openrouter):
+            if is_openrouter:
+                client = AsyncOpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=OPENROUTER_API_KEY
+                )
+                return await client.chat.completions.create(
+                    model="meta-llama/llama-4-maverick:free",
+                    messages=build_messages(system_prompt, user_prompt, is_openrouter),
+                    temperature=0.7,
+                    max_tokens=1500,
+                    timeout=60,
+                    extra_headers={
+                        "HTTP-Referer": "https://content-manager.onrender.com",
+                        "X-Title": "Smart Content Assistant"
+                    }
+                )
+            else:
+                openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+                return await openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=build_messages(system_prompt, user_prompt, False),
+                    temperature=0.7,
+                    max_tokens=1500
+                )
+        # --- Основной запрос ---
+        api_error_message = None
+        response = None
+        is_openrouter = bool(OPENROUTER_API_KEY)
+        try:
+            response = await generate_post(system_prompt, user_prompt, is_openrouter)
+            if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+                post_text = response.choices[0].message.content.strip()
+                logger.info(f"Получен текст поста через {'OpenRouter' if is_openrouter else 'OpenAI'} API ({len(post_text)} символов)")
+            else:
+                raise Exception("API вернул некорректный или пустой ответ")
+        except Exception as api_error:
+            api_error_message = f"Ошибка соединения с API: {str(api_error)}"
+            logger.error(f"Ошибка при запросе к {'OpenRouter' if is_openrouter else 'OpenAI'} API: {api_error}", exc_info=True)
+            # fallback на запасной API
+            if is_openrouter and OPENAI_API_KEY:
+                used_backup_api = True
                 try:
-                    client = AsyncOpenAI(
-                        base_url="https://openrouter.ai/api/v1",
-                        api_key=OPENROUTER_API_KEY
-                    )
-                    is_openrouter = True
-                    response = await client.chat.completions.create(
-                        model="meta-llama/llama-4-maverick:free",
-                        messages=build_messages(system_prompt, prompt, is_openrouter),
-                        temperature=0.7,
-                        max_tokens=1500,
-                        timeout=60,
-                        extra_headers={
-                            "HTTP-Referer": "https://content-manager.onrender.com",
-                            "X-Title": "Smart Content Assistant"
-                        }
-                    )
-                    if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-                        return response.choices[0].message.content.strip()
-                except Exception as api_error:
-                    logger.error(f"Ошибка при запросе к OpenRouter API: {api_error}", exc_info=True)
-            if OPENAI_API_KEY:
-                try:
-                    openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-                    openai_response = await openai_client.chat.completions.create(
-                        model="gpt-3.5-turbo",
-                        messages=build_messages(system_prompt, prompt, False),
-                        temperature=0.7,
-                        max_tokens=1500
-                    )
-                    if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
-                        return openai_response.choices[0].message.content.strip()
+                    response = await generate_post(system_prompt, user_prompt, False)
+                    if response and response.choices and len(response.choices) > 0 and response.choices[0].message:
+                        post_text = response.choices[0].message.content.strip()
+                        logger.info(f"Получен текст поста через запасной OpenAI API ({len(post_text)} символов)")
+                        api_error_message = None
+                    else:
+                        raise Exception("Запасной OpenAI API вернул некорректный или пустой ответ")
                 except Exception as openai_error:
-                    logger.error(f"Ошибка при использовании OpenAI API: {openai_error}", exc_info=True)
-            return ""
-        post_text = await generate_with_prompt(user_prompt)
-        # --- Повторный запрос, если текст слишком короткий ---
+                    logger.error(f"Ошибка при использовании запасного OpenAI API: {openai_error}", exc_info=True)
+                    post_text = "[Текст не сгенерирован из-за ошибок API]"
+            else:
+                post_text = "[Текст не сгенерирован из-за ошибки API]"
+        # --- Проверка длины и повторный запрос при необходимости ---
         if is_too_short(post_text):
-            logger.warning(f"Сгенерированный текст слишком короткий ({len(post_text)} < {int(avg_length*0.9)}), повторный запрос с усилением промта")
-            retry_prompt = f"{extra_length_req}\nТы выдал слишком короткий текст! Повтори, но напиши не менее {avg_length} символов!\n" + user_prompt + f"\n{extra_length_req}"
-            post_text = await generate_with_prompt(retry_prompt)
+            logger.warning(f"Сгенерированный текст слишком короткий ({len(post_text)} < {int(avg_length*0.9)}). Повторный запрос с усилением промта.")
+            hard_rule = f"Ты выдал слишком короткий текст! Повтори, но напиши не менее {avg_length} символов! {length_rule}"
+            system_prompt_hard = f"{hard_rule}\n\n{system_prompt}\n\n{hard_rule}"
+            user_prompt_hard = f"{hard_rule}\n\n{user_prompt}\n\n{hard_rule}"
+            try:
+                response2 = await generate_post(system_prompt_hard, user_prompt_hard, is_openrouter)
+                if response2 and response2.choices and len(response2.choices) > 0 and response2.choices[0].message and response2.choices[0].message.content:
+                    post_text2 = response2.choices[0].message.content.strip()
+                    if not is_too_short(post_text2):
+                        post_text = post_text2
+                        logger.info(f"Повторный запрос успешен, длина: {len(post_text2)} символов")
+                    else:
+                        logger.warning(f"Даже после повторного запроса текст короткий: {len(post_text2)} символов")
+                else:
+                    logger.error("API не вернул текст при повторном запросе")
+            except Exception as e:
+                logger.error(f"Ошибка при повторном запросе: {e}")
         
         # Генерация ключевых слов для поиска изображений
         image_keywords = await generate_image_keywords(post_text, topic_idea, format_style)
