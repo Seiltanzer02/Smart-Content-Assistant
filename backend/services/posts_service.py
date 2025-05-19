@@ -7,7 +7,6 @@ import uuid
 import asyncio
 from datetime import datetime
 import traceback
-from os import getenv
 
 # Импорт моделей PostImage, PostData, SavedPostResponse, PostDetailsResponse из main.py или отдельного файла моделей
 # from backend.models import PostImage, PostData, SavedPostResponse, PostDetailsResponse
@@ -375,15 +374,7 @@ async def generate_post_details(request: Request, req):
             logger.warning("Генерация деталей поста невозможна: отсутствуют OPENROUTER_API_KEY и OPENAI_API_KEY")
             raise HTTPException(status_code=503, detail="API для генерации текста недоступен")
             
-        avg_length = 1000  # Значение по умолчанию, если нет примеров
-        if post_samples:
-            avg_length = int(sum(len(p) for p in post_samples) / len(post_samples))
-        
-        # Получаем название платной модели из переменной окружения (если есть)
-        OPENROUTER_PAID_MODEL = getenv("OPENROUTER_PAID_MODEL") or "meta-llama/llama-3.2-1b-instruct"
-        
-        # --- Сначала формируем базовые промты ---
-        base_system_prompt = f"""Ты — опытный контент-маркетолог для Telegram-каналов.
+        system_prompt = """Ты — опытный контент-маркетолог для Telegram-каналов.
 Твоя задача — сгенерировать текст поста на основе идеи и формата, который будет готов к публикации.
 
 Пост должен быть:
@@ -393,106 +384,123 @@ async def generate_post_details(request: Request, req):
 4. Иметь правильное форматирование для Telegram (если нужно — с эмодзи, абзацами, списками).
 5. НЕ использовать никаких шаблонов, placeholder-ов ([Название], [Ссылка], [Начать сейчас], "...", "[текст]" и т.д.) — текст должен быть полностью готов к публикации, без мест для ручного заполнения.
 6. **Критически важно**: Максимально точно копируй стиль, тон, манеру изложения, использование эмодзи (включая их количество и расположение), длину предложений и абзацев, использование заглавных букв, пунктуацию и другие характерные особенности из предоставленных примеров постов. Текст должен выглядеть так, как будто его написал автор оригинального канала. Обрати внимание на частоту использования определенных слов или фраз.
-7. **Текст поста должен быть не короче {avg_length} символов. Если это невозможно, максимально приблизься к этой длине.**
 
 Не используй хэштеги, если это не является частью формата или их нет в примерах.
 Сделай пост уникальным и интересным, но приоритет — на точном следовании стилю канала.
 Используй примеры постов канала, если они предоставлены, чтобы сохранить стиль. Если примеры не предоставлены, создай качественный пост в указанном формате."""
-        base_user_prompt = f"""Внимание: Текст поста должен быть не короче {avg_length} символов. Если это невозможно, максимально приблизься к этой длине.\n\nСоздай пост для Telegram-канала \"@{channel_name}\" на тему:\n\"{topic_idea}\"\n\nФормат поста: {format_style}\n\nНапиши полный текст поста, который будет готов к публикации.\n"""
+        user_prompt = f"""Создай пост для Telegram-канала \\\"@{channel_name}\\\" на тему:\\n\\\"{topic_idea}\\\"\\n\\nФормат поста: {format_style}\\n\\nНапиши полный текст поста, который будет готов к публикации.\\n"""
         if post_samples:
-            sample_text = "\n\n---\n\n".join(post_samples[:10]) # До 10 примеров
-            base_user_prompt += f"""
-\nВот несколько примеров постов из этого канала для точного копирования стиля и подачи (проанализируй их очень внимательно):\n\n{sample_text}\n\nСредняя длина постов в этом канале: {avg_length} символов. Новый пост должен быть примерно такой же длины (±10%).\n\nВнимание:\n- Используй предоставленные примеры постов для точного копирования стиля, структуры, формата и длины.\n- Длина нового поста должна соответствовать средней длине примеров (указано выше).\n- Не пиши, что примеры отсутствуют, даже если их нет — просто следуй анализу стиля и тематики.\n- Не добавляй никаких пояснений, только сам пост.\n- Не обращайся к читателю или пользователю, не используй обращения типа 'вы', 'друзья', 'коллеги', 'подписчики' и т.п.\n- Если примеры постов предоставлены, обязательно опирайся на них при генерации.\n- Твой ответ — только текст поста, без каких-либо комментариев, пояснений или технических вставок.\n\nУбедись, что твой ответ строго следует их манере."""
-        else:
-            base_user_prompt += f"""
-\nВнимание:\n- Если примеры постов не предоставлены, строго следуй анализу стиля и тематики канала.\n- Не добавляй никаких пояснений, только сам пост.\n- Не обращайся к читателю или пользователю, не используй обращения типа 'вы', 'друзья', 'коллеги', 'подписчики' и т.п.\n- Твой ответ — только текст поста, без каких-либо комментариев, пояснений или технических вставок."""
-        base_user_prompt += f"\n\nПовторяю, текст поста должен быть не короче {avg_length} символов. Не сокращай текст, не делай его короче, чем примеры!"
-        # --- Усиление требований к длине и детализации ---
-        length_rule = f"Напиши развернутый, подробный, длинный пост, не менее {avg_length} символов, с примерами, деталями, аналитикой, списками, абзацами, пояснениями, выводами и рекомендациями. Не сокращай!"
-        system_prompt = f"{length_rule}\n\n" + base_system_prompt + f"\n\n{length_rule}"
-        user_prompt = f"{length_rule}\n\n" + base_user_prompt + f"\n\n{length_rule}"
-        # --- Генерация поста (основной и, при необходимости, повторный запрос) ---
-        def is_too_short(text):
-            return text and len(text) < int(avg_length * 0.9)
+            sample_text = "\\n\\n---\\n\\n".join(post_samples[:10]) # Увеличено количество примеров до 10
+            user_prompt += f"""\\n\\nВот несколько примеров постов из этого канала для точного копирования стиля и подачи (проанализируй их очень внимательно):\\n\\n{sample_text}\\n\\nУбедись, что твой ответ строго следует их манере."""
+        
+        # Сначала пробуем OpenRouter API, если он доступен
         post_text = ""
         used_backup_api = False
-        async def generate_post(system_prompt, user_prompt, is_openrouter, use_paid_model=False):
-            if is_openrouter:
+        
+        if OPENROUTER_API_KEY:
+            try:
+                logger.info(f"Отправка запроса на генерацию поста по идее через OpenRouter API: {topic_idea}")
                 client = AsyncOpenAI(
                     base_url="https://openrouter.ai/api/v1",
                     api_key=OPENROUTER_API_KEY
                 )
-                model_name = OPENROUTER_PAID_MODEL if use_paid_model else "meta-llama/llama-4-maverick:free"
-                return await client.chat.completions.create(
-                    model=model_name,
-                    messages=build_messages(system_prompt, user_prompt, is_openrouter),
+                # --- Новый блок: расчет средней длины постов ---
+                avg_length = 0
+                post_samples = req.get("post_samples") or req.post_samples if hasattr(req, "post_samples") else None
+                if post_samples:
+                    avg_length = int(sum(len(t) for t in post_samples) / len(post_samples))
+                    avg_tokens = max(100, min(1200, avg_length // 3))
+                else:
+                    avg_tokens = 600
+                response = await client.chat.completions.create(
+                        model="meta-llama/llama-3.2-1b-instruct",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
                     temperature=0.7,
-                    max_tokens=1500,
+                    max_tokens=avg_tokens,
                     timeout=60,
                     extra_headers={
                         "HTTP-Referer": "https://content-manager.onrender.com",
                         "X-Title": "Smart Content Assistant"
                     }
                 )
-            else:
-                openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-                return await openai_client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=build_messages(system_prompt, user_prompt, False),
-                    temperature=0.7,
-                    max_tokens=1500
-                )
-        # --- Основной запрос ---
-        api_error_message = None
-        response = None
-        is_openrouter = bool(OPENROUTER_API_KEY)
-        try:
-            # Если явно указан платный режим — используем платную модель
-            use_paid_model = bool(getenv("USE_OPENROUTER_PAID_MODEL", "0") == "1")
-            response = await generate_post(system_prompt, user_prompt, is_openrouter, use_paid_model=use_paid_model)
-            if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-                post_text = response.choices[0].message.content.strip()
-                logger.info(f"Получен текст поста через {'OpenRouter (платная модель)' if use_paid_model else ('OpenRouter' if is_openrouter else 'OpenAI')} API ({len(post_text)} символов)")
-            else:
-                raise Exception("API вернул некорректный или пустой ответ")
-        except Exception as api_error:
-            api_error_message = f"Ошибка соединения с API: {str(api_error)}"
-            logger.error(f"Ошибка при запросе к {'OpenRouter (платная модель)' if 'use_paid_model' in locals() and use_paid_model else ('OpenRouter' if is_openrouter else 'OpenAI')} API: {api_error}", exc_info=True)
-            # fallback на запасной API
-            if is_openrouter and OPENAI_API_KEY:
-                used_backup_api = True
-                try:
-                    response = await generate_post(system_prompt, user_prompt, False)
-                    if response and response.choices and len(response.choices) > 0 and response.choices[0].message:
-                        post_text = response.choices[0].message.content.strip()
-                        logger.info(f"Получен текст поста через запасной OpenAI API ({len(post_text)} символов)")
-                        api_error_message = None
-                    else:
-                        raise Exception("Запасной OpenAI API вернул некорректный или пустой ответ")
-                except Exception as openai_error:
-                    logger.error(f"Ошибка при использовании запасного OpenAI API: {openai_error}", exc_info=True)
-                    post_text = "[Текст не сгенерирован из-за ошибок API]"
-            else:
-                post_text = "[Текст не сгенерирован из-за ошибки API]"
-        # --- Проверка длины и повторный запрос при необходимости ---
-        if is_too_short(post_text):
-            logger.warning(f"Сгенерированный текст слишком короткий ({len(post_text)} < {int(avg_length*0.9)}). Повторный запрос с усилением промта.")
-            hard_rule = f"Ты выдал слишком короткий текст! Повтори, но напиши не менее {avg_length} символов! {length_rule}"
-            system_prompt_hard = f"{hard_rule}\n\n{system_prompt}\n\n{hard_rule}"
-            user_prompt_hard = f"{hard_rule}\n\n{user_prompt}\n\n{hard_rule}"
-            try:
-                response2 = await generate_post(system_prompt_hard, user_prompt_hard, is_openrouter)
-                if response2 and response2.choices and len(response2.choices) > 0 and response2.choices[0].message and response2.choices[0].message.content:
-                    post_text2 = response2.choices[0].message.content.strip()
-                    if not is_too_short(post_text2):
-                        post_text = post_text2
-                        logger.info(f"Повторный запрос успешен, длина: {len(post_text2)} символов")
-                    else:
-                        logger.warning(f"Даже после повторного запроса текст короткий: {len(post_text2)} символов")
+                if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+                    post_text = response.choices[0].message.content.strip()
+                    logger.info(f"Получен текст поста через OpenRouter API ({len(post_text)} символов)")
+                elif response and hasattr(response, 'error') and response.error:
+                    err_details = response.error
+                    api_error_message = getattr(err_details, 'message', str(err_details))
+                    logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
+                    # Ошибка OpenRouter API - пробуем запасной вариант
+                    raise Exception(f"OpenRouter API вернул ошибку: {api_error_message}")
                 else:
-                    logger.error("API не вернул текст при повторном запросе")
-            except Exception as e:
-                logger.error(f"Ошибка при повторном запросе: {e}")
+                    api_error_message = "OpenRouter API вернул некорректный или пустой ответ"
+                    logger.error(f"Некорректный или пустой ответ от OpenRouter API. Ответ: {response}")
+                    # Ошибка OpenRouter API - пробуем запасной вариант
+                    raise Exception("Некорректный или пустой ответ от OpenRouter API")
+            except Exception as api_error:
+                # В случае ошибки с OpenRouter API, проверяем наличие запасного ключа
+                api_error_message = f"Ошибка соединения с OpenRouter API: {str(api_error)}"
+                logger.error(f"Ошибка при запросе к OpenRouter API: {api_error}", exc_info=True)
+                # Пробуем использовать OpenAI API как запасной вариант
+                if OPENAI_API_KEY:
+                    used_backup_api = True
+                    logger.info(f"Попытка использования OpenAI API как запасного варианта для идеи: {topic_idea}")
+                    try:
+                        openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+                        openai_response = await openai_client.chat.completions.create(
+                            model="gpt-3.5-turbo",  # Используем GPT-3.5 Turbo как запасной вариант
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt}
+                            ],
+                            temperature=0.7,
+                            max_tokens=850
+                        )
+                        if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
+                            post_text = openai_response.choices[0].message.content.strip()
+                            logger.info(f"Получен текст поста через запасной OpenAI API ({len(post_text)} символов)")
+                            # Сбрасываем сообщение об ошибке, так как запасной вариант сработал
+                            api_error_message = None
+                        else:
+                            logger.error(f"Некорректный или пустой ответ от запасного OpenAI API")
+                            post_text = "[Текст не сгенерирован из-за ошибок API]"
+                    except Exception as openai_error:
+                        logger.error(f"Ошибка при использовании запасного OpenAI API: {openai_error}", exc_info=True)
+                        post_text = "[Текст не сгенерирован из-за ошибок API]"
+                else:
+                    logger.error("Запасной OPENAI_API_KEY не настроен, невозможно использовать альтернативный API")
+                post_text = "[Текст не сгенерирован из-за ошибки API]"
+        
+        # Если нет OPENROUTER_API_KEY, но есть OPENAI_API_KEY, используем его напрямую
+        elif OPENAI_API_KEY:
+            used_backup_api = True
+            logger.info(f"OPENROUTER_API_KEY отсутствует, используем OpenAI API напрямую для идеи: {topic_idea}")
+            try:
+                openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+                
+                openai_response = await openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",  # Используем GPT-3.5 Turbo
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=850
+                )
+                
+                if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
+                    post_text = openai_response.choices[0].message.content.strip()
+                    logger.info(f"Получен текст поста через OpenAI API ({len(post_text)} символов)")
+                else:
+                    logger.error(f"Некорректный или пустой ответ от OpenAI API")
+                    post_text = "[Текст не сгенерирован из-за ошибки API]"
+            except Exception as openai_error:
+                api_error_message = f"Ошибка соединения с OpenAI API: {str(openai_error)}"
+                logger.error(f"Ошибка при запросе к OpenAI API: {openai_error}", exc_info=True)
+                post_text = "[Текст не сгенерирован из-за ошибки API]"
         
         # Генерация ключевых слов для поиска изображений
         image_keywords = await generate_image_keywords(post_text, topic_idea, format_style)
@@ -557,14 +565,3 @@ async def generate_post_details(request: Request, req):
         logger.error(f"Ошибка при генерации деталей поста: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера при генерации деталей поста: {str(e)}") 
-
-def build_messages(system_prompt, user_prompt, is_openrouter):
-    if is_openrouter:
-        return [
-            {"role": "user", "content": f"{system_prompt}\n\n{user_prompt}"}
-        ]
-    else:
-        return [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ] 

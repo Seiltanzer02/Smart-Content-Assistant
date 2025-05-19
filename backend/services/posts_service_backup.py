@@ -406,7 +406,7 @@ async def generate_post_details(request: Request, req):
                 )
                 
                 response = await client.chat.completions.create(
-                    model="meta-llama/llama-4-maverick:free",
+                    model="meta-llama/llama-3.2-1b-instruct",
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
