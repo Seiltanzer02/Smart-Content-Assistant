@@ -7,7 +7,7 @@ from openai import AsyncOpenAI
 logger = logging.getLogger(__name__)
 
 async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[str, List[str]]:
-    """Анализ контента с использованием модели DeepSeek через OpenRouter API."""
+    """Анализ контента с использованием нескольких моделей OpenRouter API с fallback на OpenAI."""
     if not api_key:
         logger.warning("Анализ контента с DeepSeek невозможен: отсутствует OPENROUTER_API_KEY")
         return {
@@ -22,50 +22,49 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
     system_prompt = """Ты - эксперт по анализу контента Telegram-каналов. \nТвоя задача - глубоко проанализировать предоставленные посты и выявить САМЫЕ ХАРАКТЕРНЫЕ, ДОМИНИРУЮЩИЕ темы и стили/форматы, отражающие СУТЬ и УНИКАЛЬНОСТЬ канала. \nИзбегай слишком общих формулировок, если они не являются ключевыми. Сосредоточься на качестве, а не на количестве.\n\nВыдай результат СТРОГО в формате JSON с двумя ключами: \"themes\" и \"styles\". Каждый ключ должен содержать массив из 3-5 наиболее РЕЛЕВАНТНЫХ строк."""
     user_prompt = f"""Проанализируй СТРОГО следующие посты из Telegram-канала:\n{combined_text}\n\nОпредели 3-5 САМЫХ ХАРАКТЕРНЫХ тем и 3-5 САМЫХ РАСПРОСТРАНЕННЫХ стилей/форматов подачи контента, которые наилучшим образом отражают специфику ИМЕННО ЭТОГО канала. \nОсновывайся ТОЛЬКО на предоставленных текстах. \n\nПредставь результат ТОЛЬКО в виде JSON объекта с ключами \"themes\" и \"styles\". Никакого другого текста. \n\nОтветь только JSON-объектом, без пояснений, markdown и текста вокруг."""
     analysis_result = {"themes": [], "styles": []}
-    try:
-        client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=api_key
-        )
-        response = await client.chat.completions.create(
-            model="meta-llama/llama-4-maverick:free",
-            messages=build_messages(system_prompt, user_prompt, True),
-            temperature=0.1,
-            max_tokens=600,
-            timeout=60,
-            extra_headers={
-                "HTTP-Referer": "https://content-manager.onrender.com",
-                "X-Title": "Smart Content Assistant"
-            }
-        )
-        analysis_text = response.choices[0].message.content.strip()
-        logger.info(f"Получен ответ от DeepSeek: {analysis_text[:100]}...")
-        analysis_text = extract_json_from_llm_response(analysis_text)
-        json_match = re.search(r'(\{.*\})', analysis_text, re.DOTALL)
-        if json_match:
-            analysis_text = json_match.group(1)
-        analysis_json = json.loads(analysis_text)
-        themes = analysis_json.get("themes", [])
-        styles = analysis_json.get("styles", analysis_json.get("style", [])) 
-        if isinstance(themes, list) and isinstance(styles, list):
-            analysis_result = {"themes": themes, "styles": styles}
-            logger.info(f"Успешно извлечены темы ({len(themes)}) и стили ({len(styles)}) из JSON.")
-        else:
-            logger.warning(f"Некорректный тип данных для тем или стилей в JSON: {analysis_json}")
-            analysis_result = {"themes": [], "styles": []}
-    except json.JSONDecodeError as e:
-        logger.error(f"Ошибка парсинга JSON: {e}, текст: {analysis_text}")
-        themes_match = re.findall(r'"themes":\s*\[(.*?)\]', analysis_text, re.DOTALL)
-        if themes_match:
-            theme_items = re.findall(r'"([^"]+)"', themes_match[0])
-            analysis_result["themes"] = theme_items
-        styles_match = re.findall(r'"styles":\s*\[(.*?)\]', analysis_text, re.DOTALL)
-        if styles_match:
-            style_items = re.findall(r'"([^"]+)"', styles_match[0])
-            analysis_result["styles"] = style_items
-    except Exception as e:
-        logger.error(f"Ошибка при анализе контента через DeepSeek: {e}")
-    return analysis_result 
+    openrouter_models = [
+        "meta-llama/llama-4-maverick:free",
+        "meta-llama/llama-4-scout:free",
+        "google/gemini-2.0-flash-exp:free"
+    ]
+    for model_name in openrouter_models:
+        try:
+            client = AsyncOpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=api_key
+            )
+            response = await client.chat.completions.create(
+                model=model_name,
+                messages=build_messages(system_prompt, user_prompt, True),
+                temperature=0.1,
+                max_tokens=600,
+                timeout=60,
+                extra_headers={
+                    "HTTP-Referer": "https://content-manager.onrender.com",
+                    "X-Title": "Smart Content Assistant"
+                }
+            )
+            analysis_text = response.choices[0].message.content.strip()
+            logger.info(f"Получен ответ от {model_name}: {analysis_text[:100]}...")
+            analysis_text = extract_json_from_llm_response(analysis_text)
+            import re
+            json_match = re.search(r'(\{.*\})', analysis_text, re.DOTALL)
+            if json_match:
+                analysis_text = json_match.group(1)
+            import json
+            analysis_json = json.loads(analysis_text)
+            themes = analysis_json.get("themes", [])
+            styles = analysis_json.get("styles", analysis_json.get("style", []))
+            if isinstance(themes, list) and isinstance(styles, list) and themes and styles:
+                analysis_result = {"themes": themes, "styles": styles}
+                logger.info(f"Успешно извлечены темы ({len(themes)}) и стили ({len(styles)}) из JSON c {model_name}.")
+                return analysis_result
+            else:
+                logger.warning(f"Некорректный тип данных для тем или стилей в JSON: {analysis_json} (модель: {model_name})")
+        except Exception as e:
+            logger.error(f"Ошибка при анализе через модель {model_name}: {e}")
+    # Если все OpenRouter модели не дали результата — возвращаем пустой результат, чтобы сработал fallback на OpenAI
+    return analysis_result
 
 def build_messages(system_prompt, user_prompt, is_openrouter):
     if is_openrouter:
