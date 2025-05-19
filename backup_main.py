@@ -2317,70 +2317,80 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
                 logger.warning(f"Не удалось получить примеры постов для канала @{channel_name}: {e}")
                 # Продолжаем без примеров
                 pass
-                
-        # Формируем системный промпт
-        system_prompt = """Ты - опытный контент-маркетолог для Telegram-каналов.
-Твоя задача - сгенерировать текст поста на основе идеи и формата, который будет готов к публикации.
-
-Пост должен быть:
-1. Хорошо структурированным и легко читаемым
-2. Соответствовать указанной теме/идее
-3. Соответствовать указанному формату/стилю
-4. Иметь правильное форматирование для Telegram (если нужно - с эмодзи, абзацами, списками)
-
-Не используй хэштеги, если это не является частью формата.
-Сделай пост уникальным и интересным, учитывая специфику Telegram-аудитории.
-Используй примеры постов канала, если они предоставлены, чтобы сохранить стиль."""
-
-        # Формируем запрос пользователя
-        user_prompt = f"""Создай пост для Telegram-канала "@{channel_name}" на тему:
-"{topic_idea}"
-
-Формат поста: {format_style}
-
-Напиши полный текст поста, который будет готов к публикации.
-"""
-
-        # Если есть примеры постов канала, добавляем их
+        # --- ДОПОЛНЕНИЕ: если все примеры короткие, добавляем искусственный длинный пример ---
+        min_required_length = 1000
+        if post_samples and all(len(p.strip()) < 500 for p in post_samples):
+            long_example = (
+                "Пример длинного, подробного, развернутого поста с аналитикой, списками, абзацами, пояснениями, выводами и рекомендациями.\n"
+                "1. Введение: Кратко обозначьте тему и её актуальность.\n"
+                "2. Основная часть: Подробно разберите ключевые аспекты, приведите аналитику, статистику, примеры.\n"
+                "3. Списки: Используйте маркированные или нумерованные списки для структурирования информации.\n"
+                "4. Выводы и рекомендации: Сформулируйте основные выводы и дайте рекомендации читателям.\n"
+                "5. Заключение: Подытожьте материал и призовите к действию или размышлению.\n"
+                "Общий объём такого поста — не менее 1000 символов!"
+            )
+            post_samples.append(long_example)
+        # --- КОНЕЦ ДОПОЛНЕНИЯ ---
+        # --- Усиление требований к длине ---
+        avg_length = min_required_length
         if post_samples:
-            sample_text = "\n\n".join(post_samples[:3])  # Берем до 3 примеров, чтобы не превышать токены
-            user_prompt += f"""
-            
-Вот несколько примеров постов из этого канала для сохранения стиля:
-
-{sample_text}
-"""
-
+            avg_length = max(int(sum(len(p) for p in post_samples) / len(post_samples)), min_required_length)
+        # Формируем системный промпт
+        system_prompt = f"""Ты - опытный контент-маркетолог для Telegram-каналов.\nТвоя задача - сгенерировать развернутый, подробный, длинный пост (не менее {avg_length} символов) на основе идеи и формата, который будет готов к публикации.\n\nПост должен быть:\n1. Хорошо структурированным и легко читаемым\n2. Соответствовать указанной теме/идее\n3. Соответствовать указанному формату/стилю\n4. Иметь правильное форматирование для Telegram (если нужно - с эмодзи, абзацами, списками)\n5. Включать аналитику, детали, списки, абзацы, пояснения, выводы и рекомендации.\n6. Не сокращай текст! Не делай его короче, чем требуется.\n\nНе используй хэштеги, если это не является частью формата.\nСделай пост уникальным и интересным, учитывая специфику Telegram-аудитории.\nИспользуй примеры постов канала, если они предоставлены, чтобы сохранить стиль."""
+        # Формируем запрос пользователя
+        user_prompt = f"""Внимание: Напиши развернутый, подробный, длинный пост не менее {avg_length} символов, с примерами, деталями, аналитикой, списками, абзацами, пояснениями, выводами и рекомендациями. Не сокращай!\n\nСоздай пост для Telegram-канала \"@{channel_name}\" на тему:\n\"{topic_idea}\"\n\nФормат поста: {format_style}\n\nНапиши полный текст поста, который будет готов к публикации.\n"""
+        if post_samples:
+            sample_text = "\n\n---\n\n".join(post_samples[:5])  # До 5 примеров
+            user_prompt += f"""\nВот несколько примеров постов из этого канала для сохранения стиля:\n\n{sample_text}\n\nСредняя длина постов: {avg_length} символов. Новый пост должен быть не короче этой длины!\n"""
+        user_prompt += f"\nПовторяю: Напиши развернутый, подробный, длинный пост не менее {avg_length} символов, с примерами, деталями, аналитикой, списками, абзацами, пояснениями, выводами и рекомендациями. Не сокращай!"
         # Настройка клиента OpenAI для использования OpenRouter
         client = AsyncOpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=OPENROUTER_API_KEY
         )
-        
         # === ИЗМЕНЕНО: Добавлена обработка ошибок API ===
         post_text = ""
         try:
             # Запрос к API
             logger.info(f"Отправка запроса на генерацию поста по идее: {topic_idea}")
             response = await client.chat.completions.create(
-                model="deepseek/deepseek-chat-v3-0324:free", # <--- ИЗМЕНЕНО НА НОВУЮ БЕСПЛАТНУЮ МОДЕЛЬ
+                model="deepseek/deepseek-chat-v3-0324:free",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.7,
-                max_tokens=850, # === ИЗМЕНЕНО: Уменьшен лимит токенов с 1000 до 850 ===
+                max_tokens=1500,
                 timeout=60,
                 extra_headers={
                     "HTTP-Referer": "https://content-manager.onrender.com",
                     "X-Title": "Smart Content Assistant"
                 }
             )
-            
-            # Проверка ответа и извлечение текста
             if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
                 post_text = response.choices[0].message.content.strip()
                 logger.info(f"Получен текст поста ({len(post_text)} символов)")
+                # --- Пост-обработка: если текст слишком короткий, повторяем запрос с жёстким уточнением ---
+                if len(post_text) < int(avg_length * 0.9):
+                    logger.warning(f"Сгенерированный текст слишком короткий ({len(post_text)} символов), повторяем запрос с усиленным требованием длины!")
+                    user_prompt += f"\n\nТы выдал слишком короткий текст ({len(post_text)} символов)! Повтори генерацию, но напиши не менее {avg_length} символов, подробно, развернуто, с аналитикой, списками, примерами, пояснениями, выводами и рекомендациями. Не сокращай!"
+                    response2 = await client.chat.completions.create(
+                        model="deepseek/deepseek-chat-v3-0324:free",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        temperature=0.7,
+                        max_tokens=1500,
+                        timeout=60,
+                        extra_headers={
+                            "HTTP-Referer": "https://content-manager.onrender.com",
+                            "X-Title": "Smart Content Assistant"
+                        }
+                    )
+                    if response2 and response2.choices and len(response2.choices) > 0 and response2.choices[0].message and response2.choices[0].message.content:
+                        post_text = response2.choices[0].message.content.strip()
+                        logger.info(f"Повторно получен текст поста ({len(post_text)} символов)")
             # === ДОБАВЛЕНО: Явная проверка на ошибку в ответе ===
             elif response and hasattr(response, 'error') and response.error:
                 err_details = response.error
