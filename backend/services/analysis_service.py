@@ -19,17 +19,6 @@ class AnalyzeResponse(BaseModel):
     message: Optional[str] = None
     error: Optional[str] = None
 
-def build_messages(system_prompt, user_prompt, is_openrouter):
-    if is_openrouter:
-        return [
-            {"role": "user", "content": f"{system_prompt}\n\n{user_prompt}"}
-        ]
-    else:
-        return [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-
 async def analyze_channel(request: Request, req: AnalyzeRequest):
     telegram_user_id = request.headers.get("X-Telegram-User-Id")
     logger.info(f"Начинаем анализ канала от пользователя: {telegram_user_id}")
@@ -130,9 +119,9 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
             # Пробуем сначала использовать OpenRouter API
             try:
                 logger.info(f"Анализируем посты канала @{username} с использованием OpenRouter API")
-                analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
-                themes = analysis_result.get("themes", [])
-                styles = analysis_result.get("styles", [])
+        analysis_result = await analyze_content_with_deepseek(texts, OPENROUTER_API_KEY)
+        themes = analysis_result.get("themes", [])
+        styles = analysis_result.get("styles", [])
                 
                 if not themes and not styles:
                     # Если не получены результаты, пробуем запасной API
@@ -171,7 +160,10 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                         
                         response = await openai_client.chat.completions.create(
                             model="gpt-3.5-turbo",
-                            messages=build_messages("Ты - аналитик контента для Telegram-каналов.", prompt, False),
+                            messages=[
+                                {"role": "system", "content": "Ты - аналитик контента для Telegram-каналов."},
+                                {"role": "user", "content": prompt}
+                            ],
                             temperature=0.7,
                             max_tokens=500
                         )
@@ -245,7 +237,10 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                 
                 response = await openai_client.chat.completions.create(
                     model="gpt-3.5-turbo",
-                    messages=build_messages("Ты - аналитик контента для Telegram-каналов.", prompt, False),
+                    messages=[
+                        {"role": "system", "content": "Ты - аналитик контента для Telegram-каналов."},
+                        {"role": "user", "content": prompt}
+                    ],
                     temperature=0.7,
                     max_tokens=500
                 )

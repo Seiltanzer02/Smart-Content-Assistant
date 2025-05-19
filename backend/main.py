@@ -1364,7 +1364,7 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
         # Запрос к API
         logger.info(f"Отправка запроса на генерацию плана контента для канала @{channel_name} с уточненным промптом")
         response = await client.chat.completions.create(
-            model="meta-llama/llama-4-maverick:free", # <--- ИЗМЕНЕНО НА НОВУЮ БЕСПЛАТНУЮ МОДЕЛЬ
+            model="meta-llama/llama-3.2-1b-instruct", # <--- ИЗМЕНЕНО НА НОВУЮ БЕСПЛАТНУЮ МОДЕЛЬ
             messages=[
                 # {"role": "system", "content": system_prompt}, # Системный промпт может конфликтовать с некоторыми моделями, тестируем без него или с ним
                 {"role": "user", "content": user_prompt} # Помещаем все инструкции в user_prompt
@@ -2126,7 +2126,7 @@ async def generate_image_keywords(text: str, topic: str, format_style: str) -> L
         
         # Запрос к API
         response = await client.chat.completions.create(
-            model="meta-llama/llama-4-maverick:free", # <--- ИЗМЕНЕНО НА НОВУЮ БЕСПЛАТНУЮ МОДЕЛЬ
+            model="meta-llama/llama-3.2-1b-instruct", # <--- ИЗМЕНЕНО НА НОВУЮ БЕСПЛАТНУЮ МОДЕЛЬ
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -2362,7 +2362,7 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
             # Запрос к API
             logger.info(f"Отправка запроса на генерацию поста по идее: {topic_idea}")
             response = await client.chat.completions.create(
-                model="meta-llama/llama-4-maverick:free", # <--- ИЗМЕНЕНО НА НОВУЮ БЕСПЛАТНУЮ МОДЕЛЬ
+                model="meta-llama/llama-3.2-1b-instruct", # <--- ИЗМЕНЕНО НА НОВУЮ БЕСПЛАТНУЮ МОДЕЛЬ
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
