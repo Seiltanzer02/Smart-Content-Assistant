@@ -7,6 +7,7 @@ import uuid
 import asyncio
 from datetime import datetime
 import traceback
+from os import getenv
 
 # Импорт моделей PostImage, PostData, SavedPostResponse, PostDetailsResponse из main.py или отдельного файла моделей
 # from backend.models import PostImage, PostData, SavedPostResponse, PostDetailsResponse
@@ -378,6 +379,9 @@ async def generate_post_details(request: Request, req):
         if post_samples:
             avg_length = int(sum(len(p) for p in post_samples) / len(post_samples))
         
+        # Получаем название платной модели из переменной окружения (если есть)
+        OPENROUTER_PAID_MODEL = getenv("OPENROUTER_PAID_MODEL") or "meta-llama/llama-3.2-1b-instruct"
+        
         # --- Сначала формируем базовые промты ---
         base_system_prompt = f"""Ты — опытный контент-маркетолог для Telegram-каналов.
 Твоя задача — сгенерировать текст поста на основе идеи и формата, который будет готов к публикации.
@@ -412,14 +416,15 @@ async def generate_post_details(request: Request, req):
             return text and len(text) < int(avg_length * 0.9)
         post_text = ""
         used_backup_api = False
-        async def generate_post(system_prompt, user_prompt, is_openrouter):
+        async def generate_post(system_prompt, user_prompt, is_openrouter, use_paid_model=False):
             if is_openrouter:
                 client = AsyncOpenAI(
                     base_url="https://openrouter.ai/api/v1",
                     api_key=OPENROUTER_API_KEY
                 )
+                model_name = OPENROUTER_PAID_MODEL if use_paid_model else "meta-llama/llama-4-maverick:free"
                 return await client.chat.completions.create(
-                    model="meta-llama/llama-4-maverick:free",
+                    model=model_name,
                     messages=build_messages(system_prompt, user_prompt, is_openrouter),
                     temperature=0.7,
                     max_tokens=1500,
@@ -442,15 +447,17 @@ async def generate_post_details(request: Request, req):
         response = None
         is_openrouter = bool(OPENROUTER_API_KEY)
         try:
-            response = await generate_post(system_prompt, user_prompt, is_openrouter)
+            # Если явно указан платный режим — используем платную модель
+            use_paid_model = bool(getenv("USE_OPENROUTER_PAID_MODEL", "0") == "1")
+            response = await generate_post(system_prompt, user_prompt, is_openrouter, use_paid_model=use_paid_model)
             if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
                 post_text = response.choices[0].message.content.strip()
-                logger.info(f"Получен текст поста через {'OpenRouter' if is_openrouter else 'OpenAI'} API ({len(post_text)} символов)")
+                logger.info(f"Получен текст поста через {'OpenRouter (платная модель)' if use_paid_model else ('OpenRouter' if is_openrouter else 'OpenAI')} API ({len(post_text)} символов)")
             else:
                 raise Exception("API вернул некорректный или пустой ответ")
         except Exception as api_error:
             api_error_message = f"Ошибка соединения с API: {str(api_error)}"
-            logger.error(f"Ошибка при запросе к {'OpenRouter' if is_openrouter else 'OpenAI'} API: {api_error}", exc_info=True)
+            logger.error(f"Ошибка при запросе к {'OpenRouter (платная модель)' if 'use_paid_model' in locals() and use_paid_model else ('OpenRouter' if is_openrouter else 'OpenAI')} API: {api_error}", exc_info=True)
             # fallback на запасной API
             if is_openrouter and OPENAI_API_KEY:
                 used_backup_api = True
