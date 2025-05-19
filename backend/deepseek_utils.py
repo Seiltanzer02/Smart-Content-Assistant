@@ -29,10 +29,7 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
         )
         response = await client.chat.completions.create(
             model="meta-llama/llama-4-maverick:free",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
+            messages=build_messages(system_prompt, user_prompt, True),
             temperature=0.1,
             max_tokens=600,
             timeout=60,
@@ -68,3 +65,14 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
     except Exception as e:
         logger.error(f"Ошибка при анализе контента через DeepSeek: {e}")
     return analysis_result 
+
+def build_messages(system_prompt, user_prompt, is_openrouter):
+    if is_openrouter:
+        return [
+            {"role": "user", "content": f"{system_prompt}\n\n{user_prompt}"}
+        ]
+    else:
+        return [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ] 

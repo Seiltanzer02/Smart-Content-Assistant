@@ -404,12 +404,10 @@ async def generate_post_details(request: Request, req):
                     base_url="https://openrouter.ai/api/v1",
                     api_key=OPENROUTER_API_KEY
                 )
+                is_openrouter = True
                 response = await client.chat.completions.create(
                     model="meta-llama/llama-4-maverick:free",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
+                    messages=build_messages(system_prompt, user_prompt, is_openrouter),
                     temperature=0.7,
                     max_tokens=850,
                     timeout=60,
@@ -444,10 +442,7 @@ async def generate_post_details(request: Request, req):
                         openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
                         openai_response = await openai_client.chat.completions.create(
                             model="gpt-3.5-turbo",  # Используем GPT-3.5 Turbo как запасной вариант
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt}
-                            ],
+                            messages=build_messages(system_prompt, user_prompt, False),
                             temperature=0.7,
                             max_tokens=850
                         )
@@ -475,10 +470,7 @@ async def generate_post_details(request: Request, req):
                 
                 openai_response = await openai_client.chat.completions.create(
                     model="gpt-3.5-turbo",  # Используем GPT-3.5 Turbo
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
+                    messages=build_messages(system_prompt, user_prompt, False),
                     temperature=0.7,
                     max_tokens=850
                 )
@@ -557,3 +549,14 @@ async def generate_post_details(request: Request, req):
         logger.error(f"Ошибка при генерации деталей поста: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера при генерации деталей поста: {str(e)}") 
+
+def build_messages(system_prompt, user_prompt, is_openrouter):
+    if is_openrouter:
+        return [
+            {"role": "user", "content": f"{system_prompt}\n\n{user_prompt}"}
+        ]
+    else:
+        return [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ] 
