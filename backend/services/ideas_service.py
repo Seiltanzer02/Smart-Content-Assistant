@@ -148,6 +148,7 @@ async def generate_content_plan(request: Request, req):
             "deepseek/deepseek-chat-v3-0324:free"
         ]
         plan_text = None
+        plan_items = []
         if OPENROUTER_API_KEY:
             for model_name in openrouter_models:
                 try:
@@ -171,7 +172,61 @@ async def generate_content_plan(request: Request, req):
                     if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
                         plan_text = response.choices[0].message.content.strip()
                         logger.info(f"Получен ответ с планом публикаций через OpenRouter API ({model_name}, первые 100 символов): {plan_text[:100]}...")
-                        break
+                        # Обработка ответа (markdown, JSON, строки)
+                        temp_plan_items = []
+                        temp_text = plan_text.strip()
+                        if temp_text.startswith('```json'):
+                            temp_text = temp_text[len('```json'):].lstrip('\n')
+                        elif temp_text.startswith('```'):
+                            temp_text = temp_text[len('```'):].lstrip('\n')
+                        if temp_text.endswith('```'):
+                            temp_text = temp_text[:-3].rstrip()
+                        json_match = re.search(r'(\[.*\]|\{.*\})', temp_text, re.DOTALL)
+                        if json_match:
+                            plan_text_json = json_match.group(1)
+                            try:
+                                plan_json = json.loads(plan_text_json)
+                                if isinstance(plan_json, list):
+                                    temp_plan_items = plan_json
+                                elif isinstance(plan_json, dict) and 'plan' in plan_json:
+                                    temp_plan_items = plan_json['plan']
+                            except Exception as e:
+                                logger.error(f"Ошибка парсинга JSON плана: {e}, текст: {plan_text_json}")
+                        # Если не JSON — старая логика
+                        if not temp_plan_items:
+                            lines = temp_text.split('\n')
+                            expected_style_set = set(s.lower() for s in styles)
+                            for line in lines:
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                parts = line.split('::')
+                                if len(parts) == 3:
+                                    try:
+                                        day_part = parts[0].lower().replace('день', '').strip()
+                                        day = int(day_part)
+                                        topic_idea = clean_text_formatting(parts[1].strip())
+                                        format_style = clean_text_formatting(parts[2].strip())
+                                        if format_style.lower() not in expected_style_set:
+                                            logger.warning(f"Стиль '{format_style}' не найден в списке допустимых стилей: {styles}")
+                                            format_style = random.choice(styles) if styles else format_style
+                                        if topic_idea:
+                                            temp_plan_items.append({
+                                                "day": day,
+                                                "topic_idea": topic_idea,
+                                                "format_style": format_style
+                                            })
+                                        else:
+                                            logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
+                                    except Exception as parse_err:
+                                        logger.error(f"Ошибка при парсинге строки плана: {line} — {parse_err}")
+                                        continue
+                                else:
+                                    logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
+                        # Если удалось получить валидный план — используем его и выходим из цикла
+                        if temp_plan_items:
+                            plan_items = temp_plan_items
+                            break
                     elif response and hasattr(response, 'error') and response.error:
                         err_details = response.error
                         api_error_message = getattr(err_details, 'message', str(err_details))
@@ -180,9 +235,10 @@ async def generate_content_plan(request: Request, req):
                         logger.error(f"Некорректный или пустой ответ от OpenRouter API. Ответ: {response}")
                 except Exception as api_error:
                     logger.error(f"Ошибка при запросе к OpenRouter API ({model_name}): {api_error}", exc_info=True)
-            if not plan_text:
-                logger.warning("Все OpenRouter модели не дали результата, fallback на OpenAI")
-        if not plan_text and OPENAI_API_KEY:
+            if not plan_items:
+                logger.warning("Все OpenRouter модели не дали валидного результата, fallback на OpenAI")
+        # Fallback на OpenAI, если не удалось получить валидный план
+        if not plan_items and OPENAI_API_KEY:
             used_backup_api = True
             logger.info(f"Попытка использования OpenAI API как запасного варианта для канала {channel_name}")
             try:
@@ -196,82 +252,60 @@ async def generate_content_plan(request: Request, req):
                 if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
                     plan_text = openai_response.choices[0].message.content.strip()
                     logger.info(f"Получен план через запасной OpenAI API ({len(plan_text)} символов)")
-                else:
-                    logger.error(f"Некорректный или пустой ответ от OpenAI API")
-                    return {
-                        "plan": [],
-                        "message": "Ошибка при генерации плана (некорректный ответ API).",
-                        "limit_reached": False
-                    }
+                    # Повторяем обработку для OpenAI-ответа
+                    temp_plan_items = []
+                    temp_text = plan_text.strip()
+                    if temp_text.startswith('```json'):
+                        temp_text = temp_text[len('```json'):].lstrip('\n')
+                    elif temp_text.startswith('```'):
+                        temp_text = temp_text[len('```'):].lstrip('\n')
+                    if temp_text.endswith('```'):
+                        temp_text = temp_text[:-3].rstrip()
+                    json_match = re.search(r'(\[.*\]|\{.*\})', temp_text, re.DOTALL)
+                    if json_match:
+                        plan_text_json = json_match.group(1)
+                        try:
+                            plan_json = json.loads(plan_text_json)
+                            if isinstance(plan_json, list):
+                                temp_plan_items = plan_json
+                            elif isinstance(plan_json, dict) and 'plan' in plan_json:
+                                temp_plan_items = plan_json['plan']
+                        except Exception as e:
+                            logger.error(f"Ошибка парсинга JSON плана: {e}, текст: {plan_text_json}")
+                    if not temp_plan_items:
+                        lines = temp_text.split('\n')
+                        expected_style_set = set(s.lower() for s in styles)
+                        for line in lines:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            parts = line.split('::')
+                            if len(parts) == 3:
+                                try:
+                                    day_part = parts[0].lower().replace('день', '').strip()
+                                    day = int(day_part)
+                                    topic_idea = clean_text_formatting(parts[1].strip())
+                                    format_style = clean_text_formatting(parts[2].strip())
+                                    if format_style.lower() not in expected_style_set:
+                                        logger.warning(f"Стиль '{format_style}' не найден в списке допустимых стилей: {styles}")
+                                        format_style = random.choice(styles) if styles else format_style
+                                    if topic_idea:
+                                        temp_plan_items.append({
+                                            "day": day,
+                                            "topic_idea": topic_idea,
+                                            "format_style": format_style
+                                        })
+                                    else:
+                                        logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
+                                except Exception as parse_err:
+                                    logger.error(f"Ошибка при парсинге строки плана: {line} — {parse_err}")
+                                    continue
+                            else:
+                                logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
+                    if temp_plan_items:
+                        plan_items = temp_plan_items
             except Exception as e:
                 logger.error(f"Ошибка при генерации плана через OpenAI API: {e}")
-                return {
-                    "plan": [],
-                    "message": f"Ошибка при генерации плана: {str(e)}",
-                    "limit_reached": False
-                }
-        else:
-            logger.error("Отсутствуют API ключи для генерации плана (OPENROUTER_API_KEY и OPENAI_API_KEY)")
-            return {
-                "plan": [],
-                "message": "API для генерации плана недоступны.",
-                "limit_reached": False
-            }
-        
-        # Обработка полученного текста плана
-        plan_items = []
-        if plan_text:
-            plan_text = plan_text.strip()
-            # Удаляем markdown-обёртку, если есть
-            if plan_text.startswith('```json'):
-                plan_text = plan_text[len('```json'):].lstrip('\n')
-            elif plan_text.startswith('```'):
-                plan_text = plan_text[len('```'):].lstrip('\n')
-            if plan_text.endswith('```'):
-                plan_text = plan_text[:-3].rstrip()
-            # Пробуем найти JSON в любом месте ответа
-            json_match = re.search(r'(\[.*\]|\{.*\})', plan_text, re.DOTALL)
-            if json_match:
-                plan_text_json = json_match.group(1)
-                try:
-                    plan_json = json.loads(plan_text_json)
-                    if isinstance(plan_json, list):
-                        plan_items = plan_json
-                    elif isinstance(plan_json, dict) and 'plan' in plan_json:
-                        plan_items = plan_json['plan']
-                except Exception as e:
-                    logger.error(f"Ошибка парсинга JSON плана: {e}, текст: {plan_text_json}")
-            # Если не JSON — старая логика
-            if not plan_items:
-                lines = plan_text.split('\n')
-                expected_style_set = set(s.lower() for s in styles)
-                for line in lines:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    parts = line.split('::')
-                    if len(parts) == 3:
-                        try:
-                            day_part = parts[0].lower().replace('день', '').strip()
-                            day = int(day_part)
-                            topic_idea = clean_text_formatting(parts[1].strip())
-                            format_style = clean_text_formatting(parts[2].strip())
-                            if format_style.lower() not in expected_style_set:
-                                logger.warning(f"Стиль '{format_style}' не найден в списке допустимых стилей: {styles}")
-                                format_style = random.choice(styles) if styles else format_style
-                            if topic_idea:
-                                plan_items.append({
-                                    "day": day,
-                                    "topic_idea": topic_idea,
-                                    "format_style": format_style
-                                })
-                            else:
-                                logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
-                        except Exception as parse_err:
-                            logger.error(f"Ошибка при парсинге строки плана: {line} — {parse_err}")
-                            continue
-                    else:
-                        logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
         # Если не удалось извлечь идеи — генерируем базовый план вручную
         if not plan_items:
             logger.error(f"LLM не вернул валидных идей! Исходный ответ: {plan_text}")
