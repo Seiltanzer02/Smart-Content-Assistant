@@ -557,26 +557,6 @@ async def telegram_webhook(request: Request):
         
         # ... остальная обработка вебхуков ...
         
-        # Обработка команды /partner_link
-        if text == '/partner_link':
-            logger.info(f"[PARTNER_LINK] Запуск обработки команды для user_id={user_id}")
-            try:
-                db_pool = get_db_pool() if 'get_db_pool' in globals() else None
-                if not db_pool:
-                    logger.error("db_pool не инициализирован! Попробуйте позже.")
-                    await send_telegram_message(user_id, "Ошибка сервера: база данных недоступна.")
-                    return {"ok": False, "error": "db_pool is None"}
-                service = PartnerReferralService(db_pool)
-                partner_link = await service.get_partner_link(int(user_id))
-                logger.info(f"[PARTNER_LINK] Получена или сгенерирована ссылка: {partner_link}")
-                await send_telegram_message(user_id, f"Ваша партнёрская ссылка:\n{partner_link}")
-                return {"ok": True}
-            except Exception as e:
-                import traceback
-                logger.error(f"[PARTNER_LINK] Ошибка: {e}\n{traceback.format_exc()}")
-                await send_telegram_message(user_id, "Ошибка при получении партнёрской ссылки. Попробуйте позже.")
-            return {"ok": True}
-        
         return {"ok": True}
     except Exception as e:
         logger.error(f"Ошибка при обработке вебхука Telegram: {e}")
@@ -2465,11 +2445,11 @@ async def generate_post_details(request: Request, req: GeneratePostDetailsReques
                         # Обновляем существующую запись
                         result = supabase.table("channel_analysis").update(analysis_data).eq("user_id", telegram_user_id).eq("channel_name", username).execute()
                         logger.info(f"Обновлен результат анализа для канала @{username} пользователя {telegram_user_id}")
-                    else:
+            else:
                         # Создаем новую запись
                         result = supabase.table("channel_analysis").insert(analysis_data).execute()
                         logger.info(f"Сохранен новый результат анализа для канала @{username} пользователя {telegram_user_id}")
-                except Exception as api_error:
+        except Exception as api_error:
                     logger.warning(f"Ошибка при сохранении через API: {api_error}. Пробуем прямой SQL запрос.")
                     
                     # Получаем URL и ключ Supabase

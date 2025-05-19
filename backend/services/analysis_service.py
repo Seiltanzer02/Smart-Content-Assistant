@@ -114,8 +114,6 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
         
         # Проверяем наличие API ключей и выбираем стратегию анализа
         used_backup_api = False
-        themes = []
-        styles = []
         
         if OPENROUTER_API_KEY:
             # Пробуем сначала использовать OpenRouter API
@@ -316,34 +314,20 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                 supabase.table("user_settings").update({"allChannels": all_channels, "updated_at": datetime.now().isoformat()}).eq("user_id", telegram_user_id).execute()
         except Exception as db_error:
             logger.error(f"Ошибка при сохранении результатов анализа в БД: {db_error}")
-            
         # 6. Увеличиваем счетчик использования
         try:
             await subscription_service.increment_analysis_usage(int(telegram_user_id))
         except Exception as counter_error:
-            logger.error(f"Ошибка при увеличении счетчика анализов: {counter_error}")
-        
-        # 7. Формируем и возвращаем результат
-        sample_posts = [p.get("text", "") for p in posts[:3]]
-        response = AnalyzeResponse(
+            logger.error(f"Ошибка при увеличении счетчика анализа: {counter_error}")
+        # 7. Возвращаем результат
+        return AnalyzeResponse(
             themes=themes,
             styles=styles,
-            analyzed_posts_sample=sample_posts,
-            best_posting_time="18:00-20:00",  # Можно доработать
+            analyzed_posts_sample=[post.get("text", "") for post in posts[:10]],
+            best_posting_time="18:00-20:00",
             analyzed_posts_count=len(posts),
             message=error_message
         )
-        
-        logger.info(f"Завершен анализ канала @{username} от пользователя {telegram_user_id}")
-        return response
-        
     except Exception as e:
-        logger.error(f"Общая ошибка при анализе канала: {e}")
-        return AnalyzeResponse(
-            themes=[],
-            styles=[],
-            analyzed_posts_sample=[],
-            best_posting_time="",
-            analyzed_posts_count=0,
-            error=f"Ошибка при анализе: {str(e)}"
-        ) 
+        logger.error(f"Ошибка при анализе канала для пользователя {telegram_user_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера: {str(e)}") 
