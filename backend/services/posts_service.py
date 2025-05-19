@@ -404,7 +404,6 @@ async def generate_post_details(request: Request, req):
                     base_url="https://openrouter.ai/api/v1",
                     api_key=OPENROUTER_API_KEY
                 )
-                
                 response = await client.chat.completions.create(
                     model="meta-llama/llama-4-maverick:free",
                     messages=[
@@ -419,7 +418,6 @@ async def generate_post_details(request: Request, req):
                         "X-Title": "Smart Content Assistant"
                     }
                 )
-                
                 if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
                     post_text = response.choices[0].message.content.strip()
                     logger.info(f"Получен текст поста через OpenRouter API ({len(post_text)} символов)")
@@ -466,7 +464,7 @@ async def generate_post_details(request: Request, req):
                         post_text = "[Текст не сгенерирован из-за ошибок API]"
                 else:
                     logger.error("Запасной OPENAI_API_KEY не настроен, невозможно использовать альтернативный API")
-                    post_text = "[Текст не сгенерирован из-за ошибки API]"
+                post_text = "[Текст не сгенерирован из-за ошибки API]"
         
         # Если нет OPENROUTER_API_KEY, но есть OPENAI_API_KEY, используем его напрямую
         elif OPENAI_API_KEY:

@@ -38,11 +38,6 @@ app.add_middleware(
 )
 
 from services.subscription_service import SubscriptionService, FREE_ANALYSIS_LIMIT, FREE_POST_LIMIT, SUBSCRIPTION_PRICE, SUBSCRIPTION_DURATION_MONTHS
-# Импорт роутера партнерской программы
-from backend.routers.partner_router import router as partner_router
-
-# Подключаем роутер партнерской программы
-app.include_router(partner_router)
 
 # Настройка логирования
 import logging
@@ -90,17 +85,6 @@ class DirectPremiumStatusResponse(BaseModel):
     subscription_end_date: Optional[str] = None
     analysis_count: Optional[int] = None
     post_generation_count: Optional[int] = None
-
-db_pool = None
-
-@app.on_event("startup")
-async def startup():
-    global db_pool
-    db_url = os.getenv("DATABASE_URL")
-    db_pool = await asyncpg.create_pool(db_url)
-
-def get_db_pool():
-    return db_pool
 
 async def get_subscription_service():
     """Создает экземпляр SubscriptionService с подключением к базе данных"""
