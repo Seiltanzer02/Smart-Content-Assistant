@@ -20,12 +20,15 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
     combined_text = "\n\n".join([f"Пост {i+1}: {text}" for i, text in enumerate(texts)])
     logger.info(f"Подготовлено {len(texts)} текстов для анализа через DeepSeek")
     system_prompt = """Ты - эксперт по анализу контента Telegram-каналов. \nТвоя задача - глубоко проанализировать предоставленные посты и выявить САМЫЕ ХАРАКТЕРНЫЕ, ДОМИНИРУЮЩИЕ темы и стили/форматы, отражающие СУТЬ и УНИКАЛЬНОСТЬ канала. \nИзбегай слишком общих формулировок, если они не являются ключевыми. Сосредоточься на качестве, а не на количестве.\n\nВыдай результат СТРОГО в формате JSON с двумя ключами: \"themes\" и \"styles\". Каждый ключ должен содержать массив из 3-5 наиболее РЕЛЕВАНТНЫХ строк."""
-    user_prompt = f"""Проанализируй СТРОГО следующие посты из Telegram-канала:\n{combined_text}\n\nОпредели 3-5 САМЫХ ХАРАКТЕРНЫХ тем и 3-5 САМЫХ РАСПРОСТРАНЕННЫХ стилей/форматов подачи контента, которые наилучшим образом отражают специфику ИМЕННО ЭТОГО канала. \nОсновывайся ТОЛЬКО на предоставленных текстах. \n\nПредставь результат ТОЛЬКО в виде JSON объекта с ключами \"themes\" и \"styles\". Никакого другого текста. \n\nОтветь только JSON-объектом, без пояснений, markdown и текста вокруг."""
+    user_prompt = f"""Проанализируй СТРОГО следующие посты из Telegram-канала:\n{combined_text}\n\nОпредели 3-5 САМЫХ ХАРАКТЕРНЫХ тем и 3-5 САМЫХ РАСПРОСТРАНЕННЫХ стилей/форматов подачи контента, которые наилучшим образом отражают специфику ИМЕННО ЭТОГО канала. \nОсновывайся ТОЛЬКО на предоставленных текстах. \n\nОтветь только JSON-объектом с ключами \"themes\" и \"styles\". Не добавляй никаких пояснений, markdown, комментариев, только JSON!"""
     analysis_result = {"themes": [], "styles": []}
     openrouter_models = [
         "meta-llama/llama-4-maverick:free",
         "meta-llama/llama-4-scout:free",
-        "google/gemini-2.0-flash-exp:free"
+        "google/gemini-2.0-flash-exp:free",
+        "qwen/qwen3-235b-a22b:free",
+        "microsoft/mai-ds-r1:free",
+        "deepseek/deepseek-chat-v3-0324:free"
     ]
     for model_name in openrouter_models:
         try:
@@ -47,15 +50,21 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
             analysis_text = response.choices[0].message.content.strip()
             logger.info(f"Получен ответ от {model_name}: {analysis_text[:100]}...")
             analysis_text = extract_json_from_llm_response(analysis_text)
-            import re
             json_match = re.search(r'(\{.*\})', analysis_text, re.DOTALL)
             if json_match:
                 analysis_text = json_match.group(1)
-            import json
-            analysis_json = json.loads(analysis_text)
+            try:
+                analysis_json = json.loads(analysis_text)
+            except Exception as e:
+                logger.error(f"Ошибка парсинга JSON от {model_name}: {e}, текст: {analysis_text}")
+                continue
             themes = analysis_json.get("themes", [])
             styles = analysis_json.get("styles", analysis_json.get("style", []))
-            if isinstance(themes, list) and isinstance(styles, list) and themes and styles:
+            if not isinstance(themes, list):
+                themes = [str(themes)] if themes else []
+            if not isinstance(styles, list):
+                styles = [str(styles)] if styles else []
+            if themes and styles:
                 analysis_result = {"themes": themes, "styles": styles}
                 logger.info(f"Успешно извлечены темы ({len(themes)}) и стили ({len(styles)}) из JSON c {model_name}.")
                 return analysis_result
