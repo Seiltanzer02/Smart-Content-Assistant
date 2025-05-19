@@ -137,108 +137,64 @@ async def generate_content_plan(request: Request, req):
 
 Необходимо создать {period_days} идей для постов - по одной на каждый день.
 
-Ответь только JSON-объектом, без пояснений, markdown и текста вокруг."""
-        
+Ответь только JSON-объектом, без пояснений, markdown и текста вокруг. Не добавляй никаких пояснений, markdown, комментариев, только JSON!"""
+        openrouter_models = [
+            "meta-llama/llama-4-maverick:free",
+            "meta-llama/llama-4-scout:free",
+            "google/gemini-2.0-flash-exp:free",
+            "qwen/qwen3-235b-a22b:free",
+            "microsoft/mai-ds-r1:free",
+            "deepseek/deepseek-chat-v3-0324:free"
+        ]
+        plan_text = None
         if OPENROUTER_API_KEY:
-            try:
-                logger.info(f"Отправка запроса на генерацию плана через OpenRouter API для канала {channel_name}")
-                client = AsyncOpenAI(
-                    base_url="https://openrouter.ai/api/v1",
-                    api_key=OPENROUTER_API_KEY
-                )
-                is_openrouter = True
-                response = await client.chat.completions.create(
-                    model="meta-llama/llama-4-maverick:free",
-                    messages=build_messages(system_prompt, user_prompt, is_openrouter),
-                    temperature=0.7,
-                    max_tokens=1200,
-                    timeout=60,
-                    extra_headers={
-                        "HTTP-Referer": "https://content-manager.onrender.com",
-                        "X-Title": "Smart Content Assistant"
-                    }
-                )
-                
-                if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-                    plan_text = response.choices[0].message.content.strip()
-                    logger.info(f"Получен ответ с планом публикаций через OpenRouter API (первые 100 символов): {plan_text[:100]}...")
-                elif response and hasattr(response, 'error') and response.error:
-                    err_details = response.error
-                    api_error_message = getattr(err_details, 'message', str(err_details))
-                    logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
-                    # Ошибка OpenRouter API - пробуем запасной вариант
-                    raise Exception(f"OpenRouter API вернул ошибку: {api_error_message}")
-                else:
-                    # Проблема с ответом API
-                    try:
-                        logger.error(f"Некорректный или пустой ответ от OpenRouter API. Ответ: {response}")
-                    except Exception as log_err:
-                        logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
-                    # Ошибка OpenRouter API - пробуем запасной вариант
-                    raise Exception("Некорректный или пустой ответ от OpenRouter API")
-            except Exception as api_error:
-                # В случае ошибки с OpenRouter API, проверяем наличие запасного ключа
-                api_error_message = f"Ошибка соединения с OpenRouter API: {str(api_error)}"
-                logger.error(f"Ошибка при запросе к OpenRouter API: {api_error}", exc_info=True)
-                
-                # Пробуем использовать OpenAI API как запасной вариант
-                if OPENAI_API_KEY:
-                    used_backup_api = True
-                    logger.info(f"Попытка использования OpenAI API как запасного варианта для канала {channel_name}")
-                    try:
-                        openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-                        
-                        openai_response = await openai_client.chat.completions.create(
-                            model="gpt-3.5-turbo",  # Используем GPT-3.5 Turbo как запасной вариант
-                            messages=build_messages(system_prompt, user_prompt, False),
-                            temperature=0.7,
-                            max_tokens=1200
-                        )
-                        
-                        if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
-                            plan_text = openai_response.choices[0].message.content.strip()
-                            logger.info(f"Получен план через запасной OpenAI API ({len(plan_text)} символов)")
-                            # Сбрасываем сообщение об ошибке, так как запасной вариант сработал
-                            api_error_message = None
-                        else:
-                            logger.error(f"Некорректный или пустой ответ от запасного OpenAI API")
-                            return {
-                                "plan": [],
-                                "message": "Ошибка при генерации плана (некорректный ответ API).",
-                                "limit_reached": False
-                            }
-                    except Exception as openai_error:
-                        logger.error(f"Ошибка при использовании запасного OpenAI API: {openai_error}", exc_info=True)
-                        return {
-                            "plan": [],
-                            "message": f"Ошибка при генерации плана: {str(openai_error)}",
-                            "limit_reached": False
+            for model_name in openrouter_models:
+                try:
+                    logger.info(f"Отправка запроса на генерацию плана через OpenRouter API для канала {channel_name}, модель: {model_name}")
+                    client = AsyncOpenAI(
+                        base_url="https://openrouter.ai/api/v1",
+                        api_key=OPENROUTER_API_KEY
+                    )
+                    is_openrouter = True
+                    response = await client.chat.completions.create(
+                        model=model_name,
+                        messages=build_messages(system_prompt, user_prompt, is_openrouter),
+                        temperature=0.7,
+                        max_tokens=1200,
+                        timeout=60,
+                        extra_headers={
+                            "HTTP-Referer": "https://content-manager.onrender.com",
+                            "X-Title": "Smart Content Assistant"
                         }
-                else:
-                    logger.error("Запасной OPENAI_API_KEY не настроен, невозможно использовать альтернативный API")
-                    return {
-                        "plan": [],
-                        "message": "Ошибка при генерации плана. API для генерации недоступны.",
-                        "limit_reached": False
-                    }
-        
-        # Если нет OPENROUTER_API_KEY, но есть OPENAI_API_KEY, используем его напрямую
-        elif OPENAI_API_KEY:
+                    )
+                    if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
+                        plan_text = response.choices[0].message.content.strip()
+                        logger.info(f"Получен ответ с планом публикаций через OpenRouter API ({model_name}, первые 100 символов): {plan_text[:100]}...")
+                        break
+                    elif response and hasattr(response, 'error') and response.error:
+                        err_details = response.error
+                        api_error_message = getattr(err_details, 'message', str(err_details))
+                        logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
+                    else:
+                        logger.error(f"Некорректный или пустой ответ от OpenRouter API. Ответ: {response}")
+                except Exception as api_error:
+                    logger.error(f"Ошибка при запросе к OpenRouter API ({model_name}): {api_error}", exc_info=True)
+            if not plan_text:
+                logger.warning("Все OpenRouter модели не дали результата, fallback на OpenAI")
+        if not plan_text and OPENAI_API_KEY:
             used_backup_api = True
-            logger.info(f"OPENROUTER_API_KEY отсутствует, используем OpenAI API напрямую для канала {channel_name}")
+            logger.info(f"Попытка использования OpenAI API как запасного варианта для канала {channel_name}")
             try:
                 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-                
                 openai_response = await openai_client.chat.completions.create(
-                    model="gpt-3.5-turbo",  # Используем GPT-3.5 Turbo
+                    model="gpt-3.5-turbo",
                     messages=build_messages(system_prompt, user_prompt, False),
                     temperature=0.7,
                     max_tokens=1200
                 )
-                
                 if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
                     plan_text = openai_response.choices[0].message.content.strip()
-                    logger.info(f"Получен план через OpenAI API ({len(plan_text)} символов)")
+                    logger.info(f"Получен план через запасной OpenAI API ({len(plan_text)} символов)")
                 else:
                     logger.error(f"Некорректный или пустой ответ от OpenAI API")
                     return {
@@ -246,12 +202,11 @@ async def generate_content_plan(request: Request, req):
                         "message": "Ошибка при генерации плана (некорректный ответ API).",
                         "limit_reached": False
                     }
-            except Exception as openai_error:
-                api_error_message = f"Ошибка соединения с OpenAI API: {str(openai_error)}"
-                logger.error(f"Ошибка при запросе к OpenAI API: {openai_error}", exc_info=True)
+            except Exception as e:
+                logger.error(f"Ошибка при генерации плана через OpenAI API: {e}")
                 return {
                     "plan": [],
-                    "message": f"Ошибка при генерации плана: {str(openai_error)}",
+                    "message": f"Ошибка при генерации плана: {str(e)}",
                     "limit_reached": False
                 }
         else:
