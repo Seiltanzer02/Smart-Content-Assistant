@@ -135,7 +135,9 @@ async def generate_content_plan(request: Request, req):
   ...
 ]
 
-Необходимо создать {period_days} идей для постов - по одной на каждый день."""
+Необходимо создать {period_days} идей для постов - по одной на каждый день.
+
+Ответь только JSON-объектом, без пояснений, markdown и текста вокруг."""
         
         if OPENROUTER_API_KEY:
             try:

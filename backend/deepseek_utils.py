@@ -20,7 +20,7 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
     combined_text = "\n\n".join([f"Пост {i+1}: {text}" for i, text in enumerate(texts)])
     logger.info(f"Подготовлено {len(texts)} текстов для анализа через DeepSeek")
     system_prompt = """Ты - эксперт по анализу контента Telegram-каналов. \nТвоя задача - глубоко проанализировать предоставленные посты и выявить САМЫЕ ХАРАКТЕРНЫЕ, ДОМИНИРУЮЩИЕ темы и стили/форматы, отражающие СУТЬ и УНИКАЛЬНОСТЬ канала. \nИзбегай слишком общих формулировок, если они не являются ключевыми. Сосредоточься на качестве, а не на количестве.\n\nВыдай результат СТРОГО в формате JSON с двумя ключами: \"themes\" и \"styles\". Каждый ключ должен содержать массив из 3-5 наиболее РЕЛЕВАНТНЫХ строк."""
-    user_prompt = f"""Проанализируй СТРОГО следующие посты из Telegram-канала:\n{combined_text}\n\nОпредели 3-5 САМЫХ ХАРАКТЕРНЫХ тем и 3-5 САМЫХ РАСПРОСТРАНЕННЫХ стилей/форматов подачи контента, которые наилучшим образом отражают специфику ИМЕННО ЭТОГО канала. \nОсновывайся ТОЛЬКО на предоставленных текстах. \n\nПредставь результат ТОЛЬКО в виде JSON объекта с ключами \"themes\" и \"styles\". Никакого другого текста."""
+    user_prompt = f"""Проанализируй СТРОГО следующие посты из Telegram-канала:\n{combined_text}\n\nОпредели 3-5 САМЫХ ХАРАКТЕРНЫХ тем и 3-5 САМЫХ РАСПРОСТРАНЕННЫХ стилей/форматов подачи контента, которые наилучшим образом отражают специфику ИМЕННО ЭТОГО канала. \nОсновывайся ТОЛЬКО на предоставленных текстах. \n\nПредставь результат ТОЛЬКО в виде JSON объекта с ключами \"themes\" и \"styles\". Никакого другого текста. \n\nОтветь только JSON-объектом, без пояснений, markdown и текста вокруг."""
     analysis_result = {"themes": [], "styles": []}
     try:
         client = AsyncOpenAI(
@@ -40,6 +40,7 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
         )
         analysis_text = response.choices[0].message.content.strip()
         logger.info(f"Получен ответ от DeepSeek: {analysis_text[:100]}...")
+        analysis_text = extract_json_from_llm_response(analysis_text)
         json_match = re.search(r'(\{.*\})', analysis_text, re.DOTALL)
         if json_match:
             analysis_text = json_match.group(1)
@@ -76,3 +77,17 @@ def build_messages(system_prompt, user_prompt, is_openrouter):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ] 
+
+def extract_json_from_llm_response(text):
+    text = text.strip()
+    if text.startswith('```json'):
+        text = text[len('```json'):].lstrip('\n')
+    elif text.startswith('```'):
+        text = text[len('```'):].lstrip('\n')
+    if text.endswith('```'):
+        text = text[:-3].rstrip()
+    import re
+    json_match = re.search(r'(\{.*\})', text, re.DOTALL)
+    if json_match:
+        return json_match.group(1)
+    return text 
