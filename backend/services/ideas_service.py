@@ -222,16 +222,25 @@ async def generate_content_plan(request: Request, req):
         plan_items = []
         if plan_text:
             plan_text = plan_text.strip()
-            # Если ответ похож на JSON
-            if plan_text.startswith('[') or plan_text.startswith('{'):
+            # Удаляем markdown-обёртку, если есть
+            if plan_text.startswith('```json'):
+                plan_text = plan_text[len('```json'):].lstrip('\n')
+            elif plan_text.startswith('```'):
+                plan_text = plan_text[len('```'):].lstrip('\n')
+            if plan_text.endswith('```'):
+                plan_text = plan_text[:-3].rstrip()
+            # Пробуем найти JSON в любом месте ответа
+            json_match = re.search(r'(\[.*\]|\{.*\})', plan_text, re.DOTALL)
+            if json_match:
+                plan_text_json = json_match.group(1)
                 try:
-                    plan_json = json.loads(plan_text)
+                    plan_json = json.loads(plan_text_json)
                     if isinstance(plan_json, list):
                         plan_items = plan_json
                     elif isinstance(plan_json, dict) and 'plan' in plan_json:
                         plan_items = plan_json['plan']
                 except Exception as e:
-                    logger.error(f"Ошибка парсинга JSON плана: {e}, текст: {plan_text}")
+                    logger.error(f"Ошибка парсинга JSON плана: {e}, текст: {plan_text_json}")
             # Если не JSON — старая логика
             if not plan_items:
                 lines = plan_text.split('\n')
@@ -265,7 +274,7 @@ async def generate_content_plan(request: Request, req):
                         logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
         # Если не удалось извлечь идеи — генерируем базовый план вручную
         if not plan_items:
-            logger.warning("Не удалось извлечь идеи из ответа LLM или все строки были некорректными, генерируем базовый план.")
+            logger.error(f"LLM не вернул валидных идей! Исходный ответ: {plan_text}")
             for day in range(1, period_days + 1):
                 random_theme = random.choice(themes) if themes else "Общая тема"
                 random_style = random.choice(styles) if styles else "Общий стиль"
