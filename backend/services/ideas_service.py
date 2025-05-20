@@ -9,6 +9,7 @@ import uuid
 from openai import AsyncOpenAI
 from backend.services.supabase_subscription_service import SupabaseSubscriptionService
 from datetime import datetime
+import json
 
 # Импорт моделей PlanItem, PlanGenerationResponse, SuggestedIdeasResponse, SaveIdeasRequest из main.py или отдельного файла моделей
 # from backend.models import PlanItem, PlanGenerationResponse, SuggestedIdeasResponse, SaveIdeasRequest
@@ -23,6 +24,29 @@ def clean_text_formatting(text):
     text = text.strip()
     if text and len(text) > 0:
         text = text[0].upper() + text[1:] if len(text) > 1 else text.upper()
+    return text
+
+def clean_generated_content(text):
+    """Очищает сгенерированный текст от возможных частей промпта, которые модель могла случайно включить."""
+    if not text:
+        return text
+        
+    # Удаляем потенциальные начала промпта, которые могли попасть в ответ
+    prompt_patterns = [
+        r"Ты — опытный контент.*?маркетолог для Telegram.*?каналов",
+        r"Создай план публикаций для Telegram.*?канала тематики",
+        r".*?который будет готов к публикации",
+        r"Вот список возможных форматов постов",
+        r"Создай план в формате JSON"
+    ]
+    
+    # Применяем каждый шаблон и удаляем совпадения
+    for pattern in prompt_patterns:
+        text = re.sub(pattern, "", text, flags=re.DOTALL | re.IGNORECASE)
+    
+    # Удаляем любые переносы строк и пробелы в начале после очистки
+    text = text.strip()
+    
     return text
 
 async def get_saved_ideas(request: Request, channel_name: Optional[str] = None):
@@ -183,39 +207,53 @@ async def generate_content_plan(request: Request, req):
         plan_items = []
         
         if plan_text:
-            lines = plan_text.split('\n')
-        expected_style_set = set(s.lower() for s in styles)
+            # Очистка от потенциальных частей промпта
+            plan_text = clean_generated_content(plan_text)
             
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                    
-            parts = line.split('::')
-            if len(parts) == 3:
-                try:
-                    day_part = parts[0].lower().replace('день', '').strip()
-                    day = int(day_part)
-                    topic_idea = clean_text_formatting(parts[1].strip())
-                    format_style = clean_text_formatting(parts[2].strip())
-                        
-                    if format_style.lower() not in expected_style_set:
-                        logger.warning(f"Стиль '{format_style}' не найден в списке допустимых стилей: {styles}")
-                        format_style = random.choice(styles) if styles else format_style
-                            
-                    if topic_idea:
-                        plan_items.append({
-                            "day": day,
-                            "topic_idea": topic_idea,
-                            "format_style": format_style
-                        })
-                    else:
-                        logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
-                except Exception as parse_err:
-                    logger.error(f"Ошибка при парсинге строки плана: {line} — {parse_err}")
+            # Попытка извлечь JSON
+            try:
+                # Ищем JSON объект в ответе
+                json_match = re.search(r'(\[.*\])', plan_text, re.DOTALL)
+                if json_match:
+                    plan_json = json.loads(json_match.group(1))
+                    plan_items = plan_json
+                    logger.info(f"Успешно извлечены {len(plan_items)} пунктов плана из JSON")
+            except Exception as json_err:
+                logger.error(f"Ошибка при парсинге JSON из ответа LLM: {json_err}")
+                # Продолжаем со стандартным парсингом, если JSON не удалось распарсить
+            
+            expected_style_set = set(s.lower() for s in styles)
+            
+            for line in plan_text.split('\n'):
+                line = line.strip()
+                if not line:
                     continue
-            else:
-                logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
+                    
+                parts = line.split('::')
+                if len(parts) == 3:
+                    try:
+                        day_part = parts[0].lower().replace('день', '').strip()
+                        day = int(day_part)
+                        topic_idea = clean_text_formatting(parts[1].strip())
+                        format_style = clean_text_formatting(parts[2].strip())
+                        
+                        if format_style.lower() not in expected_style_set:
+                            logger.warning(f"Стиль '{format_style}' не найден в списке допустимых стилей: {styles}")
+                            format_style = random.choice(styles) if styles else format_style
+                            
+                        if topic_idea:
+                            plan_items.append({
+                                "day": day,
+                                "topic_idea": topic_idea,
+                                "format_style": format_style
+                            })
+                        else:
+                            logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
+                    except Exception as parse_err:
+                        logger.error(f"Ошибка при парсинге строки плана: {line} — {parse_err}")
+                        continue
+                else:
+                    logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
         
         # Если не удалось извлечь идеи — генерируем базовый план вручную
         if not plan_items:
