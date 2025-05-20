@@ -81,15 +81,26 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
             last_curly = analysis_text.rfind('}')
             last_square = analysis_text.rfind(']')
             cut = max(last_curly, last_square)
+            recovered = False
             if cut > 0:
                 try:
                     analysis_json = json.loads(analysis_text[:cut+1])
+                    recovered = True
                 except Exception:
                     logger.error(f"Ошибка парсинга JSON даже после восстановления: {e}, текст: {analysis_text}")
-                    analysis_json = {"themes": [], "styles": []}
-            else:
-                logger.error(f"Ошибка парсинга JSON: {e}, текст: {analysis_text}")
-                analysis_json = {"themes": [], "styles": []}
+            if not recovered:
+                # Попытка удалить последнюю незакрытую строку из themes/styles
+                def fix_array(text, key):
+                    arr_match = re.search(rf'"{key}"\s*:\s*\[(.*?)\]', text, re.DOTALL)
+                    if arr_match:
+                        arr = arr_match.group(1)
+                        items = re.findall(r'"(.*?)"', arr)
+                        return items
+                    return []
+                themes = fix_array(analysis_text, 'themes')
+                styles = fix_array(analysis_text, 'styles')
+                analysis_json = {"themes": themes, "styles": styles}
+                logger.warning(f"Восстановлен частичный JSON: themes={themes}, styles={styles}")
         themes = analysis_json.get("themes", [])
         styles = analysis_json.get("styles", analysis_json.get("style", [])) 
         if isinstance(themes, list) and isinstance(styles, list):
