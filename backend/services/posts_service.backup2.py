@@ -419,7 +419,7 @@ async def generate_post_details(request: Request, req):
                 if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
                     post_text = response.choices[0].message.content.strip()
                     # Удаляем кавычки по краям, если они есть
-                    post_text = re.sub(r'^[\"“”«»\']+|[\"“”«»\']+$', '', post_text).strip()
+                    post_text = re.sub(r'^[\"“"«»\']+|[\"""«»\']+$', '', post_text).strip()
                     # Фильтрация лишнего: убираем возможные повторения промпта или инструкций
                     for unwanted in ["Ты — опытный контент-маркетолог", "Вот несколько примеров постов", "Формат поста:", "Твоя задача", "В ответе выдай только"]:
                         if post_text.lower().startswith(unwanted.lower()):
@@ -447,7 +447,7 @@ async def generate_post_details(request: Request, req):
                     try:
                         openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
                         openai_response = await openai_client.chat.completions.create(
-                            model="gpt-3.5-turbo",  # Используем GPT-3.5 Turbo как запасной вариант
+                            model="gpt-3.5-turbo",
                             messages=[
                                 {"role": "system", "content": system_prompt},
                                 {"role": "user", "content": user_prompt}
@@ -484,7 +484,7 @@ async def generate_post_details(request: Request, req):
                 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
                 
                 openai_response = await openai_client.chat.completions.create(
-                    model="gpt-3.5-turbo",  # Используем GPT-3.5 Turbo
+                    model="gpt-3.5-turbo",
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}

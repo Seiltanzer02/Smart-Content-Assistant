@@ -50,6 +50,12 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
             }
         )
         analysis_text = response.choices[0].message.content.strip()
+        # Удаляем обёртку ```json ... ``` если есть
+        if analysis_text.startswith('```json'):
+            analysis_text = analysis_text[7:]
+        if analysis_text.endswith('```'):
+            analysis_text = analysis_text[:-3]
+        analysis_text = analysis_text.strip()
         logger.info(f"Получен ответ от DeepSeek: {analysis_text[:100]}...")
         json_match = re.search(r'(\{.*\})', analysis_text, re.DOTALL)
         if json_match:
