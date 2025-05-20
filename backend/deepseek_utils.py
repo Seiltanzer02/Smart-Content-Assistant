@@ -110,18 +110,10 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
                                 tail = arr[last_quote+1:].split(']')[0].split(',')[0].strip()
                                 if tail and len(tail) > 2:
                                     filtered.append(tail)
-                        # Если всё ещё пусто — взять всё, что идёт после ключа до конца строки/массива
+                        # Финальное восстановление: разбить по запятым, взять все элементы, даже не в кавычках
                         if not filtered:
-                            key_pos = text.find(f'"{key}"')
-                            if key_pos != -1:
-                                arr_start = text.find('[', key_pos)
-                                if arr_start != -1:
-                                    arr_tail = text[arr_start+1:]
-                                    # Берём до конца строки или до закрывающей скобки/конца текста
-                                    arr_tail = arr_tail.split(']')[0].split('\n')[0]
-                                    arr_tail = arr_tail.strip(' ,"\n')
-                                    if len(arr_tail) > 2:
-                                        filtered.append(arr_tail)
+                            raw_items = [x.strip(' ,"\n') for x in arr.split(',')]
+                            filtered = [x for x in raw_items if len(x) > 2]
                         return filtered
                     return []
                 themes = fix_array(analysis_text, 'themes')
