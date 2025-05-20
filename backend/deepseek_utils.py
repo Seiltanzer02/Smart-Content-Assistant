@@ -95,8 +95,15 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
                     if arr_match:
                         arr = arr_match.group(1)
                         items = re.findall(r'"(.*?)"', arr)
-                        # Фильтруем явно обрезанные элементы (например, слишком короткие или заканчивающиеся на неалфавитный символ)
                         filtered = [s for s in items if len(s.strip()) > 2 and s.strip()[-1].isalnum()]
+                        # Если ничего не найдено, но есть хотя бы одна открывающая кавычка — взять текст до неё
+                        if not filtered and '"' in arr:
+                            # Берём всё до первой незакрытой кавычки или до запятой
+                            possible = arr.split('"')
+                            if len(possible) > 1:
+                                candidate = possible[1].split(',')[0].strip()
+                                if len(candidate) > 2:
+                                    filtered.append(candidate)
                         return filtered
                     return []
                 themes = fix_array(analysis_text, 'themes')
