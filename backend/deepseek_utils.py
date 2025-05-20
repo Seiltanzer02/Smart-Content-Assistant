@@ -56,10 +56,22 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
         if analysis_text.endswith('```'):
             analysis_text = analysis_text[:-3]
         # Удаляем шаблоны вида [ссылка], [контакт], [детали] и т.д.
-        analysis_text = re.sub(r'\[[^\]]{2,40}\]', '', analysis_text)
-        analysis_text = re.sub(r'\([сС]сылка( или контакт)?\)', '', analysis_text)
-        analysis_text = re.sub(r'\([кК]онтакт(ы)?|[дД]етали|[цЦ]ена|[нН]омер|[иИ]мя|[нН]азвание|[eE]mail|[тТ]елефон)\)', '', analysis_text)
-        analysis_text = re.sub(r'\s{2,}', ' ', analysis_text)
+        try:
+            analysis_text = re.sub(r'\[[^\]]{2,40}\]', '', analysis_text)
+        except Exception as re1:
+            logger.error(f"Ошибка re.sub для квадратных скобок: {re1}")
+        try:
+            analysis_text = re.sub(r'\([сС]сылка( или контакт)?\)', '', analysis_text)
+        except Exception as re2:
+            logger.error(f"Ошибка re.sub для (ссылка): {re2}")
+        try:
+            analysis_text = re.sub(r'\((?:[кК]онтакт(?:ы)?|[дД]етали|[цЦ]ена|[нН]омер|[иИ]мя|[нН]азвание|[eE]mail|[тТ]елефон)\)', '', analysis_text)
+        except Exception as re3:
+            logger.error(f"Ошибка re.sub для (контакт/детали/и др.): {re3}")
+        try:
+            analysis_text = re.sub(r'\s{2,}', ' ', analysis_text)
+        except Exception as re4:
+            logger.error(f"Ошибка re.sub для пробелов: {re4}")
         analysis_text = analysis_text.strip()
         logger.info(f"Получен ответ от DeepSeek: {analysis_text[:100]}...")
         # Если невалидный JSON — пробуем обрезать до последней } или ] и парсить снова
