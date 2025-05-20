@@ -91,34 +91,25 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
             if not recovered:
                 # Попытка удалить последнюю незакрытую строку из themes/styles
                 def fix_array(text, key):
+                    # Ищем массив вида "styles": [ ... ]
                     arr_match = re.search(rf'"{key}"\s*:\s*\[(.*?)\]', text, re.DOTALL)
                     filtered = []
                     if arr_match:
                         arr = arr_match.group(1)
-                        items = re.findall(r'"(.*?)"', arr)
-                        filtered = [s for s in items if len(s.strip()) > 2 and s.strip()[-1].isalnum()]
-                        if not filtered and '"' in arr:
-                            possible = arr.split('"')
-                            if len(possible) > 1:
-                                candidate = possible[1].split(',')[0].strip()
-                                if len(candidate) > 2:
-                                    filtered.append(candidate)
-                        if not filtered:
-                            last_quote = arr.rfind('"')
-                            if last_quote != -1:
-                                tail = arr[last_quote+1:].split(']')[0].split(',')[0].strip()
-                                if tail and len(tail) > 2:
-                                    filtered.append(tail)
-                        if not filtered:
-                            raw_items = re.split(r'[",;\-\n]', arr)
-                            filtered = [x.strip(' ,"\n') for x in raw_items if len(x.strip(' ,"\n')) > 2]
-                    # Если всё ещё пусто — искать стили в исходном тексте после слова styles
+                    else:
+                        # Если нет закрывающей скобки, берём всё после "styles": [
+                        arr_match = re.search(rf'"{key}"\s*:\s*\[(.*)', text, re.DOTALL)
+                        arr = arr_match.group(1) if arr_match else ""
+                    # Ищем все строки в кавычках
+                    items = re.findall(r'"([^"\n]{2,60})"', arr)
+                    filtered = [s.strip() for s in items if len(s.strip()) > 2 and s.strip() != ': [']
+                    # Если ничего не нашли — ищем после слова styles все строки в кавычках
                     if not filtered:
                         styles_pos = text.lower().find(key.lower())
                         if styles_pos != -1:
                             after_styles = text[styles_pos:]
                             found = re.findall(r'"([^"\n]{3,60})"', after_styles)
-                            filtered = [s.strip() for s in found if len(s.strip()) > 2]
+                            filtered = [s.strip() for s in found if len(s.strip()) > 2 and s.strip() != ': [']
                     return filtered
                 themes = fix_array(analysis_text, 'themes')
                 styles = fix_array(analysis_text, 'styles')
