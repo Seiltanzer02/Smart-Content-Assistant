@@ -4189,9 +4189,7 @@ async def send_image_to_chat(request: Request):
         # Отправляем изображение через Telegram Bot API
         payload = {
             'chat_id': telegram_user_id,
-            'photo': image_url,
-            'caption': alt or 'Ваше изображение',
-            'parse_mode': 'HTML'
+            'photo': image_url
         }
         resp = requests.post(f'{TELEGRAM_API_URL}/sendPhoto', data=payload)
         if resp.status_code == 200:
