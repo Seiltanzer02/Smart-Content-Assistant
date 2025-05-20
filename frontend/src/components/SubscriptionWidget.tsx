@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/SubscriptionWidget.css';
 import { getUserSubscriptionStatus, SubscriptionStatus, generateInvoice, checkPremiumViaBot, getBotStylePremiumStatus, PremiumStatus } from '../api/subscription';
+import { FaCrown, FaStar, FaLock } from 'react-icons/fa';
 
 // Добавляем объявление глобального объекта Telegram для TypeScript
 declare global {
@@ -408,6 +409,10 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
         timestamp: new Date().getTime(),
         status: 'checking'
       }));
+      // Сворачиваем Telegram WebApp, если доступно
+      if (window.Telegram?.WebApp?.close) {
+        window.Telegram.WebApp.close();
+      }
     }
   };
   
@@ -458,46 +463,50 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
 
   return (
     <div className="subscription-widget">
-      <h3>Статус подписки</h3>
+      <h3 style={{marginBottom: '1.2rem'}}>Статус подписки</h3>
       {hasPremium ? (
-        <div className="premium-block">
-          <h4>Премиум активен</h4>
-          <p>Вам доступны все функции!</p>
+        <div className="premium-block modern-premium">
+          <div className="premium-badge-animated">
+            <FaCrown size={38} color="#FFD700" style={{filter: 'drop-shadow(0 0 8px #FFD70088)'}} />
+            <span className="premium-badge-text">Премиум активен!</span>
+          </div>
+          <div className="premium-congrats">🎉 Поздравляем! У вас открыт полный доступ!</div>
           {endDate && (
-            <p className="end-date">Действует до: {formatDate(endDate)}</p>
+            <div className="premium-end-date">Действует до: <b>{formatDate(endDate)}</b></div>
           )}
           <button 
-            className="refresh-button"
+            className="refresh-button premium-refresh"
             onClick={() => {
               fetchSubscriptionStatus();
               fetchDirectPremiumStatus();
             }}
           >
-            Обновить статус
+            🔄 Обновить статус
           </button>
         </div>
       ) : (
-        <div className="free-block">
-          <h4>Базовый доступ</h4>
-          <p>Для Премиум доступа без ограничений оформите подписку.</p>
-          <div className="buy-section">
-            <button
-              className="subscribe-button"
-              onClick={handleSubscribe}
-              disabled={isSubscribing}
-            >
-              {isSubscribing ? 'Обработка...' : 'Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars'}
-            </button>
-            <button 
-              className="check-button"
-              onClick={handleCheckPremiumViaBot}
-            >
-              Проверить подписку через бот
-            </button>
+        <div className="free-block modern-free">
+          <div className="free-badge-animated">
+            <FaLock size={32} color="#8ca0b3" style={{filter: 'drop-shadow(0 0 6px #8ca0b388)'}} />
+            <span className="free-badge-text">Базовый доступ</span>
           </div>
+          <div className="free-info">Для Премиум доступа без ограничений оформите подписку.</div>
+          <button
+            className="subscribe-button modern-subscribe"
+            onClick={handleSubscribe}
+            disabled={isSubscribing}
+          >
+            {isSubscribing ? 'Обработка...' : '✨ Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars'}
+          </button>
+          <button 
+            className="check-button modern-check"
+            onClick={handleCheckPremiumViaBot}
+          >
+            Проверить подписку через бот
+          </button>
         </div>
       )}
-      <p className="user-id">User ID: {validatedUserId}</p>
+      <p className="user-id" style={{opacity: 0.7, fontSize: '0.85em', marginTop: 18}}>User ID: {validatedUserId}</p>
     </div>
   );
 };

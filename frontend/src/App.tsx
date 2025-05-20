@@ -551,8 +551,7 @@ function App() {
     if (!selectedImage || !userId) return;
     try {
       const response = await axios.post('/api/send-image-to-chat', {
-        imageUrl: selectedImage.url,
-        alt: selectedImage.alt || '',
+        imageUrl: selectedImage.url
       }, {
         headers: { 'x-telegram-user-id': userId }
       });
