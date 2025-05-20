@@ -7,7 +7,6 @@ import uuid
 import asyncio
 from datetime import datetime
 import traceback
-import re
 
 # Импорт моделей PostImage, PostData, SavedPostResponse, PostDetailsResponse из main.py или отдельного файла моделей
 # from backend.models import PostImage, PostData, SavedPostResponse, PostDetailsResponse
@@ -338,29 +337,6 @@ async def delete_post(post_id: str, request: Request):
         logger.error(f"Ошибка при удалении поста {post_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера при удалении поста: {str(e)}")
 
-def clean_generated_post(text):
-    """Очищает сгенерированный текст от возможных частей промпта, которые модель могла случайно включить."""
-    if not text:
-        return text
-        
-    # Удаляем потенциальные начала промпта, которые могли попасть в ответ
-    prompt_patterns = [
-        r"Ты — опытный контент.*?маркетолог для Telegram.*?каналов",
-        r"Создай пост для Telegram-канала.*?на тему",
-        r".*?который будет готов к публикации",
-        r"Вот.*?примеры постов из этого канала для точного копирования стиля",
-        r"Убедись, что твой ответ строго следует их манере"
-    ]
-    
-    # Применяем каждый шаблон и удаляем совпадения
-    for pattern in prompt_patterns:
-        text = re.sub(pattern, "", text, flags=re.DOTALL | re.IGNORECASE)
-    
-    # Удаляем любые переносы строк и пробелы в начале после очистки
-    text = text.strip()
-    
-    return text
-
 async def generate_post_details(request: Request, req):
     import traceback
     from backend.main import generate_image_keywords, search_unsplash_images, get_channel_analysis, IMAGE_RESULTS_COUNT, PostImage, OPENROUTER_API_KEY, OPENAI_API_KEY, logger
@@ -398,24 +374,12 @@ async def generate_post_details(request: Request, req):
             logger.warning("Генерация деталей поста невозможна: отсутствуют OPENROUTER_API_KEY и OPENAI_API_KEY")
             raise HTTPException(status_code=503, detail="API для генерации текста недоступен")
             
-        system_prompt = """Ты — опытный контент-маркетолог для Telegram-каналов.
-Твоя задача — сгенерировать текст поста на основе идеи и формата, который будет готов к публикации.
-
-Пост должен быть:
-1. Хорошо структурированным и легко читаемым.
-2. Соответствовать указанной теме/идее.
-3. Соответствовать указанному формату/стилю.
-4. Иметь правильное форматирование для Telegram (если нужно — с эмодзи, абзацами, списками).
-5. НЕ использовать никаких шаблонов, placeholder-ов ([Название], [Ссылка], [Начать сейчас], "...", "[текст]" и т.д.) — текст должен быть полностью готов к публикации, без мест для ручного заполнения.
-6. **Критически важно**: Максимально точно копируй стиль, тон, манеру изложения, использование эмодзи (включая их количество и расположение), длину предложений и абзацев, использование заглавных букв, пунктуацию и другие характерные особенности из предоставленных примеров постов. Текст должен выглядеть так, как будто его написал автор оригинального канала. Обрати внимание на частоту использования определенных слов или фраз.
-
-Не используй хэштеги, если это не является частью формата или их нет в примерах.
-Сделай пост уникальным и интересным, но приоритет — на точном следовании стилю канала.
-Используй примеры постов канала, если они предоставлены, чтобы сохранить стиль. Если примеры не предоставлены, создай качественный пост в указанном формате."""
-        user_prompt = f"""Создай пост для Telegram-канала \\\"@{channel_name}\\\" на тему:\\n\\\"{topic_idea}\\\"\\n\\nФормат поста: {format_style}\\n\\nНапиши полный текст поста, который будет готов к публикации.\\n"""
+        system_prompt = """Ты — опытный контент-маркетолог для Telegram-каналов. Твоя задача — сгенерировать текст поста на основе идеи и формата, который будет готов к публикации. Пост должен быть структурированным, соответствовать теме и формату, быть готовым к публикации без шаблонов и пояснений. Критически важно: максимально точно копируй стиль, тон, манеру изложения, длину, форматирование и особенности из примеров постов, если они есть. Не используй хэштеги, если их нет в примерах. В ответе выдай только готовый текст поста, без пояснений, без повторения инструкции, без примеров, только сам пост."""
+        user_prompt = f"Создай пост для Telegram-канала @{channel_name} на тему: '{topic_idea}'. Формат поста: {format_style}."
         if post_samples:
-            sample_text = "\\n\\n---\\n\\n".join(post_samples[:10]) # Увеличено количество примеров до 10
-            user_prompt += f"""\\n\\nВот несколько примеров постов из этого канала для точного копирования стиля и подачи (проанализируй их очень внимательно):\\n\\n{sample_text}\\n\\nУбедись, что твой ответ строго следует их манере."""
+            sample_text = "\n\n---\n\n".join(post_samples[:10])
+            user_prompt += f"\n\nВот несколько примеров постов из этого канала для копирования стиля:\n{sample_text}\n"
+        user_prompt += "\nВ ответе выдай только готовый текст поста, без пояснений, без повторения инструкции, без примеров, только сам пост."
         
         # Сначала пробуем OpenRouter API, если он доступен
         post_text = ""
@@ -452,11 +416,11 @@ async def generate_post_details(request: Request, req):
                 )
                 if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
                     post_text = response.choices[0].message.content.strip()
+                    # Фильтрация лишнего: убираем возможные повторения промпта или инструкций
+                    for unwanted in ["Ты — опытный контент-маркетолог", "Вот несколько примеров постов", "Формат поста:", "Твоя задача", "В ответе выдай только"]:
+                        if post_text.lower().startswith(unwanted.lower()):
+                            post_text = post_text.split("\n", 1)[-1].strip()
                     logger.info(f"Получен текст поста через OpenRouter API ({len(post_text)} символов)")
-                    
-                    # Очистка текста поста от возможных частей промпта
-                    post_text = clean_generated_post(post_text)
-                    
                 elif response and hasattr(response, 'error') and response.error:
                     err_details = response.error
                     api_error_message = getattr(err_details, 'message', str(err_details))
@@ -489,11 +453,11 @@ async def generate_post_details(request: Request, req):
                         )
                         if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
                             post_text = openai_response.choices[0].message.content.strip()
+                            # Фильтрация лишнего: убираем возможные повторения промпта или инструкций
+                            for unwanted in ["Ты — опытный контент-маркетолог", "Вот несколько примеров постов", "Формат поста:", "Твоя задача", "В ответе выдай только"]:
+                                if post_text.lower().startswith(unwanted.lower()):
+                                    post_text = post_text.split("\n", 1)[-1].strip()
                             logger.info(f"Получен текст поста через запасной OpenAI API ({len(post_text)} символов)")
-                            
-                            # Очистка текста поста от возможных частей промпта
-                            post_text = clean_generated_post(post_text)
-                            
                             # Сбрасываем сообщение об ошибке, так как запасной вариант сработал
                             api_error_message = None
                         else:
@@ -525,10 +489,11 @@ async def generate_post_details(request: Request, req):
                 
                 if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
                     post_text = openai_response.choices[0].message.content.strip()
+                    # Фильтрация лишнего: убираем возможные повторения промпта или инструкций
+                    for unwanted in ["Ты — опытный контент-маркетолог", "Вот несколько примеров постов", "Формат поста:", "Твоя задача", "В ответе выдай только"]:
+                        if post_text.lower().startswith(unwanted.lower()):
+                            post_text = post_text.split("\n", 1)[-1].strip()
                     logger.info(f"Получен текст поста через OpenAI API ({len(post_text)} символов)")
-                    
-                    # Очистка текста поста от возможных частей промпта
-                    post_text = clean_generated_post(post_text)
                 else:
                     logger.error(f"Некорректный или пустой ответ от OpenAI API")
                     post_text = "[Текст не сгенерирован из-за ошибки API]"

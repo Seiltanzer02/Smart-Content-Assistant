@@ -9,7 +9,6 @@ import uuid
 from openai import AsyncOpenAI
 from backend.services.supabase_subscription_service import SupabaseSubscriptionService
 from datetime import datetime
-import json
 
 # Импорт моделей PlanItem, PlanGenerationResponse, SuggestedIdeasResponse, SaveIdeasRequest из main.py или отдельного файла моделей
 # from backend.models import PlanItem, PlanGenerationResponse, SuggestedIdeasResponse, SaveIdeasRequest
@@ -24,29 +23,6 @@ def clean_text_formatting(text):
     text = text.strip()
     if text and len(text) > 0:
         text = text[0].upper() + text[1:] if len(text) > 1 else text.upper()
-    return text
-
-def clean_generated_content(text):
-    """Очищает сгенерированный текст от возможных частей промпта, которые модель могла случайно включить."""
-    if not text:
-        return text
-        
-    # Удаляем потенциальные начала промпта, которые могли попасть в ответ
-    prompt_patterns = [
-        r"Ты — опытный контент.*?маркетолог для Telegram.*?каналов",
-        r"Создай план публикаций для Telegram.*?канала тематики",
-        r".*?который будет готов к публикации",
-        r"Вот список возможных форматов постов",
-        r"Создай план в формате JSON"
-    ]
-    
-    # Применяем каждый шаблон и удаляем совпадения
-    for pattern in prompt_patterns:
-        text = re.sub(pattern, "", text, flags=re.DOTALL | re.IGNORECASE)
-    
-    # Удаляем любые переносы строк и пробелы в начале после очистки
-    text = text.strip()
-    
     return text
 
 async def get_saved_ideas(request: Request, channel_name: Optional[str] = None):
@@ -123,32 +99,8 @@ async def generate_content_plan(request: Request, req):
         logger.info(f"Запрос генерации плана контента от пользователя {telegram_user_id} для канала {channel_name}")
         
         # Готовим промпт для генерации плана
-        system_prompt = """Ты — опытный контент-маркетолог для Telegram-каналов.
-Твоя задача — создать план публикаций на определенный период, учитывая темы и форматы канала.
-
-План должен быть:
-1. Разнообразным (разные темы и форматы)
-2. Логично выстроенным (связанные темы могут идти последовательно)
-3. Реалистичным для реализации
-
-Выдай результат в JSON-формате со списком постов для каждого дня."""
-
-        user_prompt = f"""Создай план публикаций для Telegram-канала тематики: {', '.join(themes[:5])} на {period_days} дней.
-
-Вот список возможных форматов постов:
-{', '.join(styles[:5])}
-
-Создай план в формате JSON:
-[
-  {{
-    "day": 1,
-    "topic_idea": "Конкретная тема/идея поста",
-    "format_style": "Один из предложенных форматов"
-  }},
-  ...
-]
-
-Необходимо создать {period_days} идей для постов - по одной на каждый день."""
+        system_prompt = """Ты — опытный контент-маркетолог для Telegram-каналов. Твоя задача — создать план публикаций на определенный период, учитывая темы и форматы канала. В ответе выдай только JSON-план, без пояснений, без повторения инструкции, только сам план."""
+        user_prompt = f"Создай план публикаций для Telegram-канала тематики: {', '.join(themes[:5])} на {period_days} дней. Вот список возможных форматов постов: {', '.join(styles[:5])}\nСоздай план в формате JSON: [{{'day': 1, 'topic_idea': '...', 'format_style': '...'}}, ...] Необходимо создать {period_days} идей для постов - по одной на каждый день. В ответе выдай только JSON-план, без пояснений, без повторения инструкции, только сам план."
         
         if OPENROUTER_API_KEY:
             try:
@@ -184,6 +136,10 @@ async def generate_content_plan(request: Request, req):
                 
                 if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
                     plan_text = response.choices[0].message.content.strip()
+                    # Фильтрация лишнего: убираем возможные повторения промпта или инструкций
+                    for unwanted in ["Ты — опытный контент-маркетолог", "Создай план публикаций", "В ответе выдай только"]:
+                        if plan_text.lower().startswith(unwanted.lower()):
+                            plan_text = plan_text.split("\n", 1)[-1].strip()
                     logger.info(f"Получен ответ с планом публикаций через OpenRouter API (первые 100 символов): {plan_text[:100]}...")
                 elif response and hasattr(response, 'error') and response.error:
                     err_details = response.error
@@ -207,53 +163,39 @@ async def generate_content_plan(request: Request, req):
         plan_items = []
         
         if plan_text:
-            # Очистка от потенциальных частей промпта
-            plan_text = clean_generated_content(plan_text)
+            lines = plan_text.split('\n')
+        expected_style_set = set(s.lower() for s in styles)
             
-            # Попытка извлечь JSON
-            try:
-                # Ищем JSON объект в ответе
-                json_match = re.search(r'(\[.*\])', plan_text, re.DOTALL)
-                if json_match:
-                    plan_json = json.loads(json_match.group(1))
-                    plan_items = plan_json
-                    logger.info(f"Успешно извлечены {len(plan_items)} пунктов плана из JSON")
-            except Exception as json_err:
-                logger.error(f"Ошибка при парсинге JSON из ответа LLM: {json_err}")
-                # Продолжаем со стандартным парсингом, если JSON не удалось распарсить
-            
-            expected_style_set = set(s.lower() for s in styles)
-            
-            for line in plan_text.split('\n'):
-                line = line.strip()
-                if not line:
-                    continue
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
                     
-                parts = line.split('::')
-                if len(parts) == 3:
-                    try:
-                        day_part = parts[0].lower().replace('день', '').strip()
-                        day = int(day_part)
-                        topic_idea = clean_text_formatting(parts[1].strip())
-                        format_style = clean_text_formatting(parts[2].strip())
+            parts = line.split('::')
+            if len(parts) == 3:
+                try:
+                    day_part = parts[0].lower().replace('день', '').strip()
+                    day = int(day_part)
+                    topic_idea = clean_text_formatting(parts[1].strip())
+                    format_style = clean_text_formatting(parts[2].strip())
                         
-                        if format_style.lower() not in expected_style_set:
-                            logger.warning(f"Стиль '{format_style}' не найден в списке допустимых стилей: {styles}")
-                            format_style = random.choice(styles) if styles else format_style
+                    if format_style.lower() not in expected_style_set:
+                        logger.warning(f"Стиль '{format_style}' не найден в списке допустимых стилей: {styles}")
+                        format_style = random.choice(styles) if styles else format_style
                             
-                        if topic_idea:
-                            plan_items.append({
-                                "day": day,
-                                "topic_idea": topic_idea,
-                                "format_style": format_style
-                            })
-                        else:
-                            logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
-                    except Exception as parse_err:
-                        logger.error(f"Ошибка при парсинге строки плана: {line} — {parse_err}")
-                        continue
-                else:
-                    logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
+                    if topic_idea:
+                        plan_items.append({
+                            "day": day,
+                            "topic_idea": topic_idea,
+                            "format_style": format_style
+                        })
+                    else:
+                        logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
+                except Exception as parse_err:
+                    logger.error(f"Ошибка при парсинге строки плана: {line} — {parse_err}")
+                    continue
+            else:
+                logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
         
         # Если не удалось извлечь идеи — генерируем базовый план вручную
         if not plan_items:
