@@ -120,7 +120,7 @@ async def generate_content_plan(request: Request, req):
                     avg_tokens = 1200
                 
                 response = await client.chat.completions.create(
-                            model="meta-llama/llama-3.2-1b-instruct",
+                            model="google/gemini-2.5-flash-preview",
                     messages=[
                                 {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
@@ -136,6 +136,8 @@ async def generate_content_plan(request: Request, req):
                 
                 if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
                     plan_text = response.choices[0].message.content.strip()
+                    # Удаляем кавычки по краям, если они есть
+                    plan_text = re.sub(r'^[\"“"«»\']+|[\"""«»\']+$', '', plan_text).strip()
                     # Фильтрация лишнего: убираем возможные повторения промпта или инструкций
                     for unwanted in ["Ты — опытный контент-маркетолог", "Создай план публикаций", "В ответе выдай только"]:
                         if plan_text.lower().startswith(unwanted.lower()):

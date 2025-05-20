@@ -7,6 +7,7 @@ import uuid
 import asyncio
 from datetime import datetime
 import traceback
+import re
 
 # Импорт моделей PostImage, PostData, SavedPostResponse, PostDetailsResponse из main.py или отдельного файла моделей
 # from backend.models import PostImage, PostData, SavedPostResponse, PostDetailsResponse
@@ -394,7 +395,7 @@ async def generate_post_details(request: Request, req):
                 )
                 
                 response = await client.chat.completions.create(
-                    model="meta-llama/llama-3.2-1b-instruct",
+                    model="google/gemini-2.5-flash-preview",
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
@@ -410,6 +411,8 @@ async def generate_post_details(request: Request, req):
                 
                 if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
                     post_text = response.choices[0].message.content.strip()
+                    # Удаляем кавычки по краям, если они есть
+                    post_text = re.sub(r'^[\"“"«»\']+|[\"""«»\']+$', '', post_text).strip()
                     # Фильтрация лишнего: убираем возможные повторения промпта или инструкций
                     for unwanted in ["Ты — опытный контент-маркетолог", "Вот несколько примеров постов", "Формат поста:", "Твоя задача", "В ответе выдай только"]:
                         if post_text.lower().startswith(unwanted.lower()):
@@ -451,6 +454,8 @@ async def generate_post_details(request: Request, req):
                         
                         if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
                             post_text = openai_response.choices[0].message.content.strip()
+                            # Удаляем кавычки по краям, если они есть
+                            post_text = re.sub(r'^[\"“"«»\']+|[\"""«»\']+$', '', post_text).strip()
                             # Фильтрация лишнего: убираем возможные повторения промпта или инструкций
                             for unwanted in ["Ты — опытный контент-маркетолог", "Вот несколько примеров постов", "Формат поста:", "Твоя задача", "В ответе выдай только"]:
                                 if post_text.lower().startswith(unwanted.lower()):
@@ -487,6 +492,8 @@ async def generate_post_details(request: Request, req):
                 
                 if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
                     post_text = openai_response.choices[0].message.content.strip()
+                    # Удаляем кавычки по краям, если они есть
+                    post_text = re.sub(r'^[\"“"«»\']+|[\"""«»\']+$', '', post_text).strip()
                     # Фильтрация лишнего: убираем возможные повторения промпта или инструкций
                     for unwanted in ["Ты — опытный контент-маркетолог", "Вот несколько примеров постов", "Формат поста:", "Твоя задача", "В ответе выдай только"]:
                         if post_text.lower().startswith(unwanted.lower()):

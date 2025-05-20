@@ -36,7 +36,7 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
         else:
             avg_tokens = 600
         response = await client.chat.completions.create(
-            model="meta-llama/llama-3.2-1b-instruct",
+            model="google/gemini-2.5-flash-preview",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
