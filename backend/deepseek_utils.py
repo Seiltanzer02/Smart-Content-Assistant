@@ -110,10 +110,11 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
                                 tail = arr[last_quote+1:].split(']')[0].split(',')[0].strip()
                                 if tail and len(tail) > 2:
                                     filtered.append(tail)
-                        # Финальное восстановление: разбить по запятым, взять все элементы, даже не в кавычках
+                        # Финальное восстановление: разбить по кавычкам, запятым, точкам с запятой, дефисам, точкам
                         if not filtered:
-                            raw_items = [x.strip(' ,"\n') for x in arr.split(',')]
-                            filtered = [x for x in raw_items if len(x) > 2]
+                            import re
+                            raw_items = re.split(r'[",;\-\n]', arr)
+                            filtered = [x.strip(' ,"\n') for x in raw_items if len(x.strip(' ,"\n')) > 2]
                         return filtered
                     return []
                 themes = fix_array(analysis_text, 'themes')
