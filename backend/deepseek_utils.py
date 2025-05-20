@@ -106,11 +106,13 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
                         # Если всё ещё пусто — взять всё, что идёт после последней кавычки
                         if not filtered:
                             last_quote = arr.rfind('"')
-                            if last_quote != -1:
-                                tail = arr[last_quote+1:].split(']')[0].split(',')[0].strip()
-                                if tail and len(tail) > 2:
+                            last_comma = arr.rfind(',')
+                            start = max(last_quote, last_comma)
+                            if start != -1:
+                                tail = arr[start+1:].split(']')[0].split('\n')[0].strip(' ,"\n')
+                                if len(tail) > 2:
                                     filtered.append(tail)
-                        # Финальное восстановление: разбить по кавычкам, запятым, точкам с запятой, дефисам, точкам
+                        # Если всё равно пусто — разбить весь хвост по запятым, кавычкам, пробелам
                         if not filtered:
                             raw_items = re.split(r'[",;\-\n]', arr)
                             filtered = [x.strip(' ,"\n') for x in raw_items if len(x.strip(' ,"\n')) > 2]
