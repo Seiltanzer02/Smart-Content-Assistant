@@ -7,6 +7,7 @@ import uuid
 import asyncio
 from datetime import datetime
 import traceback
+import re
 
 # Импорт моделей PostImage, PostData, SavedPostResponse, PostDetailsResponse из main.py или отдельного файла моделей
 # from backend.models import PostImage, PostData, SavedPostResponse, PostDetailsResponse
@@ -337,6 +338,29 @@ async def delete_post(post_id: str, request: Request):
         logger.error(f"Ошибка при удалении поста {post_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера при удалении поста: {str(e)}")
 
+def clean_generated_post(text):
+    """Очищает сгенерированный текст от возможных частей промпта, которые модель могла случайно включить."""
+    if not text:
+        return text
+        
+    # Удаляем потенциальные начала промпта, которые могли попасть в ответ
+    prompt_patterns = [
+        r"Ты — опытный контент.*?маркетолог для Telegram.*?каналов",
+        r"Создай пост для Telegram-канала.*?на тему",
+        r".*?который будет готов к публикации",
+        r"Вот.*?примеры постов из этого канала для точного копирования стиля",
+        r"Убедись, что твой ответ строго следует их манере"
+    ]
+    
+    # Применяем каждый шаблон и удаляем совпадения
+    for pattern in prompt_patterns:
+        text = re.sub(pattern, "", text, flags=re.DOTALL | re.IGNORECASE)
+    
+    # Удаляем любые переносы строк и пробелы в начале после очистки
+    text = text.strip()
+    
+    return text
+
 async def generate_post_details(request: Request, req):
     import traceback
     from backend.main import generate_image_keywords, search_unsplash_images, get_channel_analysis, IMAGE_RESULTS_COUNT, PostImage, OPENROUTER_API_KEY, OPENAI_API_KEY, logger
@@ -429,6 +453,10 @@ async def generate_post_details(request: Request, req):
                 if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
                     post_text = response.choices[0].message.content.strip()
                     logger.info(f"Получен текст поста через OpenRouter API ({len(post_text)} символов)")
+                    
+                    # Очистка текста поста от возможных частей промпта
+                    post_text = clean_generated_post(post_text)
+                    
                 elif response and hasattr(response, 'error') and response.error:
                     err_details = response.error
                     api_error_message = getattr(err_details, 'message', str(err_details))
@@ -462,6 +490,10 @@ async def generate_post_details(request: Request, req):
                         if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
                             post_text = openai_response.choices[0].message.content.strip()
                             logger.info(f"Получен текст поста через запасной OpenAI API ({len(post_text)} символов)")
+                            
+                            # Очистка текста поста от возможных частей промпта
+                            post_text = clean_generated_post(post_text)
+                            
                             # Сбрасываем сообщение об ошибке, так как запасной вариант сработал
                             api_error_message = None
                         else:
@@ -494,6 +526,9 @@ async def generate_post_details(request: Request, req):
                 if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
                     post_text = openai_response.choices[0].message.content.strip()
                     logger.info(f"Получен текст поста через OpenAI API ({len(post_text)} символов)")
+                    
+                    # Очистка текста поста от возможных частей промпта
+                    post_text = clean_generated_post(post_text)
                 else:
                     logger.error(f"Некорректный или пустой ответ от OpenAI API")
                     post_text = "[Текст не сгенерирован из-за ошибки API]"
