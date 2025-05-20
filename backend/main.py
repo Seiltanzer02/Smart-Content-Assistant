@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field
 import re
 import random
+from dateutil.relativedelta import relativedelta
 
 # FastAPI компоненты
 from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query, Path, Response, Header, Depends, Form
@@ -519,10 +520,11 @@ async def telegram_webhook(request: Request):
                 logger.error(f'[telegram_webhook] Не удалось привести user_id к int: {user_id_raw}, ошибка: {e}')
                 return {"ok": False, "error": "Некорректный user_id"}
             payment_id = successful_payment.get("telegram_payment_charge_id")
-            from datetime import datetime, timedelta
+            from datetime import datetime
+            from dateutil.relativedelta import relativedelta
             now = datetime.utcnow()
             start_date = now
-            end_date = now + timedelta(minutes=5)
+            end_date = now + relativedelta(months=1)
             logger.info(f'[telegram_webhook] Успешная оплата: user_id={user_id} ({type(user_id)}), payment_id={payment_id}, start_date={start_date}, end_date={end_date}')
             try:
                 # Проверяем, есть ли уже подписка
