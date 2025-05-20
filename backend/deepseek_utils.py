@@ -123,6 +123,42 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
         else:
             logger.warning(f"Некорректный тип данных для тем или стилей в JSON: {analysis_json}")
             analysis_result = {"themes": [], "styles": []}
+
+        # === ДОБАВЛЕНО: отдельный запрос на стили, если их мало ===
+        if not analysis_result["styles"] or len(analysis_result["styles"]) < 2:
+            logger.warning(f"Стили не извлечены или их слишком мало ({len(analysis_result['styles'])}), делаем отдельный запрос только на стили...")
+            styles_prompt = f"Выдели 3-5 самых характерных стилей/форматов подачи контента для следующих постов Telegram-канала. Выдай только массив строк в JSON: [\"стиль1\", \"стиль2\", ...]\n\nПосты:\n{combined_text}"
+            try:
+                styles_response = await client.chat.completions.create(
+                    model="google/gemini-2.5-flash-preview",
+                    messages=[{"role": "user", "content": styles_prompt}],
+                    temperature=0.1,
+                    max_tokens=300,
+                    timeout=30,
+                    extra_headers={
+                        "HTTP-Referer": "https://content-manager.onrender.com",
+                        "X-Title": "Smart Content Assistant"
+                    }
+                )
+                styles_text = styles_response.choices[0].message.content.strip()
+                if styles_text.startswith('```json'):
+                    styles_text = styles_text[7:]
+                if styles_text.endswith('```'):
+                    styles_text = styles_text[:-3]
+                try:
+                    styles = json.loads(styles_text)
+                    if not isinstance(styles, list):
+                        raise Exception("Ответ не является массивом")
+                except Exception:
+                    styles = re.findall(r'"([^"\n]{3,60})"', styles_text)
+                styles = [s.strip() for s in styles if len(s.strip()) > 2 and s.strip() != ': [']
+                analysis_result["styles"] = styles
+                logger.info(f"Стили успешно получены отдельным запросом: {styles}")
+            except Exception as e:
+                logger.error(f"Ошибка при отдельном запросе на стили: {e}")
+                # fallback: дефолтные стили
+                analysis_result["styles"] = ["Формат 1", "Формат 2", "Формат 3", "Формат 4", "Формат 5"]
+                logger.warning("Использованы дефолтные стили.")
     except Exception as e:
         logger.error(f"Ошибка при анализе контента через DeepSeek: {e}")
     return analysis_result 
