@@ -98,12 +98,18 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
                         filtered = [s for s in items if len(s.strip()) > 2 and s.strip()[-1].isalnum()]
                         # Если ничего не найдено, но есть хотя бы одна открывающая кавычка — взять текст до неё
                         if not filtered and '"' in arr:
-                            # Берём всё до первой незакрытой кавычки или до запятой
                             possible = arr.split('"')
                             if len(possible) > 1:
                                 candidate = possible[1].split(',')[0].strip()
                                 if len(candidate) > 2:
                                     filtered.append(candidate)
+                        # Если всё ещё пусто — взять всё, что идёт после последней кавычки
+                        if not filtered:
+                            last_quote = arr.rfind('"')
+                            if last_quote != -1:
+                                tail = arr[last_quote+1:].split(']')[0].split(',')[0].strip()
+                                if tail and len(tail) > 2:
+                                    filtered.append(tail)
                         return filtered
                     return []
                 themes = fix_array(analysis_text, 'themes')
