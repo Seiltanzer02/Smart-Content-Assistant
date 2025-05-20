@@ -95,7 +95,9 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
                     if arr_match:
                         arr = arr_match.group(1)
                         items = re.findall(r'"(.*?)"', arr)
-                        return items
+                        # Фильтруем явно обрезанные элементы (например, слишком короткие или заканчивающиеся на неалфавитный символ)
+                        filtered = [s for s in items if len(s.strip()) > 2 and s.strip()[-1].isalnum()]
+                        return filtered
                     return []
                 themes = fix_array(analysis_text, 'themes')
                 styles = fix_array(analysis_text, 'styles')
