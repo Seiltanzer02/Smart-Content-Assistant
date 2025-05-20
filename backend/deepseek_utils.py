@@ -112,7 +112,6 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
                                     filtered.append(tail)
                         # Финальное восстановление: разбить по кавычкам, запятым, точкам с запятой, дефисам, точкам
                         if not filtered:
-                            import re
                             raw_items = re.split(r'[",;\-\n]', arr)
                             filtered = [x.strip(' ,"\n') for x in raw_items if len(x.strip(' ,"\n')) > 2]
                         return filtered
