@@ -1279,6 +1279,59 @@ def clean_text_formatting(text):
     
     return text
 
+def parse_plan_response(plan_text, styles, period_days):
+    import re
+    plan_items = []
+    expected_style_set = set(s.lower() for s in styles)
+    # 1. Попытка распарсить как JSON
+    try:
+        plan_text_clean = plan_text.strip()
+        if plan_text_clean.startswith('```json'):
+            plan_text_clean = plan_text_clean[7:]
+        if plan_text_clean.endswith('```'):
+            plan_text_clean = plan_text_clean[:-3]
+        plan_text_clean = plan_text_clean.strip()
+        plan_json = json.loads(plan_text_clean)
+        if isinstance(plan_json, dict):
+            plan_json = [plan_json]
+        for item in plan_json:
+            day = int(item.get("day", 0))
+            topic_idea = clean_text_formatting(item.get("topic_idea", ""))
+            format_style = clean_text_formatting(item.get("format_style", ""))
+            # Фильтрация плейсхолдеров
+            if not topic_idea or re.search(r"\[.*\]", topic_idea):
+                continue
+            if format_style.lower() not in expected_style_set:
+                format_style = random.choice(styles)
+            plan_items.append(PlanItem(day=day, topic_idea=topic_idea, format_style=format_style))
+        if plan_items:
+            return plan_items
+    except Exception as e:
+        logger.info(f"Ответ не является валидным JSON: {e}")
+    # 2. Парсинг по строкам с разделителем ::
+    lines = plan_text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split('::')
+        if len(parts) == 3:
+            try:
+                day_part = parts[0].lower().replace('день', '').strip()
+                day = int(day_part)
+                topic_idea = clean_text_formatting(parts[1].strip())
+                format_style = clean_text_formatting(parts[2].strip())
+                if not topic_idea or re.search(r"\[.*\]", topic_idea):
+                    continue
+                if format_style.lower() not in expected_style_set:
+                    format_style = random.choice(styles)
+                plan_items.append(PlanItem(day=day, topic_idea=topic_idea, format_style=format_style))
+            except Exception as parse_err:
+                logger.warning(f"Ошибка парсинга строки плана '{line}': {parse_err}")
+        else:
+            logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
+    return plan_items
+
 # --- Маршрут для генерации плана публикаций ---
 @app.post("/generate-plan", response_model=PlanGenerationResponse)
 async def generate_content_plan(request: Request, req: PlanGenerationRequest):
@@ -1352,7 +1405,8 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
 Выдай ровно {period_days} строк СТРОГО в формате:
 День <номер_дня>:: <Идея поста>:: <Стиль из списка>
 
-Не включай ничего, кроме этих строк."""
+Не включай ничего, кроме этих строк.
+'Не используй никаких шаблонов, плейсхолдеров, квадратных скобок ([ссылка], [контакт], [детали], [цена], [номер], [имя], [название], [email], [телефон], [ссылка или контакт] и т.д.). Выдай только полностью готовый текст без мест для ручного заполнения.'"""
         # --- ИЗМЕНЕНИЕ КОНЕЦ ---
 
         # Настройка клиента OpenAI для использования OpenRouter
@@ -1400,71 +1454,22 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
             )
         # === КОНЕЦ ИЗМЕНЕНИЯ ===
         
-        plan_items = []
-        lines = plan_text.split('\n')
-
-        # --- ИЗМЕНЕНИЕ НАЧАЛО: Улучшенный парсинг с новым разделителем ---
-        expected_style_set = set(s.lower() for s in styles) # Для быстрой проверки
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            parts = line.split('::')
-            if len(parts) == 3:
-                # === ИСПРАВЛЕНО: Выровнен отступ для try ===
-                try:
-                    day_part = parts[0].lower().replace('день', '').strip()
-                    day = int(day_part)
-                    topic_idea = clean_text_formatting(parts[1].strip())
-                    format_style = clean_text_formatting(parts[2].strip())
-
-                    # Проверяем, входит ли стиль в запрошенный список (без учета регистра)
-                    if format_style.lower() not in expected_style_set:
-                        logger.warning(f"Стиль '{format_style}' из ответа LLM не найден в запрошенных стилях. Выбираем случайный.")
-                        format_style = random.choice(styles) if styles else "Без указания стиля"
-
-                    if topic_idea: # Пропускаем, если тема пустая
-                        plan_items.append(PlanItem(
-                            day=day,
-                            topic_idea=topic_idea,
-                            format_style=format_style
-                        ))
-                    else:
-                        logger.warning(f"Пропущена строка плана из-за пустой темы после очистки: {line}")
-                # === ИСПРАВЛЕНО: Выровнен отступ для except ===
-                except ValueError:
-                    logger.warning(f"Не удалось извлечь номер дня из строки плана: {line}")
-                except Exception as parse_err:
-                    logger.warning(f"Ошибка парсинга строки плана '{line}': {parse_err}")
-            # === ИСПРАВЛЕНО: Выровнен отступ для else ===
-            else:
-                logger.warning(f"Строка плана не соответствует формату 'День X:: Тема:: Стиль': {line}")
-        # --- ИЗМЕНЕНИЕ КОНЕЦ ---
-
-        # ... (остальная логика обработки plan_items: сортировка, дополнение, проверка пустого плана) ...
-        # Если и сейчас нет идей, генерируем вручную
+        plan_items = parse_plan_response(plan_text, styles, period_days)
+        # Если не удалось — fallback
         if not plan_items:
             logger.warning("Не удалось извлечь идеи из ответа LLM или все строки были некорректными, генерируем базовый план.")
             for day in range(1, period_days + 1):
                 random_theme = random.choice(themes) if themes else "Общая тема"
                 random_style = random.choice(styles) if styles else "Общий стиль"
-                # === ИЗМЕНЕНИЕ: Убираем 'Пост о' ===
                 fallback_topic = f"{random_theme} ({random_style})"
                 plan_items.append(PlanItem(
                     day=day,
-                    topic_idea=fallback_topic, # <--- Используем новую строку
+                    topic_idea=fallback_topic,
                     format_style=random_style
                 ))
-        
-        # Сортируем по дням
+        # ... сортировка, обрезка, дополнение ...
         plan_items.sort(key=lambda x: x.day)
-        
-        # Обрезаем до запрошенного количества дней (на случай, если LLM выдал больше)
         plan_items = plan_items[:period_days]
-        
-        # Если план получился короче запрошенного периода, дополняем (возможно, из-за ошибок парсинга)
         if len(plan_items) < period_days:
             existing_days = {item.day for item in plan_items}
             needed_days = period_days - len(plan_items)
@@ -1475,17 +1480,13 @@ async def generate_content_plan(request: Request, req: PlanGenerationRequest):
                 if current_day not in existing_days:
                     random_theme = random.choice(themes) if themes else "Дополнительная тема"
                     random_style = random.choice(styles) if styles else "Дополнительный стиль"
-                    # === ИЗМЕНЕНИЕ: Убираем 'Пост о' и '(Дополнено)' ===
                     fallback_topic = f"{random_theme} ({random_style})"
                     plan_items.append(PlanItem(
                         day=current_day,
-                        topic_idea=fallback_topic, # <--- Используем новую строку
+                        topic_idea=fallback_topic,
                         format_style=random_style
                     ))
-        
-            # Сортируем по дням еще раз после возможного дополнения
             plan_items.sort(key=lambda x: x.day)
-        
         logger.info(f"Сгенерирован и обработан план из {len(plan_items)} идей для канала @{channel_name}")
         return PlanGenerationResponse(plan=plan_items)
                 

@@ -55,12 +55,29 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
             analysis_text = analysis_text[7:]
         if analysis_text.endswith('```'):
             analysis_text = analysis_text[:-3]
+        # Удаляем шаблоны вида [ссылка], [контакт], [детали] и т.д.
+        analysis_text = re.sub(r'\[[^\]]{2,40}\]', '', analysis_text)
+        analysis_text = re.sub(r'\([сС]сылка( или контакт)?\)', '', analysis_text)
+        analysis_text = re.sub(r'\([кК]онтакт(ы)?|[дД]етали|[цЦ]ена|[нН]омер|[иИ]мя|[нН]азвание|[eE]mail|[тТ]елефон)\)', '', analysis_text)
+        analysis_text = re.sub(r'\s{2,}', ' ', analysis_text)
         analysis_text = analysis_text.strip()
         logger.info(f"Получен ответ от DeepSeek: {analysis_text[:100]}...")
-        json_match = re.search(r'(\{.*\})', analysis_text, re.DOTALL)
-        if json_match:
-            analysis_text = json_match.group(1)
-        analysis_json = json.loads(analysis_text)
+        # Если невалидный JSON — пробуем обрезать до последней } или ] и парсить снова
+        try:
+            analysis_json = json.loads(analysis_text)
+        except json.JSONDecodeError as e:
+            last_curly = analysis_text.rfind('}')
+            last_square = analysis_text.rfind(']')
+            cut = max(last_curly, last_square)
+            if cut > 0:
+                try:
+                    analysis_json = json.loads(analysis_text[:cut+1])
+                except Exception:
+                    logger.error(f"Ошибка парсинга JSON даже после восстановления: {e}, текст: {analysis_text}")
+                    analysis_json = {"themes": [], "styles": []}
+            else:
+                logger.error(f"Ошибка парсинга JSON: {e}, текст: {analysis_text}")
+                analysis_json = {"themes": [], "styles": []}
         themes = analysis_json.get("themes", [])
         styles = analysis_json.get("styles", analysis_json.get("style", [])) 
         if isinstance(themes, list) and isinstance(styles, list):
@@ -69,16 +86,6 @@ async def analyze_content_with_deepseek(texts: List[str], api_key: str) -> Dict[
         else:
             logger.warning(f"Некорректный тип данных для тем или стилей в JSON: {analysis_json}")
             analysis_result = {"themes": [], "styles": []}
-    except json.JSONDecodeError as e:
-        logger.error(f"Ошибка парсинга JSON: {e}, текст: {analysis_text}")
-        themes_match = re.findall(r'"themes":\s*\[(.*?)\]', analysis_text, re.DOTALL)
-        if themes_match:
-            theme_items = re.findall(r'"([^"]+)"', themes_match[0])
-            analysis_result["themes"] = theme_items
-        styles_match = re.findall(r'"styles":\s*\[(.*?)\]', analysis_text, re.DOTALL)
-        if styles_match:
-            style_items = re.findall(r'"([^"]+)"', styles_match[0])
-            analysis_result["styles"] = style_items
     except Exception as e:
         logger.error(f"Ошибка при анализе контента через DeepSeek: {e}")
     return analysis_result 
