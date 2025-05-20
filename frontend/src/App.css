@@ -194,8 +194,12 @@ body {
 
 /* Стили формы анализа */
 .input-container {
+  max-width: 540px;
+  margin: 0 auto 15px auto;
+  width: 100%;
   display: flex;
-  margin-bottom: 15px;
+  gap: 10px;
+  align-items: center;
 }
 
 .channel-input {
@@ -219,11 +223,10 @@ body {
 }
 
 .results-container {
-  background-color: var(--tg-theme-secondary-bg-color, #f9f9f9);
-  border-radius: 6px;
-  padding: 15px;
-  margin-top: 20px;
-  border: 1px solid var(--tg-theme-hint-color, #e0e0e0);
+  max-width: 540px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .results-container h3 {
@@ -2080,3 +2083,42 @@ a,
 }
 
 /* ... конец файла ... */
+
+/* --- ВЫРАВНИВАНИЕ АНАЛИЗА --- */
+.view.analyze-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.results-container {
+  max-width: 540px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.input-container {
+  max-width: 540px;
+  margin: 0 auto 15px auto;
+  width: 100%;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+@media (max-width: 600px) {
+  .results-container, .input-container {
+    max-width: 100%;
+    width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .view.analyze-view {
+    padding: 0 2px;
+  }
+}
+/* --- КОНЕЦ ВЫРАВНИВАНИЯ АНАЛИЗА --- */
