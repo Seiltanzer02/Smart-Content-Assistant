@@ -500,9 +500,10 @@ function App() {
   const [channelCheckError, setChannelCheckError] = useState<string | null>(null);
   const [channelUsername, setChannelUsername] = useState<string>('');
   // --- Состояния для партнёрской программы ---
-  const [partnerLink, setPartnerLink] = useState<string | null>(null);
-  const [partnerLoading, setPartnerLoading] = useState(false);
-  const [partnerError, setPartnerError] = useState<string | null>(null);
+  // const [partnerLink, setPartnerLink] = useState<string | null>(null);
+  // const [partnerLoading, setPartnerLoading] = useState(false);
+  // const [partnerError, setPartnerError] = useState<string | null>(null);
+  // const fetchPartnerLink = ...
   
   // === ДОБАВЛЯЮ: Массивы забавных сообщений для прогресс-баров ===
   const postDetailsMessages = [
@@ -1879,28 +1880,17 @@ function App() {
     <h2>Партнёрская программа Telegram Stars</h2>
     <p>Станьте партнёром и зарабатывайте Stars, продвигая наше мини-приложение!<br/>
     Просто получите свою реферальную ссылку и делитесь ею — за покупки по ней Telegram начислит вам Stars.</p>
-    <button 
-      className="action-button" 
-      onClick={fetchPartnerLink}
-      disabled={partnerLoading}
+    <button
+      className="action-button"
+      onClick={() => window.open('https://t.me/SmartContentHelperBot?start=starref', '_blank')}
       style={{marginBottom: 16}}
     >
-      {partnerLoading ? 'Получение ссылки...' : 'Получить партнёрскую ссылку'}
+      Получить партнёрскую ссылку
     </button>
-    {partnerLink && (
-      <div style={{marginTop: 12}}>
-        <div style={{wordBreak: 'break-all', background: '#f7f7f7', padding: 10, borderRadius: 6, marginBottom: 8}}>
-          <b>Ваша ссылка:</b><br/>
-          <a href={partnerLink} target="_blank" rel="noopener noreferrer">{partnerLink}</a>
-        </div>
-        <button className="action-button small" onClick={() => {navigator.clipboard.writeText(partnerLink); toast.success('Ссылка скопирована!')}}>Скопировать ссылку</button>
-      </div>
-    )}
-    {partnerError && <div className="error-message" style={{marginTop: 10}}>{partnerError}</div>}
     <div style={{marginTop: 24, fontSize: 14, color: '#666'}}>
       <b>Как это работает?</b><br/>
-      1. Нажмите кнопку выше и получите свою уникальную ссылку.<br/>
-      2. Делитесь ссылкой с друзьями, в соцсетях, на сайтах.<br/>
+      1. Нажмите кнопку выше — Telegram предложит стать аффилиатом.<br/>
+      2. Получите свою уникальную ссылку и делитесь ею.<br/>
       3. За каждую покупку по вашей ссылке Telegram начислит вам Stars.<br/>
       <i>Вся статистика и начисления ведутся автоматически через Telegram.</i>
     </div>
@@ -2500,26 +2490,5 @@ function cleanPostText(text: string) {
   // Удаляем звездочки, markdown-символы, лишние пробелы
   return text.replace(/[\*\_\#\-]+/g, '').replace(/\s{2,}/g, ' ').trim();
 }
-
-// --- Функция для получения партнёрской ссылки ---
-const fetchPartnerLink = async () => {
-  setPartnerLoading(true);
-  setPartnerError(null);
-  setPartnerLink(null);
-  try {
-    const response = await fetchWithAuth('/api/user/referral-link');
-    if (!response.ok) throw new Error('Ошибка запроса: ' + response.status);
-    const data = await response.json();
-    if (data.referral_link) {
-      setPartnerLink(data.referral_link);
-    } else {
-      setPartnerError('Ссылка не получена. Попробуйте позже.');
-    }
-  } catch (e: any) {
-    setPartnerError(e.message || 'Ошибка получения ссылки');
-  } finally {
-    setPartnerLoading(false);
-  }
-};
 
 export default App;
