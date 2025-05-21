@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 # Импортируем supabase и logger из родительского main.py (backend/main.py)
 from ..main import supabase, logger
 from backend.services.user_settings_service import get_user_settings as main_get_user_settings, update_user_settings as main_update_user_settings
+from backend.services.partner_referral_service import get_star_referral_link
 
 router = APIRouter()
 
@@ -53,4 +54,17 @@ async def get_user_settings_router(request: Request):
 @router.put("/settings", response_model=UserSettingsResponse)
 async def update_user_settings_router(settings_data: UserSettingsCreate, request: Request):
     return await main_update_user_settings(settings_data, request)
+
+@router.get("/referral-link")
+async def get_referral_link(request: Request):
+    user_id = request.headers.get("X-Telegram-User-Id")
+    if not user_id:
+        logger.warning("Попытка получить реферальную ссылку без X-Telegram-User-Id")
+        raise HTTPException(status_code=401, detail="X-Telegram-User-Id header missing")
+    try:
+        link = await get_star_referral_link(int(user_id))
+        return {"referral_link": link}
+    except Exception as e:
+        logger.error(f"Ошибка при получении реферальной ссылки: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при получении реферальной ссылки: {e}")
 # === КОНЕЦ API ЭНДПОИНТОВ USER_SETTINGS === 
