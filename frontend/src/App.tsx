@@ -8,6 +8,7 @@ import { ClipLoader } from 'react-spinners';
 import SubscriptionWidget from './components/SubscriptionWidget';
 import DirectPremiumStatus from './components/DirectPremiumStatus'; // <-- Импортируем новый компонент
 import ProgressBar from './components/ProgressBar';
+import { fetchWithAuth } from './utils/fetchWithAuth';
 
 // Определяем базовый URL API
 // Так как фронтенд и API на одном домене, используем пустую строку
@@ -116,7 +117,7 @@ try {
 }
 
 // Определяем типы для данных приложения
-type ViewType = 'analyze' | 'suggestions' | 'plan' | 'details' | 'calendar' | 'edit' | 'posts';
+type ViewType = 'analyze' | 'suggestions' | 'plan' | 'details' | 'calendar' | 'edit' | 'posts' | 'partner';
 
 // Тип для результата анализа
 interface AnalysisResult {
@@ -498,6 +499,10 @@ function App() {
   const [hasChannelAccess, setHasChannelAccess] = useState(false);
   const [channelCheckError, setChannelCheckError] = useState<string | null>(null);
   const [channelUsername, setChannelUsername] = useState<string>('');
+  // --- Состояния для партнёрской программы ---
+  const [partnerLink, setPartnerLink] = useState<string | null>(null);
+  const [partnerLoading, setPartnerLoading] = useState(false);
+  const [partnerError, setPartnerError] = useState<string | null>(null);
   
   // === ДОБАВЛЯЮ: Массивы забавных сообщений для прогресс-баров ===
   const postDetailsMessages = [
@@ -1857,6 +1862,17 @@ function App() {
         </svg>
         <span>Посты</span>
       </button>
+      <button 
+        onClick={() => setCurrentView('partner')} 
+        className={`action-button ${currentView === 'partner' ? 'active' : ''}`}
+      >
+        {/* SVG handshake/партнёрство */}
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginRight: '8px'}}>
+          <path d="M2 17l4.24-4.24a3 3 0 014.24 0l1.06 1.06a3 3 0 004.24 0L22 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M18 19a2 2 0 002-2v-7a2 2 0 00-2-2h-7a2 2 0 00-2 2v7a2 2 0 002 2h7z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        <span>Партнёрка</span>
+      </button>
     </div>
 
         {/* Выбор канала */}
@@ -2452,6 +2468,25 @@ function cleanPostText(text: string) {
   return text.replace(/[\*\_\#\-]+/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
-
+// --- Функция для получения партнёрской ссылки ---
+const fetchPartnerLink = async () => {
+  setPartnerLoading(true);
+  setPartnerError(null);
+  setPartnerLink(null);
+  try {
+    const response = await fetchWithAuth('/api/user/referral-link');
+    if (!response.ok) throw new Error('Ошибка запроса: ' + response.status);
+    const data = await response.json();
+    if (data.referral_link) {
+      setPartnerLink(data.referral_link);
+    } else {
+      setPartnerError('Ссылка не получена. Попробуйте позже.');
+    }
+  } catch (e: any) {
+    setPartnerError(e.message || 'Ошибка получения ссылки');
+  } finally {
+    setPartnerLoading(false);
+  }
+};
 
 export default App;
