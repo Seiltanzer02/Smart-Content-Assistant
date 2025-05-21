@@ -170,7 +170,6 @@ async def generate_content_plan(request: Request, req):
                     base_url="https://openrouter.ai/api/v1",
                     api_key=OPENROUTER_API_KEY
                 )
-                
                 # --- Новый блок: расчет средней длины постов ---
                 avg_length = 0
                 post_samples = req.get("post_samples") or req.post_samples if hasattr(req, "post_samples") else None
@@ -179,7 +178,6 @@ async def generate_content_plan(request: Request, req):
                     avg_tokens = max(100, min(1200, avg_length // 3))
                 else:
                     avg_tokens = 1200
-                
                 response = await client.chat.completions.create(
                             model="google/gemini-2.5-flash-preview",
                     messages=[
@@ -194,7 +192,6 @@ async def generate_content_plan(request: Request, req):
                         "X-Title": "Smart Content Assistant"
                     }
                 )
-                
                 if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
                     plan_text = response.choices[0].message.content.strip()
                     # Удаляем обёртку ```json ... ``` если есть
@@ -214,11 +211,9 @@ async def generate_content_plan(request: Request, req):
                     err_details = response.error
                     api_error_message = getattr(err_details, 'message', str(err_details))
                     logger.error(f"OpenRouter API вернул ошибку: {api_error_message}")
-                    # Ошибка OpenRouter API - пробуем запасной вариант
                     raise Exception(f"OpenRouter API вернул ошибку: {api_error_message}")
             except Exception as log_err:
                 logger.error(f"Не удалось залогировать тело ответа API: {log_err}")
-                # Ошибка OpenRouter API - пробуем запасной вариант
                 raise Exception("Некорректный или пустой ответ от OpenRouter API")
         else:
             logger.error("Отсутствуют API ключи для генерации плана (OPENROUTER_API_KEY и OPENAI_API_KEY)")
@@ -253,8 +248,8 @@ async def generate_content_plan(request: Request, req):
             result_message = "План сгенерирован с использованием резервного API (OpenAI)"
         
         # После успешной генерации идей увеличиваем счетчик использования
+        
             await subscription_service.increment_idea_usage(int(telegram_user_id))
-            
         return {"plan": plan_items, "message": result_message}
     except Exception as e:
         logger.error(f"Ошибка при генерации плана: {e}")

@@ -124,10 +124,8 @@ async def analyze_channel(request: Request, req: AnalyzeRequest):
                 except Exception as e:
                     logger.error(f"Ошибка анализа: {e}")
                     analysis_result = {"themes": [], "styles": []}
-                
                 themes = analysis_result.get("themes", [])
                 styles = analysis_result.get("styles", [])
-                
                 if not themes and not styles:
                     # Если не получены результаты, пробуем запасной API
                     logger.warning(f"OpenRouter API не вернул результатов анализа для канала @{username}, пробуем использовать запасной API")
