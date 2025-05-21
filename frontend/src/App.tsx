@@ -1874,7 +1874,38 @@ function App() {
         <span>Партнёрка</span>
       </button>
     </div>
-
+	{currentView === 'partner' && (
+  <div className="view partner-view">
+    <h2>Партнёрская программа Telegram Stars</h2>
+    <p>Станьте партнёром и зарабатывайте Stars, продвигая наше мини-приложение!<br/>
+    Просто получите свою реферальную ссылку и делитесь ею — за покупки по ней Telegram начислит вам Stars.</p>
+    <button 
+      className="action-button" 
+      onClick={fetchPartnerLink}
+      disabled={partnerLoading}
+      style={{marginBottom: 16}}
+    >
+      {partnerLoading ? 'Получение ссылки...' : 'Получить партнёрскую ссылку'}
+    </button>
+    {partnerLink && (
+      <div style={{marginTop: 12}}>
+        <div style={{wordBreak: 'break-all', background: '#f7f7f7', padding: 10, borderRadius: 6, marginBottom: 8}}>
+          <b>Ваша ссылка:</b><br/>
+          <a href={partnerLink} target="_blank" rel="noopener noreferrer">{partnerLink}</a>
+        </div>
+        <button className="action-button small" onClick={() => {navigator.clipboard.writeText(partnerLink); toast.success('Ссылка скопирована!')}}>Скопировать ссылку</button>
+      </div>
+    )}
+    {partnerError && <div className="error-message" style={{marginTop: 10}}>{partnerError}</div>}
+    <div style={{marginTop: 24, fontSize: 14, color: '#666'}}>
+      <b>Как это работает?</b><br/>
+      1. Нажмите кнопку выше и получите свою уникальную ссылку.<br/>
+      2. Делитесь ссылкой с друзьями, в соцсетях, на сайтах.<br/>
+      3. За каждую покупку по вашей ссылке Telegram начислит вам Stars.<br/>
+      <i>Вся статистика и начисления ведутся автоматически через Telegram.</i>
+    </div>
+  </div>
+)}
         {/* Выбор канала */}
         <div className="channel-selector">
           <label>Каналы: </label>
