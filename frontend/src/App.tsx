@@ -1713,6 +1713,17 @@ function App() {
     // Если channelChecked сбрасывать при выходе/потере userId, то этот useEffect будет срабатывать правильно
   }, [isAuthenticated, userId, channelChecked]); 
 
+  // --- ДОБАВЛЯЮ обработку параметра tgWebAppStartParam для отслеживания рефералов ---
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const startParam = urlParams.get('tgWebAppStartParam');
+    if (startParam === 'starref') {
+      // Здесь можно добавить логику: показать сообщение, записать в базу и т.д.
+      console.log('Пользователь пришёл по реферальной ссылке (starref)');
+      // Например, можно показать уведомление:
+      // toast.success('Вы пришли по партнёрской ссылке!');
+    }
+  }, []);
 
   // --- ИЗМЕНЕНИЕ: Логика отображения загрузки/авторизации/экрана подписки ---
   if (loading) { // Общая загрузка приложения (например, скрипты Telegram)
@@ -1878,19 +1889,23 @@ function App() {
 	{currentView === 'partner' && (
   <div className="view partner-view">
     <h2>Партнёрская программа Telegram Stars</h2>
-    <p>Станьте партнёром и зарабатывайте Stars, продвигая наше мини-приложение!<br/>
-    Просто получите свою реферальную ссылку и делитесь ею — за покупки по ней Telegram начислит вам Stars.</p>
+    <p>Станьте аффилиатом и зарабатывайте Stars, продвигая наше мини-приложение!<br/>
+    <b>Чтобы подключиться к программе:</b></p>
+    <ol style={{textAlign: 'left', maxWidth: 500, margin: '0 auto 16px auto', color: '#ccc'}}>
+      <li>Нажмите кнопку ниже — Telegram сразу откроет подключение к нашей партнёрской программе.</li>
+      <li>Если не сработало, откройте Telegram → Настройки → Мои звёзды → найдите "SmartContentHelperBot" и подключитесь вручную.</li>
+    </ol>
     <button
       className="action-button"
-      onClick={() => window.open('https://t.me/SmartContentHelperBot?start=starref', '_blank')}
+      onClick={() => window.open('https://t.me/SmartContentHelperBot?startapp=starref', '_blank')}
       style={{marginBottom: 16}}
     >
-      Получить партнёрскую ссылку
+      Стать аффилиатом
     </button>
     <div style={{marginTop: 24, fontSize: 14, color: '#666'}}>
       <b>Как это работает?</b><br/>
-      1. Нажмите кнопку выше — Telegram предложит стать аффилиатом.<br/>
-      2. Получите свою уникальную ссылку и делитесь ею.<br/>
+      1. После подключения Telegram выдаст вам уникальную реферальную ссылку.<br/>
+      2. Делитесь ссылкой с друзьями, в соцсетях, на сайтах.<br/>
       3. За каждую покупку по вашей ссылке Telegram начислит вам Stars.<br/>
       <i>Вся статистика и начисления ведутся автоматически через Telegram.</i>
     </div>
