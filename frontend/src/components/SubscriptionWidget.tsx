@@ -491,19 +491,19 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
             <span className="free-badge-text">Базовый доступ</span>
           </div>
           <div className="free-info">Для Премиум доступа без ограничений оформите подписку.</div>
-          <button
+            <button
             className="subscribe-button modern-subscribe"
-            onClick={handleSubscribe}
-            disabled={isSubscribing}
-          >
+              onClick={handleSubscribe}
+              disabled={isSubscribing}
+            >
             {isSubscribing ? 'Обработка...' : '✨ Подписаться за ' + SUBSCRIPTION_PRICE + ' Stars'}
-          </button>
-          <button 
+            </button>
+            <button 
             className="check-button modern-check"
-            onClick={handleCheckPremiumViaBot}
-          >
-            Проверить подписку через бот
-          </button>
+              onClick={handleCheckPremiumViaBot}
+            >
+              Проверить подписку через бот
+            </button>
         </div>
       )}
       <p className="user-id" style={{opacity: 0.7, fontSize: '0.85em', marginTop: 18}}>User ID: {validatedUserId}</p>

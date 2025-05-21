@@ -4291,15 +4291,3 @@ else:
     logger.warning(f"Папка статических файлов SPA не найдена: {static_folder}")
     logger.warning("Обслуживание SPA фронтенда не настроено. Только API endpoints доступны.")
 
-from backend.utils.star_referral import get_star_referral_link
-
-@app.get("/api/get-star-referral-link", response_model=Dict[str, str])
-async def api_get_star_referral_link():
-    """Возвращает официальную реферальную ссылку Stars для партнёра."""
-    try:
-        link = await get_star_referral_link()
-        return {"referral_link": link}
-    except Exception as e:
-        logger.error(f"Ошибка при получении реферальной ссылки Stars: {e}")
-        return {"error": str(e)}
-
