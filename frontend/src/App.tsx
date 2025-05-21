@@ -1907,31 +1907,33 @@ function App() {
   </div>
 )}
         {/* Выбор канала */}
-        <div className="channel-selector">
-          <label>Каналы: </label>
-          <div className="custom-dropdown" style={{ position: 'relative', display: 'inline-block', minWidth: 220 }}>
-            <div className="selected" onClick={() => setDropdownOpen(v => !v)} style={{ border: '1px solid #ccc', borderRadius: 6, padding: '7px 12px', background: '#fff', cursor: 'pointer', minWidth: 180, color: '#222', fontWeight: 500 }}>
-              {channelName || 'Выберите канал'}
-              <span style={{ float: 'right', fontSize: 14, color: '#888' }}>{dropdownOpen ? '▲' : '▼'}</span>
+        {currentView !== 'partner' && (
+          <div className="channel-selector">
+            <label>Каналы: </label>
+            <div className="custom-dropdown" style={{ position: 'relative', display: 'inline-block', minWidth: 220 }}>
+              <div className="selected" onClick={() => setDropdownOpen(v => !v)} style={{ border: '1px solid #ccc', borderRadius: 6, padding: '7px 12px', background: '#fff', cursor: 'pointer', minWidth: 180, color: '#222', fontWeight: 500 }}>
+                {channelName || 'Выберите канал'}
+                <span style={{ float: 'right', fontSize: 14, color: '#888' }}>{dropdownOpen ? '▲' : '▼'}</span>
+              </div>
+              {dropdownOpen && (
+                <ul className="dropdown-list" style={{ position: 'absolute', zIndex: 10, background: '#fff', border: '1px solid #ccc', borderRadius: 6, margin: 0, padding: 0, listStyle: 'none', width: '100%' }}>
+                  {allChannels.length === 0 && <li style={{ padding: '8px 12px', color: '#888' }}>Нет каналов</li>}
+                  {allChannels.map(channel => (
+                    <li key={channel} className="dropdown-item" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #eee', cursor: 'pointer', color: '#222' }}>
+                      <span style={{ flex: 1, color: '#222' }} onClick={() => { setChannelName(channel); setDropdownOpen(false); }}>{channel}</span>
+                      <button
+                        className="remove-btn"
+                        onClick={e => { e.stopPropagation(); handleRemoveChannel(channel); }}
+                        style={{ marginLeft: 8, color: 'red', cursor: 'pointer', border: 'none', background: 'none', fontSize: 18 }}
+                        title="Удалить канал"
+                      >×</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-            {dropdownOpen && (
-              <ul className="dropdown-list" style={{ position: 'absolute', zIndex: 10, background: '#fff', border: '1px solid #ccc', borderRadius: 6, margin: 0, padding: 0, listStyle: 'none', width: '100%' }}>
-                {allChannels.length === 0 && <li style={{ padding: '8px 12px', color: '#888' }}>Нет каналов</li>}
-                {allChannels.map(channel => (
-                  <li key={channel} className="dropdown-item" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #eee', cursor: 'pointer', color: '#222' }}>
-                    <span style={{ flex: 1, color: '#222' }} onClick={() => { setChannelName(channel); setDropdownOpen(false); }}>{channel}</span>
-                    <button
-                      className="remove-btn"
-                      onClick={e => { e.stopPropagation(); handleRemoveChannel(channel); }}
-                      style={{ marginLeft: 8, color: 'red', cursor: 'pointer', border: 'none', background: 'none', fontSize: 18 }}
-                      title="Удалить канал"
-                    >×</button>
-                  </li>
-                ))}
-              </ul>
-            )}
           </div>
-        </div>
+        )}
 
         {/* Контент */}
         <div className="view-container">
