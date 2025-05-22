@@ -484,6 +484,7 @@ def normalize_db_url(url: str) -> str:
     logger.warning(f"URL базы данных имеет неизвестный формат. Начало URL: {url[:10]}...")
     return url
 
+@app.post("/telegram/webhook")
 @app.post("/telegram-webhook")
 async def telegram_webhook(request: Request):
     """Вебхук для обработки обновлений от бота Telegram."""
