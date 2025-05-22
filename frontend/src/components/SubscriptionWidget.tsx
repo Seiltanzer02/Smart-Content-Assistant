@@ -40,7 +40,7 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
   const [premiumStatus, setPremiumStatus] = useState<PremiumStatus | null>(null);  // Добавляем состояние для прямого статуса премиума
   const [showPaymentInfo, setShowPaymentInfo] = useState<boolean>(false);
-  const SUBSCRIPTION_PRICE = 1; // в Stars
+  const SUBSCRIPTION_PRICE = 70; // в Stars
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [validatedUserId, setValidatedUserId] = useState<string | null>(null);
   // localStorage только как fallback для даты окончания
@@ -474,15 +474,6 @@ const SubscriptionWidget: React.FC<SubscriptionWidgetProps> = ({ userId, isActiv
           {endDate && (
             <div className="premium-end-date">Действует до: <b>{formatDate(endDate)}</b></div>
           )}
-          <button 
-            className="refresh-button premium-refresh"
-            onClick={() => {
-              fetchSubscriptionStatus();
-              fetchDirectPremiumStatus();
-            }}
-          >
-            🔄 Обновить статус
-          </button>
         </div>
       ) : (
         <div className="free-block modern-free">

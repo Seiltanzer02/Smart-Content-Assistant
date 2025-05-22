@@ -396,7 +396,7 @@ async def generate_stars_invoice_link(request: Request):
     try:
         data = await request.json()
         user_id = data.get("user_id")
-        amount = 1 # <--- УСТАНОВЛЕНО В 1 Star
+        amount = 70 # <--- УСТАНОВЛЕНО В 70 Stars
         if not user_id:
             raise HTTPException(status_code=400, detail="user_id обязателен")
         bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
