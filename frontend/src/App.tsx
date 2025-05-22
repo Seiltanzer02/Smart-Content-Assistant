@@ -1822,7 +1822,7 @@ function App() {
         {/* Навигация */}
     <div className="navigation-buttons">
       <button 
-        onClick={() => setShowSubscription(true)} 
+        onClick={() => setShowSubscription(prev => !prev)} 
         className="action-button"
       >
         {/* SVG звезды */}
