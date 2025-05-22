@@ -117,7 +117,7 @@ try {
 }
 
 // Определяем типы для данных приложения
-type ViewType = 'analyze' | 'suggestions' | 'plan' | 'details' | 'calendar' | 'edit' | 'posts' | 'partner';
+type ViewType = 'analyze' | 'suggestions' | 'plan' | 'details' | 'calendar' | 'edit' | 'posts';
 
 // Тип для результата анализа
 interface AnalysisResult {
@@ -1874,71 +1874,34 @@ function App() {
         </svg>
         <span>Посты</span>
       </button>
-      <button 
-        onClick={() => setCurrentView('partner')} 
-        className={`action-button ${currentView === 'partner' ? 'active' : ''}`}
-      >
-        {/* SVG handshake/партнёрство */}
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginRight: '8px'}}>
-          <path d="M2 17l4.24-4.24a3 3 0 014.24 0l1.06 1.06a3 3 0 004.24 0L22 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-          <path d="M18 19a2 2 0 002-2v-7a2 2 0 00-2-2h-7a2 2 0 00-2 2v7a2 2 0 002 2h7z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-        <span>Партнёрка</span>
-      </button>
     </div>
-	{currentView === 'partner' && (
-  <div className="view partner-view">
-    <h2>Партнёрская программа Telegram Stars</h2>
-    <p>Станьте аффилиатом и зарабатывайте Stars, продвигая наше мини-приложение!<br/>
-    <b>Чтобы подключиться к программе:</b></p>
-    <ol style={{textAlign: 'left', maxWidth: 500, margin: '0 auto 16px auto', color: '#ccc'}}>
-      <li>Нажмите кнопку ниже — Telegram сразу откроет подключение к нашей партнёрской программе.</li>
-      <li>Если не сработало, откройте Telegram → Настройки → Мои звёзды → найдите "SmartContentHelperBot" и подключитесь вручную.</li>
-    </ol>
-    <button
-      className="action-button"
-      onClick={() => window.open('https://t.me/SmartContentHelperBot?startapp=starref', '_blank')}
-      style={{marginBottom: 16}}
-    >
-      Стать аффилиатом
-    </button>
-    <div style={{marginTop: 24, fontSize: 14, color: '#666'}}>
-      <b>Как это работает?</b><br/>
-      1. После подключения Telegram выдаст вам уникальную реферальную ссылку.<br/>
-      2. Делитесь ссылкой с друзьями, в соцсетях, на сайтах.<br/>
-      3. За каждую покупку по вашей ссылке Telegram начислит вам Stars.<br/>
-      <i>Вся статистика и начисления ведутся автоматически через Telegram.</i>
-    </div>
-  </div>
-)}
+
         {/* Выбор канала */}
-        {currentView !== 'partner' && (
-          <div className="channel-selector">
-            <label>Каналы: </label>
-            <div className="custom-dropdown" style={{ position: 'relative', display: 'inline-block', minWidth: 220 }}>
-              <div className="selected" onClick={() => setDropdownOpen(v => !v)} style={{ border: '1px solid #ccc', borderRadius: 6, padding: '7px 12px', background: '#fff', cursor: 'pointer', minWidth: 180, color: '#222', fontWeight: 500 }}>
-                {channelName || 'Выберите канал'}
-                <span style={{ float: 'right', fontSize: 14, color: '#888' }}>{dropdownOpen ? '▲' : '▼'}</span>
-              </div>
-              {dropdownOpen && (
-                <ul className="dropdown-list" style={{ position: 'absolute', zIndex: 10, background: '#fff', border: '1px solid #ccc', borderRadius: 6, margin: 0, padding: 0, listStyle: 'none', width: '100%' }}>
-                  {allChannels.length === 0 && <li style={{ padding: '8px 12px', color: '#888' }}>Нет каналов</li>}
-                  {allChannels.map(channel => (
-                    <li key={channel} className="dropdown-item" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #eee', cursor: 'pointer', color: '#222' }}>
-                      <span style={{ flex: 1, color: '#222' }} onClick={() => { setChannelName(channel); setDropdownOpen(false); }}>{channel}</span>
-                      <button
-                        className="remove-btn"
-                        onClick={e => { e.stopPropagation(); handleRemoveChannel(channel); }}
-                        style={{ marginLeft: 8, color: 'red', cursor: 'pointer', border: 'none', background: 'none', fontSize: 18 }}
-                        title="Удалить канал"
-                      >×</button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+        <div className="channel-selector">
+          <label>Каналы: </label>
+          <div className="custom-dropdown" style={{ position: 'relative', display: 'inline-block', minWidth: 220 }}>
+            <div className="selected" onClick={() => setDropdownOpen(v => !v)} style={{ border: '1px solid #ccc', borderRadius: 6, padding: '7px 12px', background: '#fff', cursor: 'pointer', minWidth: 180, color: '#222', fontWeight: 500 }}>
+              {channelName || 'Выберите канал'}
+              <span style={{ float: 'right', fontSize: 14, color: '#888' }}>{dropdownOpen ? '▲' : '▼'}</span>
             </div>
+            {dropdownOpen && (
+              <ul className="dropdown-list" style={{ position: 'absolute', zIndex: 10, background: '#fff', border: '1px solid #ccc', borderRadius: 6, margin: 0, padding: 0, listStyle: 'none', width: '100%' }}>
+                {allChannels.length === 0 && <li style={{ padding: '8px 12px', color: '#888' }}>Нет каналов</li>}
+                {allChannels.map(channel => (
+                  <li key={channel} className="dropdown-item" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #eee', cursor: 'pointer', color: '#222' }}>
+                    <span style={{ flex: 1, color: '#222' }} onClick={() => { setChannelName(channel); setDropdownOpen(false); }}>{channel}</span>
+                    <button
+                      className="remove-btn"
+                      onClick={e => { e.stopPropagation(); handleRemoveChannel(channel); }}
+                      style={{ marginLeft: 8, color: 'red', cursor: 'pointer', border: 'none', background: 'none', fontSize: 18 }}
+                      title="Удалить канал"
+                    >×</button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-        )}
+        </div>
 
         {/* Контент */}
         <div className="view-container">
