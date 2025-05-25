@@ -7,8 +7,8 @@ import os
 
 # Константы для бесплатных лимитов
 FREE_ANALYSIS_LIMIT = 5
-FREE_POST_LIMIT = 2
-FREE_IDEAS_LIMIT = 3
+FREE_POST_LIMIT = 5
+FREE_IDEAS_LIMIT = 5
 SUBSCRIPTION_DURATION_MONTHS = 1
 # ПЕРИОД СБРОСА ЛИМИТОВ
 RESET_PERIOD_DAYS = 3  # Сброс каждые 3 дня
