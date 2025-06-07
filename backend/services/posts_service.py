@@ -425,16 +425,15 @@ async def generate_post_details(request: Request, req):
 
         # Улучшенный system_prompt с акцентом на копирование стиля и контекст
         if post_samples:
-            # Формируем инструкции по структуре на основе анализа
-            structure_info = f"Придерживайся структуры из {avg_paragraphs} абзаца(ов), средней длины {avg_length} символов"
-            if common_formatting:
-                structure_info += f", {common_formatting}"
-            
             system_prompt = f"""Ты — опытный контент-маркетолог для Telegram-каналов. Твоя задача — сгенерировать текст поста на основе идеи и формата, который будет готов к публикации.
 
 КРИТИЧЕСКИ ВАЖНО: если даны примеры постов, ты должен максимально точно копировать их стиль, структуру, форматирование, длину, тональность, особенности подачи. НЕ используй никаких других форматов, кроме как в примерах. Не добавляй ничего нового, не меняй структуру, не используй хэштеги, если их нет в примерах.
 
-СТРУКТУРА И ДЛИНА: {structure_info}.
+ОСОБО ВАЖНО: Точно соблюдай ДЛИНУ и СТРУКТУРУ из примеров:
+• Если посты короткие (1-2 абзаца) — пиши короткие
+• Если посты длинные (5+ абзацев) — пиши длинные  
+• Копируй количество абзацев и их размер
+• Повторяй структуру: заголовок, основная часть, заключение (если есть в примерах)
 
 АБСОЛЮТНО ЗАПРЕЩЕНО: квадратные скобки [], фигурные скобки {{}}, слова "ссылка", "контакт", "название", любые placeholder'ы и незаполненные места.
 
@@ -507,8 +506,10 @@ async def generate_post_details(request: Request, req):
             sample_text = "\n\n---\n\n".join(post_samples[:10])
             user_prompt += f"""
 
-Примеры постов канала (копируй их стиль, структуру, форматирование, длину, тональность):
-{sample_text}"""
+Примеры постов канала (копируй их стиль, структуру, форматирование, длину, тональность, количество абзацев, размер текста):
+{sample_text}
+
+ВНИМАНИЕ: Создай пост точно такой же длины и с такой же структурой абзацев, как в примерах выше."""
 
         user_prompt += "\n\nВ ответе выдай только готовый текст поста, без пояснений и примеров."
         
@@ -523,41 +524,11 @@ async def generate_post_details(request: Request, req):
                     base_url="https://openrouter.ai/api/v1",
                     api_key=OPENROUTER_API_KEY
                 )
-                # --- Расширенный анализ структуры и длины постов ---
+                # --- Новый блок: расчет средней длины постов ---
                 avg_length = 0
-                avg_paragraphs = 1
-                common_formatting = ""
                 post_samples = req.get("post_samples") or req.post_samples if hasattr(req, "post_samples") else None
-                
                 if post_samples:
-                    # Анализ длины
-                    lengths = [len(t) for t in post_samples if t.strip()]
-                    avg_length = int(sum(lengths) / len(lengths)) if lengths else 600
-                    
-                    # Анализ структуры абзацев
-                    paragraph_counts = []
-                    for sample in post_samples:
-                        if sample.strip():
-                            paragraphs = len([p for p in sample.split('\n\n') if p.strip()])
-                            paragraph_counts.append(max(1, paragraphs))
-                    avg_paragraphs = int(sum(paragraph_counts) / len(paragraph_counts)) if paragraph_counts else 1
-                    
-                    # Анализ общего форматирования
-                    formatting_features = []
-                    has_bullets = any('•' in sample or '—' in sample for sample in post_samples)
-                    has_emojis = any(any(ord(char) > 127 for char in sample) for sample in post_samples)
-                    has_questions = any('?' in sample for sample in post_samples)
-                    
-                    if has_bullets:
-                        formatting_features.append("используй маркеры")
-                    if has_emojis:
-                        formatting_features.append("добавляй эмодзи умеренно")
-                    if has_questions:
-                        formatting_features.append("можешь включать вопросы")
-                    
-                    common_formatting = ", ".join(formatting_features)
-                    
-                    # Корректировка токенов с учетом структуры
+                    avg_length = int(sum(len(t) for t in post_samples) / len(post_samples))
                     avg_tokens = max(100, min(1200, avg_length // 3))
                 else:
                     avg_tokens = 600
@@ -612,7 +583,7 @@ async def generate_post_details(request: Request, req):
                                 {"role": "user", "content": user_prompt}
                             ],
                             temperature=0.7,
-                            max_tokens=avg_tokens
+                            max_tokens=850
                         )
                         if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
                             post_text = openai_response.choices[0].message.content.strip()
@@ -649,7 +620,7 @@ async def generate_post_details(request: Request, req):
                         {"role": "user", "content": user_prompt}
                     ],
                     temperature=0.7,
-                    max_tokens=avg_tokens
+                    max_tokens=850
                 )
                 
                 if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
