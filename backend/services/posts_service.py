@@ -423,66 +423,18 @@ async def generate_post_details(request: Request, req):
         
         format_instruction = format_instructions.get(format_style.lower(), "")
 
-        # --- Анализ стиля и структуры постов (вынесен наверх) ---
-        avg_length = 0
-        avg_paragraphs = 0
-        structural_analysis = ""
-        
-        if post_samples and len(post_samples) > 0:
-            # Анализ длины текста
-            lengths = [len(text) for text in post_samples if text.strip()]
-            avg_length = int(sum(lengths) / len(lengths)) if lengths else 600
-            
-            # Анализ структуры абзацев
-            paragraph_counts = []
-            for text in post_samples:
-                if text.strip():
-                    # Считаем абзацы (разделенные двойными переносами строк или одиночными)
-                    paragraphs = [p.strip() for p in re.split(r'\n\s*\n|\n', text) if p.strip()]
-                    paragraph_counts.append(len(paragraphs))
-            
-            avg_paragraphs = int(sum(paragraph_counts) / len(paragraph_counts)) if paragraph_counts else 3
-            
-            # Анализ структурных особенностей
-            structure_features = []
-            for text in post_samples:
-                if "👉" in text or "→" in text or "➡️" in text:
-                    structure_features.append("использует стрелки для выделения")
-                if text.count('\n\n') > 2:
-                    structure_features.append("много коротких абзацев")
-                elif text.count('\n\n') <= 1:
-                    structure_features.append("один большой абзац")
-                if any(emoji in text for emoji in ["📌", "💡", "⚡", "🔥", "✅"]):
-                    structure_features.append("использует эмодзи для акцентов")
-                if text.count('•') > 0 or text.count('-') > 2:
-                    structure_features.append("использует списки")
-            
-            # Определяем наиболее частые структурные особенности
-            if structure_features:
-                most_common = max(set(structure_features), key=structure_features.count)
-                structural_analysis = f"Структурные особенности: {most_common}. "
-            
-            # Определяем среднюю длину абзацев
-            if avg_paragraphs <= 2:
-                structural_analysis += f"Предпочтительно {avg_paragraphs} абзаца. "
-            else:
-                structural_analysis += f"Разбивай на {avg_paragraphs} небольших абзаца. "
-            
-            # Определяем общую длину текста
-            if avg_length <= 300:
-                structural_analysis += "Делай короткие посты (до 300 символов)."
-            elif avg_length <= 600:
-                structural_analysis += "Делай посты средней длины (300-600 символов)."
-            else:
-                structural_analysis += "Делай развернутые посты (600+ символов)."
-
         # Улучшенный system_prompt с акцентом на копирование стиля и контекст
         if post_samples:
+            # Формируем инструкции по структуре на основе анализа
+            structure_info = f"Придерживайся структуры из {avg_paragraphs} абзаца(ов), средней длины {avg_length} символов"
+            if common_formatting:
+                structure_info += f", {common_formatting}"
+            
             system_prompt = f"""Ты — опытный контент-маркетолог для Telegram-каналов. Твоя задача — сгенерировать текст поста на основе идеи и формата, который будет готов к публикации.
 
 КРИТИЧЕСКИ ВАЖНО: если даны примеры постов, ты должен максимально точно копировать их стиль, структуру, форматирование, длину, тональность, особенности подачи. НЕ используй никаких других форматов, кроме как в примерах. Не добавляй ничего нового, не меняй структуру, не используй хэштеги, если их нет в примерах.
 
-СТИЛЬ И СТРУКТУРА: {structural_analysis}
+СТРУКТУРА И ДЛИНА: {structure_info}.
 
 АБСОЛЮТНО ЗАПРЕЩЕНО: квадратные скобки [], фигурные скобки {{}}, слова "ссылка", "контакт", "название", любые placeholder'ы и незаполненные места.
 
@@ -571,8 +523,44 @@ async def generate_post_details(request: Request, req):
                     base_url="https://openrouter.ai/api/v1",
                     api_key=OPENROUTER_API_KEY
                 )
-                # Используем уже проанализированные данные структуры
-                avg_tokens = max(100, min(1200, avg_length // 3)) if avg_length > 0 else 600
+                # --- Расширенный анализ структуры и длины постов ---
+                avg_length = 0
+                avg_paragraphs = 1
+                common_formatting = ""
+                post_samples = req.get("post_samples") or req.post_samples if hasattr(req, "post_samples") else None
+                
+                if post_samples:
+                    # Анализ длины
+                    lengths = [len(t) for t in post_samples if t.strip()]
+                    avg_length = int(sum(lengths) / len(lengths)) if lengths else 600
+                    
+                    # Анализ структуры абзацев
+                    paragraph_counts = []
+                    for sample in post_samples:
+                        if sample.strip():
+                            paragraphs = len([p for p in sample.split('\n\n') if p.strip()])
+                            paragraph_counts.append(max(1, paragraphs))
+                    avg_paragraphs = int(sum(paragraph_counts) / len(paragraph_counts)) if paragraph_counts else 1
+                    
+                    # Анализ общего форматирования
+                    formatting_features = []
+                    has_bullets = any('•' in sample or '—' in sample for sample in post_samples)
+                    has_emojis = any(any(ord(char) > 127 for char in sample) for sample in post_samples)
+                    has_questions = any('?' in sample for sample in post_samples)
+                    
+                    if has_bullets:
+                        formatting_features.append("используй маркеры")
+                    if has_emojis:
+                        formatting_features.append("добавляй эмодзи умеренно")
+                    if has_questions:
+                        formatting_features.append("можешь включать вопросы")
+                    
+                    common_formatting = ", ".join(formatting_features)
+                    
+                    # Корректировка токенов с учетом структуры
+                    avg_tokens = max(100, min(1200, avg_length // 3))
+                else:
+                    avg_tokens = 600
                 response = await client.chat.completions.create(
                         model="google/gemini-2.5-flash-preview",
                     messages=[
@@ -654,9 +642,6 @@ async def generate_post_details(request: Request, req):
             try:
                 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
                 
-                # Используем уже проанализированные данные структуры
-                openai_tokens = max(100, min(1200, avg_length // 3)) if avg_length > 0 else 850
-                
                 openai_response = await openai_client.chat.completions.create(
                     model="gpt-3.5-turbo",  # Используем GPT-3.5 Turbo
                     messages=[
@@ -664,7 +649,7 @@ async def generate_post_details(request: Request, req):
                         {"role": "user", "content": user_prompt}
                     ],
                     temperature=0.7,
-                    max_tokens=openai_tokens
+                    max_tokens=avg_tokens
                 )
                 
                 if openai_response and openai_response.choices and len(openai_response.choices) > 0 and openai_response.choices[0].message:
